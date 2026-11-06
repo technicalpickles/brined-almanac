@@ -1,0 +1,55 @@
+amends "package://github.com/jdx/hk/releases/download/v2.7.1/hk@2.7.1#/Config.pkl"
+
+// Builtins.gitleaks runs `gitleaks dir .`, which scans the working tree
+// including gitignored files like local/ and .env. These steps scan what git
+// will actually publish: the staged diff on commit, history on check and push.
+local gitleaks_staged = new Step {
+  check = new CommandSpec {
+    command = "gitleaks git --staged --no-banner"
+    effect = "read"
+  }
+}
+
+local gitleaks_history = new Step {
+  check = new CommandSpec {
+    command = "gitleaks git --no-banner"
+    effect = "read"
+  }
+}
+
+// Patterns live in .forbidden-patterns; private literals live in the
+// gitignored local/forbidden-strings.
+local forbidden_files = new Step {
+  check = new CommandSpec {
+    command = "scripts/check-forbidden {{files}}"
+    effect = "read"
+  }
+}
+
+local forbidden_tree = new Step {
+  check = new CommandSpec {
+    command = "scripts/check-forbidden"
+    effect = "read"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    steps {
+      ["gitleaks"] = gitleaks_staged
+      ["forbidden"] = forbidden_files
+    }
+  }
+  ["check"] {
+    steps {
+      ["gitleaks"] = gitleaks_history
+      ["forbidden"] = forbidden_tree
+    }
+  }
+  ["pre-push"] {
+    steps {
+      ["gitleaks"] = gitleaks_history
+      ["forbidden"] = forbidden_tree
+    }
+  }
+}

@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/check-forbidden [FILE...]
+
+Fail if any file matches a forbidden pattern or a private literal.
+
+  .forbidden-patterns      committed; one extended regex per line, '#' comments
+  local/forbidden-strings  gitignored; one literal string per line
+
+With no FILE arguments, checks every file from `git ls-files`.
+Paths are relative to the repo root, which the script cd's into.
+Exits 1 on any hit and prints path:line: matched <pattern or "local literal">.
+Literals are never echoed back. Read-only.
+
+Examples:
+  scripts/check-forbidden                 # whole tree
+  scripts/check-forbidden README.md src/  # specific files (directories are skipped)
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "check-forbidden: not inside a git repository" >&2
+  exit 2
+}
+cd "$repo_root"
+
+patterns_file=.forbidden-patterns
+literals_file=local/forbidden-strings
+
+if [[ ! -f $patterns_file ]]; then
+  echo "check-forbidden: $patterns_file is missing, restore it from git" >&2
+  exit 2
+fi
+
+if [[ $# -gt 0 ]]; then
+  files=("$@")
+else
+  files=()
+  while IFS= read -r f; do files+=("$f"); done < <(git ls-files)
+fi
+
+if [[ -f $literals_file ]]; then
+  have_literals=1
+else
+  have_literals=0
+  echo "check-forbidden: $literals_file not found, skipping the literal check (patterns only)" >&2
+fi
+
+failed=0
+
+# The pattern and literal files hold the strings by design.
+is_exempt() {
+  [[ $1 == "$patterns_file" || $1 == "$literals_file" ]]
+}
+
+for f in "${files[@]}"; do
+  [[ -f $f ]] || continue
+  is_exempt "$f" && continue
+
+  while IFS= read -r pattern; do
+    [[ -z $pattern || $pattern == \#* ]] && continue
+    while IFS=: read -r lineno _; do
+      echo "$f:$lineno: matched $pattern"
+      failed=1
+    done < <(grep -nE -e "$pattern" -- "$f" || true)
+  done <"$patterns_file"
+
+  if ((have_literals)); then
+    while IFS= read -r literal; do
+      [[ -z $literal ]] && continue
+      while IFS=: read -r lineno _; do
+        echo "$f:$lineno: matched local literal"
+        failed=1
+      done < <(grep -nF -e "$literal" -- "$f" || true)
+    done <"$literals_file"
+  fi
+done
+
+exit "$failed"

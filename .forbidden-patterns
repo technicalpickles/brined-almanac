@@ -1,0 +1,15 @@
+# One extended regex per line (grep -E). Blank lines and lines starting with # are skipped.
+# Only patterns belong here. Private literals go in local/forbidden-strings, which is gitignored.
+
+# Key almanac uses for tainted text: a pasted transcript sample or a serialized Untrusted value
+"\$untrusted"
+
+# Telegram-style numeric id near a telegram or allowlist word
+(telegram|chat.?id|ALLOWED_CHAT_IDS|ownerAllowFrom)[^0-9]{0,40}[0-9]{9,11}
+
+# OpenClaw transcript event lines
+"role": *"toolResult"
+"__openclaw"
+
+# Bot handles
+@[A-Za-z0-9_]+bot\b
