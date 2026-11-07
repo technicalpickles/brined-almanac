@@ -226,6 +226,8 @@ Tests, all offline, against almanac's in-memory store and fakes:
 
 The real check after implementation is `backfill --dry-run` over the three pulled transcripts on the Mac, compared by hand against the counts in the class table. The spike matched them.
 
+Verified 2026-11-06 on the implementation: `backfill --dry-run` over the three pulled transcripts found 137 clusters, queued 137, rejected 0, produced 37 `File` effects, and skipped 12 lines that were not JSON. Those are the spike's numbers. `ALMANAC_MODE=live check` passed with the transcript provider and the stdout tracker.
+
 ## Alternatives considered
 
 **The Python package this document replaces.** Dataclasses, a `str(dict)` parser, dedupe by markers in issue bodies, and an update path that rewrote the body when a count grew. The spike matched its counts in 285 lines of Rust, with the dedupe, the budget, and the dry run coming from almanac. Dropped 2026-11-06.
