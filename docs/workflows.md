@@ -85,10 +85,15 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### continue-work
 
-- **Status:** next, in M5 with the budget rule.
-- **Watches:** resumable parked handoffs, open tasks in active repositories that I've marked as fair game, and almanac's own open pull requests.
-- **Does:** starts a worker, a headless Claude Code session in its own worktree and sandbox, to continue one piece of work toward a pull request. The worker opens or updates the pull request, answers review comments, and fixes failing checks. It never merges.
-- **Stops:** when the budget rule says stop, when a burst starts in the same repository, or when it needs a decision only I can make. It parks its state in a handoff before it stops, and the next window resumes from that handoff.
+- **Status:** next, in M4 with the budget rule.
+- **Watches:** resumable parked handoffs, open tasks in fair-game repositories, and almanac's own open pull requests.
+- **Fair game:** a repository is fair game or it isn't, declared next to its tier. Every open task in a fair-game repository is eligible unless it's tagged `+mine`, and workers take them in task-resurfacer's ranked order. A task that turns out to need a decision gets parked with the question written down. brineworks is the first fair-game repository. Others join once workers have earned it there.
+- **Handoffs:** a handoff is eligible when its repository is fair game, parked-handoffs sorts it as resumable, its next steps are code a worker can do in its worktree, and it has no `**Worker:** no` line. Newest go first. The worker runs the same validation as the `unpark` skill before it changes anything. If the handoff is stale, or a next step needs a deploy, a host, a sign-in, or a decision, the worker records what blocked it in the handoff and stops there. Those handoffs stay mine.
+- **Does:** starts a worker to continue one piece of work toward a pull request. The worker is a headless Claude Code session in a container under upstream's rootless Podman sandbox, with a fresh clone, the handoff or task text that almanac passes in, and no credentials. It returns a patch and a description. Code checks the patch, and almanac pushes it through a GitHub App to the pull request's branch, or opens the pull request on the first round. The App is installed only on fair-game repositories, with write access to contents and pull requests. Later rounds answer review comments and fix failing checks the same way. Nothing merges.
+- **How many:** at most one worker per repository, so two workers never edit the same files. One worker in total to start. When the budget rule's about-to-expire exception applies, up to three, each in a different repository. Both numbers live in code next to the budget rule.
+- **Local CI first:** when a repository has a local CI command, such as brineworks' `mise run ci`, the worker runs it in its sandbox before returning a patch, so a pull request reaches the forge's CI only after local CI has passed.
+- **Portable handoffs:** `.parkinglot/` is gitignored and a container sees only the forge, so a handoff is eligible only when its branch is pushed and nothing it needs is uncommitted or at an absolute Mac path. The `park` skill should push the branch, commit work in progress to it, and write repository-relative paths.
+- **Stops:** when the budget rule says stop, when a burst starts in the same repository, or when a step needs me. It parks its state in a handoff before it stops, and the next window resumes from that handoff. A stop that needs me records its reason from a fixed set: deploy, host, sign-in, decision, or stale. session-friction counts those reasons each week, and a common one becomes a task to give workers a safe way through that step.
 - **Model:** yes. This is the main use of agent work.
 - **Feeds:** task-resurfacer. A burst in a repository sees the handoffs and pull requests that workers left there.
 
@@ -118,7 +123,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Watches:** issues and pull requests from other people on maintained-tier repositories, through almanac's native GitHub source.
 - **Reports:** a pull request that needs my review, an issue that waits on my answer, or a thread that has gone quiet.
 - **Model:** none to start.
-- **Needs:** a GitHub App, following upstream's [deploying guide](https://github.com/ivy/almanac/blob/main/docs/deploying.md).
+- **Needs:** the GitHub App that continue-work sets up in M4, installed on maintained-tier repositories too.
 
 ### oss-contributions
 
@@ -143,6 +148,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
   - usage-limit stops
   - failed tool calls, grouped by command. Sandbox denials count only when the call itself failed, not when a result quotes the error.
   - the same command attempted three or more times in one session
+  - worker stops by reason, from continue-work
 
   Hand-backs and the time friction costs stay out until something measures them.
 - **Reports:** by whether a task tracks the item. An untracked item over its threshold becomes a task with its count and the sessions it came from. A tracked item gets the week's count annotated on its existing task, so the evidence stays current without a new task.
@@ -204,7 +210,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Why:** on 2026-11-07 only dotfiles and dotfiles-devcontainer had Renovate, and most deployed-tier repositories had no update bot at all. The gap is that update pull requests never open.
 - **Steps:**
   1. Turn on Renovate for deployed-tier repositories, including Docker base images and digests. On the WordPress droplet's repository, that would have flagged the end-of-life base images before the eMudhra advisory did.
-  2. Run upstream's `almanacs/renovate` unchanged to repair the Renovate pull requests that break. It shares the GitHub App that oss-maintained sets up.
+  2. Run upstream's `almanacs/renovate` unchanged to repair the Renovate pull requests that break. It shares the GitHub App that continue-work sets up.
   3. Its repairs are agent work, so they run only under the budget rule. Upstream caps each session by tokens, turns, and dollars, but not by the five-hour window.
 - **Model:** upstream's, for repair.
 

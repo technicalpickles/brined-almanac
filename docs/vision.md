@@ -61,10 +61,11 @@ Watchers ignore the budget rule.
 
 When a burst ends, its work usually isn't finished. It's parked in a handoff, left as open tasks, or sitting in a pull request with review comments. Agent work picks it up and keeps going on capacity I'm not using, until the work is done or it needs me.
 
-- **What it picks up.** Resumable parked handoffs, which already say what comes next. Open tasks in active repositories that I've marked as fair game. Follow-ups on its own pull requests, such as review comments and failing checks.
+- **What it picks up.** Resumable parked handoffs, which already say what comes next. Open tasks in repositories I've declared fair game, unless a task is tagged `+mine`. Follow-ups on its own pull requests, such as review comments and failing checks.
 - **How far it goes.** As far as the work goes. It writes code, runs the tests, and opens or updates a pull request. The limits are the budget rule, the sandbox, and the repository's rules, which still decide what merges.
 - **When it stops.** When the window runs out, a burst starts, or it reaches a decision only I can make. It parks its state in a handoff, the same way my own sessions do, and the next window picks up from there. A burst that starts in the same repository finds that handoff first.
-- **Who does the work.** Almanac decides what continues and when. A worker does the work: a headless Claude Code session in its own worktree and sandbox. Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes the same split, with almanac upstream of a tracker and workers.
+- **Less stays mine.** Every stop that needs me records why: a deploy, a host, a sign-in, a decision, or a stale handoff. Those reasons get counted each week, and the common ones become tasks to give workers a safe way through that step. The set of things only I can do should shrink over time.
+- **Who does the work.** Almanac decides what continues and when. A worker does the work: a headless Claude Code session in a container, using upstream's rootless Podman sandbox. It gets a fresh clone and the handoff or task text, and no credentials. It returns a patch, code checks it, and almanac pushes it through a GitHub App, the same path upstream's own agents take. The App is installed only on fair-game repositories, and its name on a pull request tells me a worker wrote it. Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes the same split, with almanac upstream of a tracker and workers.
 
 ## Small steps
 
