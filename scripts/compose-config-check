@@ -46,6 +46,14 @@ expect_guard_failure() {
   }
 }
 
+# ps and exec interpolate the whole file too; dummy values must be enough for them.
+render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused >/dev/null || {
+  echo "compose-config-check: dummy guard values do not render, so ps/exec would fail" >&2
+  exit 1
+}
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  docker compose -f compose.prod.yaml ps >/dev/null
+
 expect_guard_failure GITHUB_TOKEN PULLER_KEY
 expect_guard_failure PULLER_KEY GITHUB_TOKEN
 

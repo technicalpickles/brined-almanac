@@ -59,7 +59,7 @@ fi
 echo "deploy: state dir ok ($STATE)"
 
 docker build -q -f Containerfile -t "brined-almanac:$tag" -t brined-almanac:prod . >/dev/null
-docker build -q -t "brined-almanac-puller:$tag" -t brined-almanac-puller:prod puller/ >/dev/null
+docker build -q -f puller/Containerfile -t "brined-almanac-puller:$tag" -t brined-almanac-puller:prod puller/ >/dev/null
 echo "deploy: built brined-almanac:$tag and brined-almanac-puller:$tag (tagged prod)"
 
 if ((db_only)); then
@@ -73,6 +73,8 @@ OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"
 
-docker compose -f compose.prod.yaml ps
+# ps interpolates the whole file, so the :? guards need values; ps never recreates containers.
+BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  docker compose -f compose.prod.yaml ps
 curl -fsS http://127.0.0.1:8788/healthz
 echo
