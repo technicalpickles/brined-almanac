@@ -29,7 +29,11 @@ A repository can be in more than one tier. bktide is maintained and active while
 
 ## Host state
 
-A workflow that checks a host reads a host-state report. The report is JSON that lists the host's container images, CA package versions, operating system releases and their end-of-life dates, and checksums for the sites it serves. A workflow never knows how the report arrived. Two transports deliver it:
+A workflow that checks a host reads a host-state report. The report is the results of the host's checks, collected as JSON.
+
+A check is a small executable that tests one thing and follows the Nagios plugin convention. It exits 0 for OK, 1 for warning, 2 for critical, and 3 for unknown, and it prints one line of status with optional metrics after a `|`, as in `DISK OK - / at 61% | used=61%;80;90`. Nagios, Icinga, Sensu, Checkmk, and Zabbix run checks in this shape unchanged, and so can cron or a systemd timer, so a check written here works with other monitoring tools. A check can be written in any language and tested on its own.
+
+Checks cover container images, CA package versions, operating system releases past end of life, site checksums, systemd units that should be running, and the HTTP status of the sites a host serves. A workflow never knows how the report arrived. Two transports deliver it:
 
 - **Pull.** Almanac connects with a fenced SSH key whose forced command prints the report and does nothing else. This is the pattern the prod design uses for picklelab. It suits hosts on the tailnet.
 - **Push.** The host writes the report on a schedule to a place almanac reads. It suits hosts almanac can't or shouldn't reach, because the host needs no inbound key. A host whose report stops arriving is itself a finding.
@@ -124,26 +128,38 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 - **Status:** next.
 - **Watches:** my Claude Code transcripts under `~/.claude/projects/`, read through [cq](https://github.com/technicalpickles/pickled-claude-plugins/tree/main/plugins/cq). tool-failures does this for Brent's transcripts. This workflow does it for mine.
-- **Reports:** a weekly friction review, like the one I did by hand for picklelab on 2026-10-18. It counts sandbox denials, auto-mode denials, failing tool calls, hand-backs to me, usage-limit stops, and repeated attempts at the same command. Each item gets its count, the sessions it came from, and whether a task already tracks it.
+- **Schedule:** weekly, at the end of the week, the same window as the review I did by hand for picklelab on 2026-10-18. Running it when a burst ends waits until the weekly version shows the counts are useful.
+- **Counts:** only what transcripts record exactly. That review found its regex counts overcounted when agents quoted error text, and it couldn't measure hand-backs at all. The first version counts:
+  - auto-mode classifier denials and permission rule denials, grouped by reason
+  - usage-limit stops
+  - failed tool calls, grouped by command. Sandbox denials count only when the call itself failed, not when a result quotes the error.
+  - the same command attempted three or more times in one session
+
+  Hand-backs and the time friction costs stay out until something measures them.
+- **Reports:** by whether a task tracks the item. An untracked item over its threshold becomes a task with its count and the sessions it came from. A tracked item gets the week's count annotated on its existing task, so the evidence stays current without a new task.
 - **Model:** none for the counts, which are SQL over cq. A model may rank the items and write the summary, under the budget rule. This work suits the end of a window that would otherwise expire.
 - **Feeds:** lesson-spread. A friction item with a fix becomes a lesson.
 
 ### lesson-spread
 
 - **Status:** later, after session-friction.
-- **Watches:** lessons I already record. Those are devlog entries in the vault, Claude Code memory files, rules in dotfiles, and commits that fix a gotcha.
+- **Watches:** lessons I already record, in this order:
+  1. Claude Code `feedback` memories. On 2026-11-07 there were 69 of 243 memory files. Each holds one lesson with how to apply it, scoped to one project, so the open question for each is whether my other projects need it too.
+  2. Devlog entries in the vault, 106 session notes in the inbox alone. They're prose, so pulling a check out of one is model work under the budget rule.
+
+  Rules in dotfiles are where a lesson ends up, not a source. They already apply everywhere.
 - **Reports:** other repositories where a lesson applies and has not been applied. A repository qualifies when it uses the same tool and lacks the fix. For example, a lesson about hk's `builtins.gitleaks` scanning gitignored files applies to every repository with an `hk.pkl` that uses it.
 - **How:** each lesson names a check that code can run against a repository, such as "has `hk.pkl`" plus "uses `builtins.gitleaks`". Where a lesson can't name such a check, a model may judge whether it applies, under the budget rule.
-- **Prefer structure:** when a lesson applies to every repository, the better fix is a rule in dotfiles or a lint, not an issue per repository. The report says so.
+- **Prefer structure:** a lesson that applies to every repository files one task to promote it to a dotfiles rule or a lint. A lesson that applies to a few files one task per repository that lacks it.
 - **Model:** none for lessons with a check.
 
 ### service-down
 
-- **Status:** later.
-- **Watches:** the health of services on picklelab and of deployed-tier apps, including the WordPress sites. One of them returned HTTP 500 for weeks while it was compromised, and nothing reported it.
-- **Reports:** a service that is down or restarting in a loop.
+- **Status:** next, in M1 with security-alerts.
+- **Watches:** host-state reports from picklelab and deployed-tier hosts, including the WordPress droplet. One of its sites returned HTTP 500 for weeks while it was compromised, and nothing reported it.
+- **Reports:** a check that turned critical or stayed at warning, such as a unit that should be running and isn't, or a site that doesn't return 200.
 - **Model:** none.
-- **Open question:** picklehome already has one-signal watchdogs written in bash. Decide whether this workflow replaces them or only covers what they don't.
+- **Order:** checks for the gaps come first: units that should be running, and site status. picklehome's watchdogs (disk_monitor, exec-approvals-watch, brineworks-server-watch) then become checks one at a time, starting with disk_monitor, which already has thresholds and stays silent when all is well. Each watchdog's timer and Telegram alert retire once its check files through almanac.
 
 ### merged-on-red
 
@@ -175,11 +191,13 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### deployed-upkeep
 
-- **Status:** later.
-- **Watches:** dependency and security updates on deployed-tier repositories.
-- **Reports and repairs:** a pull request that is broken or stale. Repair is agent work under the budget rule.
-- **Model:** yes, for repair.
-- **Open question:** whether to run upstream's `almanacs/renovate` on these repositories instead of writing this workflow.
+- **Status:** later. This is Renovate plus upstream's `almanacs/renovate`, not a workflow of ours.
+- **Why:** on 2026-11-07 only dotfiles and dotfiles-devcontainer had Renovate, and most deployed-tier repositories had no update bot at all. The gap is that update pull requests never open.
+- **Steps:**
+  1. Turn on Renovate for deployed-tier repositories, including Docker base images and digests. On the WordPress droplet's repository, that would have flagged the end-of-life base images before the eMudhra advisory did.
+  2. Run upstream's `almanacs/renovate` unchanged to repair the Renovate pull requests that break. It shares the GitHub App that oss-maintained sets up.
+  3. Its repairs are agent work, so they run only under the budget rule. Upstream caps each session by tokens, turns, and dollars, but not by the five-hour window.
+- **Model:** upstream's, for repair.
 
 ### container-logs
 
