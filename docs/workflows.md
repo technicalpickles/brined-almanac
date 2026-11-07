@@ -19,7 +19,7 @@ A repository's tier decides which workflows watch it. Tiers are declared in code
 | Tier | What it is | What watches it |
 |---|---|---|
 | dormant | Not being worked on and not deployed, like an iOS app on hold. | Nothing. Its tasks are marked as parked, so they don't count as stale. |
-| deployed | Running somewhere and in use, but not being developed, like a hobby web app I still use. | Service health, dependency and security updates, and drift between main and what is deployed. |
+| deployed | Running somewhere and in use, but not being developed, like a hobby web app I still use or the WordPress sites I host. | Service health, dependency and security updates, and drift between main and what is deployed. |
 | active | Being worked on now. Today these are pickleclaw, brineworks, and picklehome. | Every workflow. |
 | maintained | Public and used by other people, like bktide and pickled-claude-plugins. | Outside issues and pull requests, plus whatever its deployed or active tier adds. |
 | retired | Public, unmaintained, and still collecting issues, like jeweler and homesick. | Nothing. The open question is whether to archive them on GitHub so they stop collecting issues. |
@@ -64,7 +64,7 @@ A repository can be in more than one tier. bktide is maintained and active while
 - **Watches:** Dependabot, code scanning, and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API.
 - **Reports:** one item per repository per day that lists its open alerts by severity, and says whether an open Renovate or Dependabot pull request already fixes each one. A fix that is a pull request in a private repository files there as an issue. Everything else is a task, including alerts on public repositories and a leaked secret to rotate.
 - **Model:** none.
-- **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for picklelab's images and hosts instead of writing that here.
+- **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for the images and hosts on picklelab and the WordPress droplet instead of writing that here. A Dependabot alert covers a lockfile. It says nothing about a host's base images, its CA package, or a release past end of life, which is what the eMudhra advisory turned on.
 - **Retired repositories:** their alerts are not reported. The count is evidence for the open question about archiving them.
 
 ### task-resurfacer
@@ -128,7 +128,7 @@ A repository can be in more than one tier. bktide is maintained and active while
 ### service-down
 
 - **Status:** later.
-- **Watches:** the health of services on picklelab and of deployed-tier apps.
+- **Watches:** the health of services on picklelab and of deployed-tier apps, including the WordPress sites. One of them returned HTTP 500 for weeks while it was compromised, and nothing reported it.
 - **Reports:** a service that is down or restarting in a loop.
 - **Model:** none.
 - **Open question:** picklehome already has one-signal watchdogs written in bash. Decide whether this workflow replaces them or only covers what they don't.

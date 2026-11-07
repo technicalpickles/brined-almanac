@@ -16,6 +16,8 @@ Between bursts, nothing moves, and these things go stale.
 - **Repositories.** Repos I am not working on go weeks without a dependency update, including ones that are deployed and still in use.
 - **Ops and security work.** On 2026-11-07, 13 of my repositories had 286 open Dependabot alerts. 103 were on jeweler, which is retired. dotfiles, cq and pickled-claude-plugins, which I use every day, had 34 between them. Nothing turns an alert into work I've planned, so it waits until a burst happens to land in that repository.
 
+Hosts are worse, because no alert exists. The clearest case is a few WordPress sites I host on a droplet. On 2026-10-20, eight of eMudhra's intermediate certificate authorities turned out to have recoverable private keys. I checked every container on the droplet by hand. Nearly all of them still trusted the compromised chains, and WordPress ships its own CA bundle, so patching the OS wasn't enough. While I was orienting for that fix, I found that one of the sites had been compromised. Webshells first ran on 2026-08-31, and on 2026-09-14 its web root was replaced with an SEO-spam dropper. The site had returned HTTP 500 for weeks, and nothing reported it. The fix took two days and left six follow-up plans, among them hardening, a database upgrade, and base images on a Debian release past end of life with no CA fix. None of that work was on the backlog until the advisory made me look.
+
 I don't need more output during bursts. I need steady progress between them.
 
 ## The thesis

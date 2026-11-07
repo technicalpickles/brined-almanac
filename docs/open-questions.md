@@ -6,6 +6,7 @@ Questions about [vision.md](vision.md) and [workflows.md](workflows.md) that nee
 
 - Archive the retired repositories on GitHub so they stop collecting issues? That is a one-time cleanup, not a workflow.
 - Tier assignments will live in code, and this repository is public. Is it fine for code to name private repositories, or do tier assignments live in a gitignored file?
+- How does almanac read a host's state, such as its images, CA packages, and site checksums? picklelab is on the tailnet. The WordPress droplet isn't reachable the same way.
 
 ## Where output goes
 
