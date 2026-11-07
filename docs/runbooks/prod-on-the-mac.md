@@ -75,8 +75,11 @@ PULL_USER=technicalpickles
 
 - `ALMANAC_MODE=live` is required. Without it, nothing files.
 - `PULL_HOST` is the name the puller container uses for picklelab. If the
-  container cannot resolve `picklelab`, set it to the Mac's tailnet address for
-  picklelab instead. Keep that address out of the repo.
+  container cannot resolve `picklelab`, set it to picklelab's tailnet address
+  (`tailscale ip -4 picklelab` prints it). Then add that address to
+  `known_hosts`, because the puller checks host keys strictly and the file is
+  keyed by hostname: `ssh-keyscan <address> >> "$STATE/known_hosts"`. Keep the
+  address out of the repo.
 - `ALMANAC_SCAN_INTERVAL_MINUTES` is optional. The default is 15.
 - `PULL_INTERVAL_MINUTES` is optional. The default is 10.
 
@@ -108,7 +111,8 @@ restrict,from="<the Mac's tailnet address>",command="/opt/pickleclaw/scripts/ope
   picklehome's deploy. It accepts only `sessions` and
   `transcript <key> --since <epoch-ms>`. Anything else exits 2.
 - `restrict` turns off forwarding, pty, and X11.
-- `from=` limits the key to the Mac's tailnet address. If a container's ssh
+- `from=` limits the key to the Mac's tailnet address. Get it with
+  `tailscale ip -4` on the Mac. If a container's ssh
   does not arrive from that address, the puller is refused. Drop `from=` and
   keep the rest.
 
@@ -118,12 +122,15 @@ delete it:
 ```sh
 key=$(mktemp)
 OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op read "op://brined-almanac/puller/private key?ssh-format=openssh" > "$key"
-ssh -i "$key" technicalpickles@picklelab sessions | jq '.sessions | length'
-ssh -i "$key" technicalpickles@picklelab version; echo "exit $?"
+ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab sessions | jq '.sessions | length'
+ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab version; echo "exit $?"
 rm -f "$key"
 ```
 
-`sessions` prints a number. `version` prints nothing and exits 2.
+`sessions` prints a number. `version` prints nothing and exits 2. If `sessions`
+is refused with a permission error, either `from=` does not match the Mac's
+address or the `authorized_keys` line holds the wrong public key. Test once
+without `from=` to tell which.
 
 ## First deploy
 
@@ -160,7 +167,11 @@ start, and a restore into a migrated database fails on existing tables.
 
    It must report 0 queued and every cluster unchanged. A different result
    means the restore is wrong. Do not leave the stack running in live mode
-   until you know why.
+   until you know why. To stop the daemon:
+
+   ```sh
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml stop almanac
+   ```
 
 5. Confirm the connection:
 
@@ -267,8 +278,10 @@ The healthcheck fails when `$STATE/transcripts/.last-pull` is older than three
 times `PULL_INTERVAL_MINUTES`. That means one of three things:
 
 - picklelab is unreachable. If the log shows a name-resolution error, set
-  `PULL_HOST` in `prod.env` to the Mac's tailnet address for picklelab and run
-  `mise run deploy`.
+  `PULL_HOST` in `prod.env` to picklelab's tailnet address (`tailscale ip -4
+  picklelab`), run `ssh-keyscan <address> >> "$STATE/known_hosts"`, and run
+  `mise run deploy`. Without the `known_hosts` entry, the strict host-key check
+  fails.
 - The forced command refused the request. The log shows the one-line reason
   from `openclaw-ro-pull`. Check that picklelab has the current pickleclaw
   deploy.
