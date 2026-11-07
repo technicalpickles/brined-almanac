@@ -59,27 +59,31 @@ The scan is a pipeline over these records. Names are final unless implementation
 ```rust
 /// One failed tool call, as the reader yields it. The only type that knows the JSONL shape.
 pub struct ToolError {
-	pub event_id: String,
-	pub at: String,         // ISO 8601, UTC, as written in the transcript
-	pub service: String,    // "brineworks", "gog", "openclaw"
-	pub tool: String,       // "triage_apply", "read"; never the meta-tool
-	pub text: String,       // error text, untrusted, truncated to 500 chars
+	pub at: At,             // ISO 8601 UTC, checked; the day is its first ten characters
+	pub service: Slug,      // "brineworks", "gog", "openclaw"; mapped into the Slug alphabet once, here
+	pub tool: Slug,         // "triage_apply", "read"; never the meta-tool
+	pub text: Sample,       // the full error text
 }
+
+/// Error text read from a transcript. No accessor, and `Debug` prints `Sample(..)`. It leaves
+/// only through `narrow`, a `fn` to a `Copy` value (classification), or `compose`, which appends
+/// it to a clean header and cuts it at 500 characters.
+pub struct Sample(String);
 
 /// What a cluster is grouped by.
 pub struct ClusterKey {
-	pub service: String,
-	pub tool: String,
+	pub service: Slug,
+	pub tool: Slug,
 	pub class: &'static str, // a row of the class table, or "other"
-	pub day: String,         // "2026-11-04", UTC
+	pub day: Slug,           // "2026-11-04", UTC
 }
 
 /// Everything the scan knows about one key.
 pub struct Cluster {
 	pub count: u64,
-	pub first: String,
-	pub last: String,
-	pub sample: String,     // the first error text seen
+	pub first: At,          // the earliest error
+	pub last: At,           // the latest error
+	pub sample: Sample,     // the earliest error's text
 }
 
 observed! {
@@ -105,6 +109,8 @@ pub enum Facts {
 
 Run ids are not read in v0. The spike did without them and the issue reader has the day and the sample to find the session.
 
+Two names changed after the type sketch on 2026-11-06. `text` holds the full error text, not a 500-character cut, because the spike classified the full text and the 137 and 37 counts were verified that way. The cut happens when the report is composed. `event_id` is not a field, because the reader deduplicates by it and nothing after the reader needs it.
+
 Two tables hold the domain knowledge, so adding a class or a service is a row, not a branch:
 
 - The class table maps a regular expression to a class name and a filing threshold. It is the table above, with `other` at 3.
@@ -129,7 +135,7 @@ tests/                      the synthetic transcript builder and the tests below
 ## Data flow
 
 1. The runtime calls `scan` once per `backfill`, or on its scan interval when the daemon runs.
-2. `scan` takes the `Transcripts` directory from the `Scanner`, and `transcript::read` parses every `*.jsonl` under it. For each event it records `toolCall` blocks by id, so an error result joins to the tool the model asked for through `toolCallId`. It reads service and tool from `details.tool.mcp` by regex, because `details` is a Python repr. When that fails and the tool is `tool_call`, it splits the call's id on `__` after stripping any `mcp:` prefix. Otherwise the service is `openclaw` and the tool is `toolName`. Empty `details` falls back to the result's `content`. A line that is not JSON is skipped and counted. A second occurrence of an event id is dropped.
+2. `scan` takes the `Transcripts` directory from the `Scanner`, and `transcript::read` parses every `*.jsonl` under it. For each event it records `toolCall` blocks by id, so an error result joins to the tool the model asked for through `toolCallId`. It reads service and tool from `details.tool.mcp` by regex, because `details` is a Python repr. When that fails and the tool is `tool_call`, it strips any `mcp:` prefix, keeps the segment after the last `:`, and splits once on `__`. An id with no `__` is one of OpenClaw's own tools. Otherwise the service is `openclaw` and the tool is `toolName`. Empty `details` falls back to the result's `content`. A line that is not JSON is skipped and counted. A failed result whose timestamp does not start with a date is counted and dropped. A second occurrence of an event id is dropped. The reader returns the errors sorted by time, so every later `first`, `last`, and sample is independent of file order.
 3. `scan` classifies each error with the class table. The first matching row wins, and no match is `other`. It clusters by `ClusterKey`, with the day taken from the first ten characters of the timestamp.
 4. For each cluster, `scan` composes the report (service, tool, class, day, count, first, last, and the sample) and emits one `Scanned<ToolFailed>` with delivery id `scan:brent/{service}/{tool}/{class}/{day}`.
 5. The runtime admits each scanned event through the store. A delivery id it has already seen is a duplicate and goes no further. The workflow key is `{service}:{tool}:{class}:{day}`, so one run is active per cluster.
@@ -168,8 +174,8 @@ The tracker adds the `almanac` label and its own marker. Nothing else goes in th
 
 Error messages come from a bot that reads Josh's email, so a sample can quote a message body. Three rules:
 
-- The report is `Untrusted<String>` from the moment `scan` composes it, and stays tainted through the event, the facts, the effect, and the outbox. Almanac's taint type has no accessor, so nothing in this crate can read the text back out. It never reaches a prompt, and this workflow calls no model.
-- The tracker refuses a public target. `providers.rs` wraps the GitHub tracker in `PrivateOnly`, which fetches `/repos/{target}` once per target per process and files only when the repository answers `private: true`. The ownership table is a closed set of two private repositories, but a repository can go public later, and the body carries transcript text.
+- Error text is a `Sample` from the moment the reader parses the line. It has no accessor and its `Debug` hides the text, so no error message, log line, or panic in this crate can repeat it. It leaves only through `narrow` into a class name or `compose` into the report. The report is `Untrusted<String>` from the moment `scan` emits it, and stays tainted through the event, the facts, the effect, and the outbox. Almanac's taint type has no accessor either. The text never reaches a prompt, and this workflow calls no model.
+- The tracker refuses a public target. `providers.rs` wraps the GitHub tracker in `PrivateOnly`, which asks `/repos/{target}` and files only when the repository answers `private: true`. A private answer is cached for the process, so a target is asked once. A public answer or a failed lookup refuses the delivery and is asked again on the retry, so an outage at GitHub never lets text through. The ownership table is a closed set of two private repositories, but a repository can go public later, and the body carries transcript text.
 - Nothing in this repository holds transcript text. Fixtures are synthetic, errors name the shape and never repeat the text, and `scripts/check-forbidden` runs before every commit and push.
 
 Pulls made with `openclaw-ro` already pass through its gitleaks gate, which masks key-shaped strings. The scan does not add a second redactor.
@@ -194,6 +200,7 @@ Three things to know before trusting a build:
 ## Errors
 
 - A line that is not JSON is counted and reported at the end of the scan. It is never fatal.
+- A failed result with no timestamp, or one that does not start with a date, is counted beside the non-JSON lines and dropped.
 - An error result with no usable `details` becomes `service = openclaw`, `tool = toolName`, class `other`, with the result's `content` as its text.
 - A transcript directory that cannot be read, or a file in it that cannot be read, fails the scan with the path. Almanac reports the failed scan and files nothing.
 - A tracker failure fails that delivery. Almanac retries it up to its attempt cap, and the marker check makes the retry safe.
@@ -207,12 +214,15 @@ No transcript is ever committed. `tests/` holds a builder that writes synthetic 
 
 Tests, all offline, against almanac's in-memory store and fakes:
 
-- `transcript::read` yields the expected `ToolError` records for each of the three tool-id spellings, reads service and tool from `details` when present, falls back to the call id when not, uses `content` when `details` is empty, and skips the non-JSON lines.
+- `transcript::read` yields the expected `ToolError` records for each of the three tool-id spellings, reads service and tool from `details` when present, falls back to the call id when not, uses `content` when `details` is empty, ignores results that are not errors, reads an event id once, and skips the non-JSON lines.
+- A 600-character error classifies from its full text, and its sample in the report is 500 characters. Printing a `ToolError` with `{:?}` never shows the text.
 - `classify` maps each sample text in the class table to its class, and an unknown text to `other`.
 - A directory with 12 `Approval timed out` results on `triage_apply` on one day produces one `ToolFailed` with count 12.
 - Scanning the same directory twice in one runtime reports the second scan as all duplicates. This is what proves the delivery ids are stable.
 - The policy files at the threshold with the owning repository as target, stays quiet one below it, and routes `brineworks` and `gog` to their repositories.
-- `PrivateOnly` refuses to file when a fake client answers `private: false`, and files when it answers `true`.
+- A live-mode run over the twelve-timeout directory with almanac's fake tracker files one issue on `technicalpickles/brineworks` and nothing for a cluster below threshold.
+- A second runtime with a fresh in-memory store queues every cluster again. This is the test that documents why live runs need a database.
+- `PrivateOnly` refuses to file when a fake answers `private: false` or fails, files when it answers `true`, and asks once for a target that answered `true`.
 
 The real check after implementation is `backfill --dry-run` over the three pulled transcripts on the Mac, compared by hand against the counts in the class table. The spike matched them.
 
