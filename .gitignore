@@ -3,3 +3,4 @@ local/
 transcripts/
 target/
 .claude/worktrees/
+.env.portool

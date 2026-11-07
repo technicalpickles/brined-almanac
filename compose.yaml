@@ -1,0 +1,23 @@
+# This checkout's almanac store. `mise run db` brings it up on the port portool gave this
+# checkout; the main checkout's is the interim store for live runs (README, "Running it").
+# Loopback only, no password: trust auth never leaves 127.0.0.1.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: almanac
+      POSTGRES_DB: almanac
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:${DB_PORT:?run `mise run db`, which asks portool for this checkout's port}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U almanac"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

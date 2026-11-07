@@ -197,6 +197,7 @@ Three things to know before trusting a build:
 - Plain `check` validates only the providers the workflow body uses. The transcript directory and the tracker are used by the scan and the effect, so run `ALMANAC_MODE=live brined-almanac check` to have them validated too (ivy/almanac#1).
 - `backfill --dry-run` spends the workflow's `runs_per_hour` budget (ivy/almanac#3). The first backfill over two months of transcripts produced 137 clusters, so the workflow declares `runs_per_hour = 1000`. Configuration can only lower it.
 - v0 runs on the Mac, by hand, over transcripts pulled with `openclaw-ro`. The daemon, a timer, and reading picklelab's store directly are a deployment document.
+- A dry run against a real store admits every delivery id, so a dry run followed by a live run files nothing (verified 2026-11-06: 102 rows in `seen` after one `backfill --dry-run`, the next run all unchanged). Dry runs therefore stay on the in-memory store; only `mise run live` sets `DATABASE_URL`. The README's "Running it" section has the operator steps.
 
 ## Errors
 

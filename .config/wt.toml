@@ -1,0 +1,4 @@
+# Runs while the worktree is still on disk, so the task can find its port and compose project.
+# `wt remove --no-hooks` skips it. worktrunk reads this from the checkout you run `wt remove` in.
+[pre-remove]
+db-down = "mise run db:down"
