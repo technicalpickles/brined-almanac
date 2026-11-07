@@ -3,7 +3,10 @@
 use std::cell::Cell;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
+use almanac::prelude::*;
+use brined_almanac::transcript::Transcripts;
 use serde_json::{Map, Value};
 use tempfile::TempDir;
 
@@ -27,6 +30,12 @@ impl Fixture {
 
     pub fn path(&self) -> &Path {
         self.dir.path()
+    }
+
+    pub fn providers(&self, tracker: Arc<dyn Tracker>) -> Providers {
+        Providers::new()
+            .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))
+            .provide::<dyn Tracker>(tracker)
     }
 
     pub fn file(&self, name: &str) -> FileBuilder<'_> {

@@ -1,10 +1,17 @@
 mod support;
 
+use std::sync::Arc;
+
 use almanac::prelude::*;
+use almanac::runtime::{Outcome, Runtime};
+use almanac::testing::FakeTracker;
 use brined_almanac::transcript::read;
+use brined_almanac::workflows;
 use brined_almanac::workflows::tool_failures::{
-    CLASSES, class_named, classify, cluster, owner_of, report,
+    CLASSES, Facts, TITLE, ToolFailed, ToolFailures, class_named, classify, cluster, facts,
+    owner_of, policy, report,
 };
+use serde_json::json;
 use support::{Failure, Fixture};
 
 fn slug(raw: &str) -> Slug {
@@ -141,4 +148,165 @@ fn report_lists_fields_then_a_blank_line_then_the_sample() {
         "{text}"
     );
     assert!(text.ends_with("Approval timed out'}"), "{text}");
+}
+
+fn tool_failed(service: &str, tool: &str, class: &str, count: u64) -> ToolFailed {
+    ToolFailed::from_json(&json!({
+        "service": service,
+        "tool": tool,
+        "class": class,
+        "day": "2026-11-04",
+        "count": count,
+        "report": "synthetic report",
+    }))
+    .expect("payload parses")
+}
+
+fn runtime(fx: &Fixture, tracker: Arc<dyn Tracker>, mode: Mode) -> Runtime {
+    Runtime::new(workflows::all(), fx.providers(tracker)).in_mode(mode)
+}
+
+fn twelve_timeouts() -> Fixture {
+    let fx = Fixture::new();
+    fx.file("a.jsonl")
+        .with(
+            Failure::mcp("brineworks", "triage_apply")
+                .error("Approval timed out")
+                .times(12),
+        )
+        .write();
+    fx
+}
+
+#[test]
+fn files_at_the_threshold_and_stays_quiet_one_below() {
+    for c in CLASSES {
+        let at = facts(&tool_failed(
+            "brineworks",
+            "triage_apply",
+            c.name,
+            c.threshold,
+        ));
+        assert!(matches!(at, Facts::Loud { .. }), "{} at threshold", c.name);
+        let below = facts(&tool_failed(
+            "brineworks",
+            "triage_apply",
+            c.name,
+            c.threshold - 1,
+        ));
+        assert!(matches!(below, Facts::Quiet), "{} one below", c.name);
+    }
+}
+
+#[test]
+fn brineworks_and_gog_route_to_their_repositories() {
+    for (service, repo) in [
+        ("brineworks", "technicalpickles/brineworks"),
+        ("gog", "technicalpickles/pickleclaw"),
+    ] {
+        match facts(&tool_failed(service, "t", "mcp-timeout", 1)) {
+            Facts::Loud { target, .. } => assert_eq!(target.to_string(), repo),
+            Facts::Quiet => panic!("{service} should be loud"),
+        }
+    }
+}
+
+#[test]
+fn policy_files_once_with_the_static_title() {
+    let loud = facts(&tool_failed("brineworks", "t", "mcp-timeout", 1));
+    let effects = policy(&loud);
+    assert_eq!(effects.len(), 1);
+    assert!(matches!(&effects[0], Effect::File { title, .. } if *title == TITLE));
+    assert!(policy(&Facts::Quiet).is_empty());
+}
+
+#[test]
+fn the_workflow_key_carries_no_state() {
+    for count in [3, 30] {
+        let event = tool_failed("brineworks", "triage_apply", "approval-timeout", count);
+        assert_eq!(
+            ToolFailures::key(&event),
+            "brineworks:triage_apply:approval-timeout:2026-11-04"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_hostile_tool_name_still_makes_a_valid_payload() {
+    let fx = Fixture::new();
+    fx.file("a.jsonl")
+        .with(Failure::mcp("brineworks", "weird tool/\u{fc}"))
+        .write();
+    let rt = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun);
+    let found = rt.backfill(None).await.unwrap();
+    assert_eq!(found.found, 1);
+    assert_eq!(found.rejected, 0);
+}
+
+#[tokio::test]
+async fn backfill_records_one_file_for_twelve_timeouts() {
+    let fx = twelve_timeouts();
+    let rt = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun);
+    rt.backfill(None).await.unwrap();
+    let outcomes = rt.settle().await.unwrap();
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        Outcome::Ran { effects, .. } => {
+            assert_eq!(effects.len(), 1);
+            assert!(
+                matches!(&effects[0], Effect::File { target, .. } if target.to_string() == "technicalpickles/brineworks")
+            );
+        }
+        _ => panic!("expected the workflow to run"),
+    }
+}
+
+#[tokio::test]
+async fn scanning_twice_reports_the_second_scan_as_duplicates() {
+    let fx = twelve_timeouts();
+    let rt = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun);
+    let first = rt.backfill(None).await.unwrap();
+    let second = rt.backfill(None).await.unwrap();
+    assert_eq!(second.unchanged, first.found);
+    assert_eq!(second.queued, 0);
+}
+
+#[tokio::test]
+async fn a_fresh_store_queues_everything_again() {
+    let fx = twelve_timeouts();
+    let first = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun)
+        .backfill(None)
+        .await
+        .unwrap();
+    let second = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun)
+        .backfill(None)
+        .await
+        .unwrap();
+    assert_eq!(second.queued, first.found);
+}
+
+#[tokio::test]
+async fn a_live_run_files_once_per_loud_cluster() {
+    let fx = twelve_timeouts();
+    fx.file("b.jsonl")
+        .with(Failure::mcp("brineworks", "lone_tool"))
+        .write();
+    let tracker = Arc::new(FakeTracker::default());
+    let rt = runtime(&fx, tracker.clone(), Mode::Live);
+    rt.backfill(None).await.unwrap();
+    rt.settle().await.unwrap();
+    let filed = tracker.filed.lock().unwrap();
+    assert_eq!(filed.len(), 1);
+    assert_eq!(filed[0].1, "technicalpickles/brineworks");
+    assert_eq!(filed[0].2, TITLE);
+}
+
+#[tokio::test]
+async fn a_dry_run_calls_no_tracker() {
+    let fx = twelve_timeouts();
+    let tracker = Arc::new(FakeTracker::default());
+    let rt = runtime(&fx, tracker.clone(), Mode::DryRun);
+    rt.backfill(None).await.unwrap();
+    rt.settle().await.unwrap();
+    assert!(tracker.calls.lock().unwrap().is_empty());
 }

@@ -3,8 +3,10 @@ use std::sync::LazyLock;
 
 use almanac::prelude::*;
 use regex::RegexSet;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
-use crate::transcript::{At, Report, Sample, ToolError};
+use crate::transcript::{At, Report, Sample, ToolError, Transcripts, read};
 
 pub struct Class {
     pub name: &'static str,
@@ -149,4 +151,107 @@ pub fn report(key: &ClusterKey, cluster: &Cluster) -> Report {
         cluster.last.as_str(),
     );
     cluster.sample.compose(&header)
+}
+
+pub const TITLE: &str = "Brent: failed tool calls";
+
+observed! {
+    /// One cluster of failed tool calls. `report` is composed from transcript text, so it is tainted.
+    pub struct ToolFailed {
+        pub service: Slug,
+        pub tool: Slug,
+        pub class: Slug,
+        pub day: Slug,
+        pub count: u64,
+        pub report: Untrusted<String>,
+    }
+}
+
+impl Event for ToolFailed {
+    const KIND: &'static str = "brent.tool.failed";
+    fn parse(p: &Payload<'_>) -> Result<Self, Malformed> {
+        Ok(Self {
+            service: p.field("/service")?,
+            tool: p.field("/tool")?,
+            class: p.field("/class")?,
+            day: p.field("/day")?,
+            count: p.field("/count")?,
+            report: p.text("/report")?,
+        })
+    }
+}
+
+pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<ToolFailed>>, StepError> {
+    let dir = scanner.get::<Transcripts>()?;
+    let read = read(&dir.0)?;
+    let shown = dir.0.display();
+    if read.skipped.not_json > 0 {
+        eprintln!(
+            "{shown}: skipped {} lines that were not JSON",
+            read.skipped.not_json
+        );
+    }
+    if read.skipped.undated > 0 {
+        eprintln!(
+            "{shown}: skipped {} lines with no usable timestamp",
+            read.skipped.undated
+        );
+    }
+    Ok(cluster(read.errors)
+        .into_iter()
+        .map(|(key, c)| {
+            let payload = json!({
+                "service": key.service,
+                "tool": key.tool,
+                "class": key.class.parse::<Slug>().expect("class names are slugs"),
+                "day": key.day,
+                "count": c.count,
+                "report": report(&key, &c),
+            });
+            Scanned::new(key.delivery_id(), payload)
+        })
+        .collect())
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Facts {
+    Quiet,
+    Loud {
+        target: Slug,
+        body: Untrusted<String>,
+    },
+}
+
+pub fn facts(event: &ToolFailed) -> Facts {
+    if event.count < class_named(&event.class.to_string()).threshold {
+        return Facts::Quiet;
+    }
+    Facts::Loud {
+        target: owner_of(&event.service),
+        body: event.report.map(|s| s.clone()),
+    }
+}
+
+#[workflow(
+    on = ToolFailed,
+    key = "{service}:{tool}:{class}:{day}",
+    intent = "File one issue per cluster of failed tool calls in Brent's transcripts.",
+    may = [File],
+    runs_per_hour = 1000,
+    scan = scan,
+    decide = policy,
+)]
+pub async fn tool_failures(_cx: &Cx, event: &ToolFailed) -> Result<Facts, Halt> {
+    Ok(facts(event))
+}
+
+pub fn policy(facts: &Facts) -> Vec<Effect> {
+    match facts {
+        Facts::Quiet => vec![],
+        Facts::Loud { target, body } => vec![Effect::File {
+            title: TITLE,
+            target: target.clone(),
+            body: body.map(|s| s.clone()),
+        }],
+    }
 }
