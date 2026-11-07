@@ -10,6 +10,7 @@ use brined_almanac::transcript::Transcripts;
 use serde_json::{Map, Value};
 use tempfile::TempDir;
 
+// See .forbidden-patterns for why these are not plain literals.
 const ROLE_KEY: &str = "role";
 const RESULT_ROLE: &str = concat!("tool", "Result");
 const DEFAULT_TIME: &str = "2026-11-04T10:00:00Z";

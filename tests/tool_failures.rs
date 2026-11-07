@@ -267,6 +267,7 @@ async fn scanning_twice_reports_the_second_scan_as_duplicates() {
     let rt = runtime(&fx, Arc::new(FakeTracker::default()), Mode::DryRun);
     let first = rt.backfill(None).await.unwrap();
     let second = rt.backfill(None).await.unwrap();
+    assert_eq!(first.found, 1);
     assert_eq!(second.unchanged, first.found);
     assert_eq!(second.queued, 0);
 }
@@ -295,6 +296,7 @@ async fn a_live_run_files_once_per_loud_cluster() {
     let rt = runtime(&fx, tracker.clone(), Mode::Live);
     rt.backfill(None).await.unwrap();
     rt.settle().await.unwrap();
+    assert_eq!(tracker.calls.lock().unwrap().len(), 1);
     let filed = tracker.filed.lock().unwrap();
     assert_eq!(filed.len(), 1);
     assert_eq!(filed[0].1, "technicalpickles/brineworks");
@@ -306,7 +308,8 @@ async fn a_dry_run_calls_no_tracker() {
     let fx = twelve_timeouts();
     let tracker = Arc::new(FakeTracker::default());
     let rt = runtime(&fx, tracker.clone(), Mode::DryRun);
-    rt.backfill(None).await.unwrap();
+    let found = rt.backfill(None).await.unwrap();
+    assert!(found.queued > 0);
     rt.settle().await.unwrap();
     assert!(tracker.calls.lock().unwrap().is_empty());
 }

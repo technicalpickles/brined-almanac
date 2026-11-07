@@ -117,3 +117,14 @@ async fn a_live_run_without_a_store_refuses_to_file_or_ask() {
         assert!(!err.0.contains("technicalpickles/brineworks"));
     }
 }
+
+#[tokio::test]
+async fn a_failed_lookup_is_asked_again() {
+    let visibility = Arc::new(FakeVisibility::new(Err("boom".to_string())));
+    let inner = FakeTracker::default();
+    let tracker = PrivateOnly::new(inner.clone(), visibility.clone());
+    assert!(tracker.file("k1", &target(), "a", &body()).await.is_err());
+    assert!(tracker.file("k2", &target(), "b", &body()).await.is_err());
+    assert_eq!(visibility.asked.lock().unwrap().len(), 2);
+    assert!(inner.filed.lock().unwrap().is_empty());
+}
