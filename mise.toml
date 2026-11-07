@@ -23,6 +23,14 @@ run = "cargo test && puller/pull.test.sh"
 description = "Build the almanac image and check it: mise run image:smoke [-- TAG]"
 run = "scripts/image-smoke"
 
+[tasks.deploy]
+description = "Build both images and start or update the prod stack; --db-only for the first deploy"
+run = "scripts/deploy"
+
+[tasks.prod]
+description = "Run a verb in the prod stack: mise run prod -- check | backfill [--dry-run]"
+run = "env -u COMPOSE_PROJECT_NAME docker compose -f compose.prod.yaml exec almanac brined-almanac"
+
 [tasks.db]
 description = "Start this checkout's Postgres on the port portool allocated (data persists in a named volume)"
 run = """
