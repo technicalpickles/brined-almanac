@@ -18,8 +18,8 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 
 - A taskwarrior `Tracker` in `src/providers.rs`, next to `LogTracker`, `StoreRequired` and `PrivateOnly`
 - A router that sends a finding to a GitHub issue or to taskwarrior, by the rule in [vision.md](vision.md) "Where output goes"
-- A way for the prod container to write to taskwarrior, either a read-write mount of `~/.task` or a taskchampion sync server
-- A delivery key on each task, so a rerun or a lost store doesn't file the same finding twice
+- A taskchampion sync server in the compose stack. The container keeps its own taskwarrior replica and syncs to it, and my Mac's `task` syncs to it on a timer. Nothing shares the SQLite file, and the setup moves to picklelab unchanged
+- An `almanac_key` user-defined attribute on each task, holding its delivery key. The tracker checks its replica for the key before filing, so a rerun or a lost store doesn't file the same finding twice. The close effect and the daily list of closes find tasks by the same key. My `.taskrc` defines the attribute through dotfiles
 - security-alerts, for deployed, active, and maintained repositories
 
 **Done when** every open security alert on those repositories is tracked as one task or issue per repository, and running the scan again files nothing new.
@@ -29,7 +29,7 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 The backlog and the parking lot stop going stale on their own.
 
 - task-reconciler, closing a task when a merged pull request or commit names its UUID or when a pull request or issue it cites has closed, and flagging the ones a later burst probably finished
-- A close effect for taskwarrior tasks. Almanac's effect set has no way to close anything yet
+- A `Resolve { key, evidence }` effect and a `Tracker::resolve` method, so closing is its own effect that guards and the run record can see. Upstream's effect module says nothing in it closes, so propose it to ivy/almanac first ([draft](superpowers/plans/2026-11-07-upstream-issue-resolve-effect.md)), arguing that a task is my planning record and closing it on checked evidence is closer to `Attest` than to a merge. If upstream declines or is slow, pin a fork branch, which is a one-line change to `Cargo.toml`. Flagging and the daily list ship without it, and closing turns on when it exists
 - A daily task that lists what the reconciler closed
 - parked-handoffs, sorting each handoff older than a week into captured, resumable, or orphaned
 - Shared evidence code for both: merged pull requests, cited files that changed, commits that mention a task or a branch
@@ -64,7 +64,7 @@ Agent work runs on capacity I'm not using.
 - The budget rule in code, with its starting numbers next to it
 - A probe that reads `unifiedWindows.five_hour` from a headless `claude -p` run
 - Burst and working detection from transcript writes under `~/.claude/projects/`
-- task-reconciler's evidence hunt, where an agent returns a proof and code checks it before closing
+- task-reconciler's evidence hunt, where an agent returns a proof of read-only checks and code runs them before closing
 - session-friction, counting friction in my transcripts through cq each week, with a model ranking the items and writing the summary
 - lesson-spread, finding repositories where a recorded lesson applies and has not been applied
 
@@ -84,7 +84,7 @@ Almanac reports problems in running services and deployed repositories.
 ## Not yet placed
 
 - **Moving the host to picklelab.** It could come before M2 or after M6. [open-questions.md](open-questions.md) tracks it.
-- **A rerun-CI effect.** Small steps need it, and it needs a principle first. It may belong upstream.
+- **A rerun-CI effect.** Proposed upstream ([draft](superpowers/plans/2026-11-07-upstream-issue-rerun-ci.md)) so other builders can weigh in. Building it waits until deployed-upkeep in M6 runs into flaky CI.
 
 ## Deliberately unscheduled
 

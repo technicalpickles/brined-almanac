@@ -14,7 +14,7 @@ Each workflow has a status:
 
 ## Repository tiers
 
-A repository's tier decides which workflows watch it. Tiers are declared in code, and moving a repository between tiers is a one-line change.
+A repository's tier decides which workflows watch it. Tiers are declared, and moving a repository between tiers is a one-line change. Public repositories, and private ones that something public already names, are declared in code. Private repositories that nothing public names are declared in a gitignored `local/tiers.toml`, which prod gets the same way it gets its secrets. That file can only add a repository to a tier that code defines. It can't define a tier or a behaviour. Inactive repositories aren't declared at all, because the rule below computes them.
 
 | Tier | What it is | What watches it |
 |---|---|---|
@@ -22,13 +22,24 @@ A repository's tier decides which workflows watch it. Tiers are declared in code
 | deployed | Running somewhere and in use, but not being developed, like a hobby web app I still use or the WordPress sites I host. | Service health, dependency and security updates, and drift between main and what is deployed. |
 | active | Being worked on now. Today these are pickleclaw, brineworks, and picklehome. | Every workflow. |
 | maintained | Public and used by other people, like bktide and pickled-claude-plugins. | Outside issues and pull requests, plus whatever its deployed or active tier adds. |
-| retired | Public, unmaintained, and still collecting issues, like jeweler and homesick. | Nothing. The open question is whether to archive them on GitHub so they stop collecting issues. |
+| handed off | Someone else maintains it, like homesick, where another maintainer merged updates in July 2026. | Only the archive question below, if that person stops too. Its README names who maintains it now. |
+| retired | Public and inactive, like jeweler, whose last human commit was in 2019. | Only the archive question below. |
 
 A repository can be in more than one tier. bktide is maintained and active while I work on it.
+
+## Host state
+
+A workflow that checks a host reads a host-state report. The report is JSON that lists the host's container images, CA package versions, operating system releases and their end-of-life dates, and checksums for the sites it serves. A workflow never knows how the report arrived. Two transports deliver it:
+
+- **Pull.** Almanac connects with a fenced SSH key whose forced command prints the report and does nothing else. This is the pattern the prod design uses for picklelab. It suits hosts on the tailnet.
+- **Push.** The host writes the report on a schedule to a place almanac reads. It suits hosts almanac can't or shouldn't reach, because the host needs no inbound key. A host whose report stops arriving is itself a finding.
+
+Each host declares its transport. picklelab and the WordPress droplet use pull. The droplet joins the tailnet first, which also lets it close SSH to the internet.
 
 ## Rules every workflow follows
 
 - A workflow files an issue only when a pull request in a private repository closes the finding. Everything else, including findings about public repositories like picklehome or dotfiles, ops actions, and decisions, goes to taskwarrior. Issue bodies can carry transcript text or task text, so nothing files to a public repository. "Where output goes" in [vision.md](vision.md) has the full rule.
+- Maintenance on an inactive repository asks first whether to archive it. A repository is inactive when no person has committed to it in 12 months. Commits from bots such as Dependabot don't count. When a workflow finds maintenance there, like an alert or an outside pull request, it files one task that asks whether to archive the repository, and it holds the maintenance until I answer. The task includes a README notice to add before archiving, which points people to a recommended path: a successor project, a maintained fork, or the tool to use instead. The workflow checks that an existing pointer still leads somewhere alive. jeweler's README points to Juwelier, which hasn't been pushed to since 2021. If I archive it, the maintenance goes away with it. If I keep it, I give it a tier, and the held findings file. A repository someone else still commits to is active by this rule, even when I don't commit to it.
 - Work repositories are out of scope. I can't reach them from here.
 - A workflow that calls a model follows the budget rule. A watcher calls no model.
 - Every workflow has a dry run that needs no database and no token.
@@ -48,13 +59,14 @@ A repository can be in more than one tier. bktide is maintained and active while
 - **Status:** next.
 - **Watches:** pending taskwarrior tasks for active and deployed repositories.
 - **Closes:** a task when code confirms one of these:
-  - a merged pull request or a commit on main names the task by UUID
+  - a merged pull request or a commit on main names the task by UUID, after "closes", "fixes", or "resolves", or with no not-done phrase in the same sentence. The starting not-done phrases are "still open", "tracked in", "phase N", "follow-up", "part of", and "refs". A UUID next to one of them only marks the task as probably done. On commits from 2026-06 to 2026-11, this rule closes 32 of the 35 tasks commits cited and marks the other 3, which are all still open.
   - the task cites a pull request that has merged, or an issue that has closed
   - an agent's proof checks out (see below)
 
   Each closed task gets the evidence as an annotation and the `+almanac` tag. One taskwarrior task per day lists what closed, so I see every close and can reopen a mistake.
 - **Reports:** tasks that are probably done on weaker evidence, such as a merged pull request that touched the files the task cites, or a cited line that no longer looks the way the task describes. The report is one task per project per day.
-- **Evidence hunt:** for a task code can't decide, an agent reads the task and the repository and returns a proof. A proof is a list of checks code can run: a commit SHA on main, a file that must contain or lack a pattern, a test that must exist and pass, an issue or pull request that must be closed. Code runs every check. The task closes only if all of them pass. If the agent finds the work isn't done, it annotates the task with what's left, which is useful on its own. The proof is agent output, so it is untrusted until code has checked it.
+- **Model veto:** later, a small model reads the sentence around a cited UUID and can stop a close it reads as not done. It can't close anything itself.
+- **Evidence hunt:** for a task code can't decide, an agent reads the task and the repository and returns a proof. A proof is a list of read-only checks code can run: a commit that must be on main, a file on main that must contain or lack a pattern, an issue or pull request that must be closed, and CI that must have passed on main at or after a given commit. A test that exists and passed in CI stands in for running it, so a proof never runs repository code. Running a test in a sandbox gets added only if proofs keep falling short without it. Code runs every check. The task closes only if all of them pass. If the agent finds the work isn't done, it annotates the task with what's left, which is useful on its own. The proof is agent output, so it is untrusted until code has checked it.
 - **Model:** none for the UUID and cited-link checks. The evidence hunt is agent work under the budget rule, and suits the end of a window that would otherwise expire.
 - **Why first:** it shrinks the backlog that the task-resurfacer has to choose from, and its first version needs no model. parked-handoffs checks the same kinds of evidence, so the two share that code.
 
@@ -65,7 +77,7 @@ A repository can be in more than one tier. bktide is maintained and active while
 - **Reports:** one item per repository per day that lists its open alerts by severity, and says whether an open Renovate or Dependabot pull request already fixes each one. A fix that is a pull request in a private repository files there as an issue. Everything else is a task, including alerts on public repositories and a leaked secret to rotate.
 - **Model:** none.
 - **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for the images and hosts on picklelab and the WordPress droplet instead of writing that here. A Dependabot alert covers a lockfile. It says nothing about a host's base images, its CA package, or a release past end of life, which is what the eMudhra advisory turned on.
-- **Retired repositories:** their alerts are not reported. The count is evidence for the open question about archiving them.
+- **Inactive repositories:** an alert there files the archive question instead of the alert.
 
 ### task-resurfacer
 

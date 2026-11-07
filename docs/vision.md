@@ -61,7 +61,7 @@ Watchers ignore the budget rule.
 
 A workflow may take a small, reversible step itself instead of only reporting it. Examples are bringing a pull request's branch up to date with main, or rerunning a CI job that failed for a reason unrelated to the change.
 
-A small step goes through almanac's closed set of effects, like everything else a workflow does. Updating a branch is a `Push`, which commits a checked patch to the pull request's own branch. The forge refuses the patch if the branch moved after the check. Rerunning CI has no effect yet. Adding one needs a principle that covers it, so a convenient retry doesn't open the door to arbitrary actions.
+A small step goes through almanac's closed set of effects, like everything else a workflow does. Updating a branch is a `Push`, which commits a checked patch to the pull request's own branch. The forge refuses the patch if the branch moved after the check. Rerunning CI has no effect yet. The narrow version is one rerun per commit, only for a failure code classifies as infrastructure, with an `Attest` that says it reran. It goes to upstream as a proposal, so other people building on almanac can say whether they need it too.
 
 A small step that code can do, such as a clean merge of main, needs no model and ignores the budget rule. A step that needs a model, such as resolving a merge conflict, is agent work and follows the budget rule. Merging a pull request is never a small step. The repository's rules merge.
 
@@ -73,7 +73,7 @@ A finding goes to one of two places. How the finding gets closed decides which.
 
 **Taskwarrior, for everything else.** That covers a finding about a public repository such as picklehome or dotfiles, an ops action with no pull request, and a decision only I can make, like closing a task or archiving a repository. A public repository never holds a finding, because the finding may carry transcript or task text. Findings that cut across projects, like a session-friction review or a lesson that applies to many repositories, are tasks too. Under this rule picklehome needs no owner of its own.
 
-Both destinations sit behind almanac's `Tracker` trait, the interface that carries a workflow's `File` and `Ask` effects. A workflow says what to file and never knows where it lands. This repository will add a taskwarrior implementation next to the GitHub one, and a router that picks between them by target. Upstream's roadmap plans the same idea for its M4, so the implementation may go upstream later.
+Both destinations sit behind almanac's `Tracker` trait, the interface that carries a workflow's `File` and `Ask` effects. A workflow says what to file and never knows where it lands. This repository will add a taskwarrior implementation next to the GitHub one, and a router that picks between them by target. The taskwarrior tracker writes to its own replica and syncs through a taskchampion sync server, so it never shares my task database file. Almanac's record of effects is the contract between a workflow and its tracker. Dry runs print it, and a different tracker could apply it later. Upstream's roadmap plans the same idea for its M4, so the implementation may go upstream later.
 
 ## What it is not
 

@@ -2,24 +2,6 @@
 
 Questions about [vision.md](vision.md) and [workflows.md](workflows.md) that need my answer. Remove a question when it is answered, and record the answer in the doc it changes.
 
-## Scope
-
-- Archive the retired repositories on GitHub so they stop collecting issues? That is a one-time cleanup, not a workflow.
-- Tier assignments will live in code, and this repository is public. Is it fine for code to name private repositories, or do tier assignments live in a gitignored file?
-- How does almanac read a host's state, such as its images, CA packages, and site checksums? picklelab is on the tailnet. The WordPress droplet isn't reachable the same way.
-
-## Where output goes
-
-- How does the prod container write to taskwarrior? It can mount `~/.task` read-write and run `task` itself, or sync through a taskchampion sync server. A read-write mount means the container and my own `task` commands write the same files at the same time.
-- How does the taskwarrior tracker avoid filing the same finding twice? GitHub issues get this from almanac's store. A taskwarrior task could also carry the delivery key in a user-defined attribute, so a lost store doesn't refile everything.
-
-## Agent work
-
-- Closing a taskwarrior task needs a new effect. Is it a method on the taskwarrior tracker, or an effect of its own? Does it also suit upstream, whose M4 plans a tracker provider?
-- A commit can mention a task it only touches, as in "part of <uuid>". Should a UUID close the task only after a keyword like "closes", or anywhere?
-- Which checks can an agent's proof contain? The draft allows a commit on main, a file pattern, a test that passes, and a closed issue or pull request. Running a test means running repository code, so it needs the sandbox.
-- Rerunning CI needs a new effect. Add it in this repository, or propose it upstream? Which principle covers it?
-
 ## Workflow design
 
 - service-down. Does it replace picklehome's bash watchdogs, or cover only what they don't?
