@@ -141,14 +141,16 @@ and unsetting the variable, then loops every `PULL_INTERVAL_MINUTES` (default
    mid-stream leaves the file as it was. `<safe-key>` is the key with every
    character outside `[A-Za-z0-9_-]` replaced by `-`, the same mapping
    `remote` uses for export directories.
-3. On success, set the cursor to the last event's timestamp plus one
-   millisecond. On failure, leave it; the next pass retries. Write
-   `.last-pull` after every pass that completed, even one with nothing new.
+3. On success, set the cursor to the session's `updatedAt` from the listing
+   that triggered this pull, plus one millisecond. On failure, leave it; the
+   next pass retries. Write `.last-pull` after every pass that completed,
+   even one with nothing new.
 
 Cursors are `.cursors.json`, a map from key to epoch ms, written atomically.
-`--since` is inclusive, so a cursor exactly at the last event would repeat it;
-the plus-one avoids that, and the reader's dedup by event id covers any
-repeat anyway. Transcript files only grow; rotation is a later concern (two
+`updatedAt` and event timestamps come from the same OpenClaw clock, and an
+event written between the listing and the pull is pulled now and again next
+pass; the reader's dedup by event id covers that, and the plus-one keeps the
+inclusive `--since` from repeating the boundary event every time. Transcript files only grow; rotation is a later concern (two
 months of two sessions was 66 MB).
 
 Telegram, direct, and openwebui sessions all come through the same list. No
@@ -286,9 +288,10 @@ Proof, in order. Each step gates the next.
 
 1. The almanac image builds with no network to a database and no `.env`;
    `docker run --rm brined-almanac:prod synth` prints the manifest.
-2. `mise run prod -- check` with `ALMANAC_MODE=live` in `prod.env` validates
-   the transcripts mount and the GitHub tracker (ivy/almanac#1 means plain
-   `check` wouldn't).
+2. `mise run prod -- check` connects to the store and constructs the GitHub
+   tracker (it verifies providers are registered, not that the directory
+   exists; the mount is proven by the backfill in step 3 and by the image
+   smoke test's dry run against a mounted empty directory).
 3. After the restore: `mise run prod -- backfill` reports 0 queued, 102
    unchanged. Nothing new appears in either repo's `almanac` label.
 4. The forced command: with the puller key, `ssh ... sessions` lists sessions;
