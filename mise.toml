@@ -18,6 +18,10 @@ run = "hk check"
 description = "Run the unit and integration tests"
 run = "cargo test"
 
+[tasks."image:smoke"]
+description = "Build the almanac image and check it: mise run image:smoke [-- TAG]"
+run = "scripts/image-smoke"
+
 [tasks.db]
 description = "Start this checkout's Postgres on the port portool allocated (data persists in a named volume)"
 run = """
