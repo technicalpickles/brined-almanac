@@ -94,7 +94,7 @@ async fn ask_is_guarded_like_file() {
     let inner = FakeTracker::default();
     let tracker = PrivateOnly::new(inner.clone(), FakeVisibility::new(Ok(false)));
     let err = tracker
-        .ask("k1", &target(), "question?", &body())
+        .ask("k1", &target(), None, "question?", &body())
         .await
         .unwrap_err();
     assert!(err.0.contains("technicalpickles/brineworks"));
@@ -108,7 +108,7 @@ async fn a_live_run_without_a_store_refuses_to_file_or_ask() {
         .await
         .unwrap_err();
     let asked = StoreRequired
-        .ask("k1", &target(), "question?", &body())
+        .ask("k1", &target(), None, "question?", &body())
         .await
         .unwrap_err();
     for err in [filed, asked] {

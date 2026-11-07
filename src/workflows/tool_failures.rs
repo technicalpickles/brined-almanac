@@ -6,7 +6,7 @@ use regex::RegexSet;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::transcript::{At, Report, Sample, ToolError, Transcripts, read};
+use crate::transcript::{At, Sample, ToolError, Transcripts, read};
 
 pub struct Class {
     pub name: &'static str,
@@ -139,31 +139,17 @@ pub fn cluster(errors: Vec<ToolError>) -> Vec<(ClusterKey, Cluster)> {
     out
 }
 
-pub fn report(key: &ClusterKey, cluster: &Cluster) -> Report {
-    let header = format!(
-        "service: {}\ntool: {}\nclass: {}\nday: {}\ncount: {}\nfirst: {}\nlast: {}",
-        key.service,
-        key.tool,
-        key.class,
-        key.day,
-        cluster.count,
-        cluster.first.as_str(),
-        cluster.last.as_str(),
-    );
-    cluster.sample.compose(&header)
-}
-
-pub const TITLE: &str = "Brent: failed tool calls";
-
 observed! {
-    /// One cluster of failed tool calls. `report` is composed from transcript text, so it is tainted.
+    /// One cluster of failed tool calls. `sample` is transcript text, so it is tainted.
     pub struct ToolFailed {
         pub service: Slug,
         pub tool: Slug,
         pub class: Slug,
         pub day: Slug,
         pub count: u64,
-        pub report: Untrusted<String>,
+        pub first: Slug,
+        pub last: Slug,
+        pub sample: Untrusted<String>,
     }
 }
 
@@ -176,11 +162,14 @@ impl Event for ToolFailed {
             class: p.field("/class")?,
             day: p.field("/day")?,
             count: p.field("/count")?,
-            report: p.text("/report")?,
+            first: p.field("/first")?,
+            last: p.field("/last")?,
+            sample: p.text("/sample")?,
         })
     }
 }
 
+#[scan]
 pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<ToolFailed>>, StepError> {
     let dir = scanner.get::<Transcripts>()?;
     let read = read(&dir.0)?;
@@ -206,7 +195,9 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<ToolFailed>>, StepErr
                 "class": key.class.parse::<Slug>().expect("class names are slugs"),
                 "day": key.day,
                 "count": c.count,
-                "report": report(&key, &c),
+                "first": c.first.as_str(),
+                "last": c.last.as_str(),
+                "sample": c.sample.excerpt(),
             });
             Scanned::new(key.delivery_id(), payload)
         })
@@ -218,6 +209,11 @@ pub enum Facts {
     Quiet,
     Loud {
         target: Slug,
+        service: Slug,
+        tool: Slug,
+        class: Slug,
+        day: Slug,
+        count: u64,
         body: Untrusted<String>,
     },
 }
@@ -226,9 +222,18 @@ pub fn facts(event: &ToolFailed) -> Facts {
     if event.count < class_named(&event.class.to_string()).threshold {
         return Facts::Quiet;
     }
+    let header = format!(
+        "service: {}\ntool: {}\nclass: {}\nday: {}\ncount: {}\nfirst: {}\nlast: {}\n\nsample:\n",
+        event.service, event.tool, event.class, event.day, event.count, event.first, event.last,
+    );
     Facts::Loud {
         target: owner_of(&event.service),
-        body: event.report.map(|s| s.clone()),
+        service: event.service.clone(),
+        tool: event.tool.clone(),
+        class: event.class.clone(),
+        day: event.day.clone(),
+        count: event.count,
+        body: Untrusted::join(&header, &event.sample),
     }
 }
 
@@ -248,8 +253,23 @@ pub async fn tool_failures(_cx: &Cx, event: &ToolFailed) -> Result<Facts, Halt> 
 pub fn policy(facts: &Facts) -> Vec<Effect> {
     match facts {
         Facts::Quiet => vec![],
-        Facts::Loud { target, body } => vec![Effect::File {
-            title: TITLE,
+        Facts::Loud {
+            target,
+            service,
+            tool,
+            class,
+            day,
+            count,
+            body,
+        } => vec![Effect::File {
+            title: title!(
+                "Brent: {}/{} {} on {} (count {})",
+                service,
+                tool,
+                class,
+                day,
+                count
+            ),
             target: target.clone(),
             body: body.map(|s| s.clone()),
         }],

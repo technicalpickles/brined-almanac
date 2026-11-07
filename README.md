@@ -40,7 +40,7 @@ A dry run needs no database and no token, so this is the loop for poking at the 
 BRENT_TRANSCRIPTS=path/to/pulls mise exec -- cargo run -- backfill --dry-run
 ```
 
-Don't point a dry run at the real store. Almanac admits every delivery id it sees, dry run or not, so a dry run against the database followed by a live run files nothing. Dry runs stay on the in-memory store, and only the `live` task sets `DATABASE_URL`.
+Only the `live` task sets `DATABASE_URL`, so dry runs use the in-memory store. A dry run pointed at the real store is harmless anyway, because almanac keeps a dry run's rows apart from a live run's.
 
 ### The store
 

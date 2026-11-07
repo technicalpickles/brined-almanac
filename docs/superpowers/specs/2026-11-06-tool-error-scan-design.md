@@ -87,29 +87,31 @@ pub struct Cluster {
 }
 
 observed! {
-	/// One cluster, as the runtime sees it. `report` is composed from transcript text, so it is tainted.
+	/// One cluster, as the runtime sees it. `sample` is transcript text, so it is tainted.
 	pub struct ToolFailed {
 		pub service: Slug,
 		pub tool: Slug,
 		pub class: Slug,
 		pub day: Slug,
 		pub count: u64,
-		pub report: Untrusted<String>,
+		pub first: Slug,
+		pub last: Slug,
+		pub sample: Untrusted<String>,
 	}
 }
 
 /// What gather hands to policy.
 pub enum Facts {
 	Quiet,
-	Loud { target: Slug, body: Untrusted<String> },
+	Loud { target: Slug, service: Slug, tool: Slug, class: Slug, day: Slug, count: u64, body: Untrusted<String> },
 }
 ```
 
-`ToolFailed` is the workflow's event. Its `KIND` is `brent.tool.failed`, and `parse` reads each field from the payload with `Payload::field`, and `report` with `Payload::text`, so the text arrives tainted. `Slug` is almanac's validated identifier (ASCII alphanumerics and `._/-:@[]`, at most 200 characters), and the scan maps any other character to `-` before building one.
+`ToolFailed` is the workflow's event. Its `KIND` is `brent.tool.failed`, and `parse` reads each field from the payload with `Payload::field`, and `sample` with `Payload::text`, so the text arrives tainted. `Slug` is almanac's validated identifier (ASCII alphanumerics and `._/-:@[]`, at most 200 characters), and the scan maps any other character to `-` before building one.
 
 Run ids are not read in v0. The spike did without them and the issue reader has the day and the sample to find the session.
 
-Two names changed after the type sketch on 2026-11-06. `text` holds the full error text, not a 500-character cut, because the spike classified the full text and the 137 and 37 counts were verified that way. The cut happens when the report is composed. `event_id` is not a field, because the reader deduplicates by it and nothing after the reader needs it.
+Two names changed after the type sketch on 2026-11-06. `text` holds the full error text, not a 500-character cut, because the spike classified the full text and the 137 and 37 counts were verified that way. The cut happens when `scan` builds the event. `event_id` is not a field, because the reader deduplicates by it and nothing after the reader needs it.
 
 Two tables hold the domain knowledge, so adding a class or a service is a row, not a branch:
 
@@ -137,13 +139,11 @@ tests/                      the synthetic transcript builder and the tests below
 1. The runtime calls `scan` once per `backfill`, or on its scan interval when the daemon runs.
 2. `scan` takes the `Transcripts` directory from the `Scanner`, and `transcript::read` parses every `*.jsonl` under it. For each event it records `toolCall` blocks by id, so an error result joins to the tool the model asked for through `toolCallId`. It reads service and tool from `details.tool.mcp` by regex, because `details` is a Python repr. When that fails and the tool is `tool_call`, it strips any `mcp:` prefix, keeps the segment after the last `:`, and splits once on `__`. An id with no `__` is one of OpenClaw's own tools. Otherwise the service is `openclaw` and the tool is `toolName`. Empty `details` falls back to the result's `content`. A line that is not JSON is skipped and counted. A failed result whose timestamp does not start with a date is counted and dropped. A second occurrence of an event id is dropped. The reader returns the errors sorted by time, so every later `first`, `last`, and sample is independent of file order.
 3. `scan` classifies each error with the class table. The first matching row wins, and no match is `other`. It clusters by `ClusterKey`, with the day taken from the first ten characters of the timestamp.
-4. For each cluster, `scan` composes the report (service, tool, class, day, count, first, last, and the sample) and emits one `Scanned<ToolFailed>` with delivery id `scan:brent/{service}/{tool}/{class}/{day}`.
+4. For each cluster, `scan` emits one `Scanned<ToolFailed>` carrying service, tool, class, day, count, first, last, and the sample cut at 500 characters, with delivery id `scan:brent/{service}/{tool}/{class}/{day}`. `first` and `last` are slugs, so a timestamp outside the slug alphabet makes the event malformed and shows in the backfill's `rejected` count.
 5. The runtime admits each scanned event through the store. A delivery id it has already seen is a duplicate and goes no further. The workflow key is `{service}:{tool}:{class}:{day}`, so one run is active per cluster.
-6. Gather compares `count` to the class threshold. Below it, the facts are `Quiet`. At or above it, they are `Loud` with the owning repository and the report.
-7. Policy maps `Quiet` to no effects and `Loud` to one `Effect::File` with the static title `Brent: failed tool calls`, the target, and the body.
-8. In live mode the runtime queues the effect in the outbox and the tracker files it. In dry-run mode it records what would have happened and calls no provider.
-
-The report is composed in `scan`, where the text is already tainted, because `Untrusted::map` takes a `fn` and cannot capture the clean fields (ivy/almanac#4). The title is `&'static str` (ivy/almanac#2), so the body's first lines carry what the title would. When either lands upstream, the body or title moves without changing the flow.
+6. Gather compares `count` to the class threshold. Below it, the facts are `Quiet`. At or above it, they are `Loud` with the owning repository, the clean fields the title needs, and the body: a header of the clean fields joined to the tainted sample with `Untrusted::join`.
+7. Policy maps `Quiet` to no effects and `Loud` to one `Effect::File` with a `title!` built from the clean fields, the target, and the body.
+8. In live mode the runtime queues the effect in the outbox and the tracker files it. In dry-run mode it records what would have happened and applies no effect.
 
 Thresholds live in gather, not in `scan`. Every cluster becomes an event, so the run log records the quiet ones, and a replay with a changed threshold re-decides old events without re-reading transcripts.
 
@@ -161,7 +161,7 @@ The durable dedupe lives in PostgreSQL. Without `DATABASE_URL`, almanac uses an 
 
 ## Issue content
 
-Title: `Brent: failed tool calls`. Static until ivy/almanac#2 lands, so the body opens with the specifics.
+Title: `Brent: {service}/{tool} {class} on {day} (count {count})`, built with `title!`, so only clean values reach it.
 
 Body, which almanac's tracker fences as a code block so no mention or markup inside it does anything:
 
@@ -174,7 +174,7 @@ The tracker adds the `almanac` label and its own marker. Nothing else goes in th
 
 Error messages come from a bot that reads Josh's email, so a sample can quote a message body. Three rules:
 
-- Error text is a `Sample` from the moment the reader parses the line. It has no accessor and its `Debug` hides the text, so no error message, log line, or panic in this crate can repeat it. It leaves only through `narrow` into a class name or `compose` into the report. The report is `Untrusted<String>` from the moment `scan` emits it, and stays tainted through the event, the facts, the effect, and the outbox. Almanac's taint type has no accessor either. The text never reaches a prompt, and this workflow calls no model.
+- Error text is a `Sample` from the moment the reader parses the line. It has no accessor and its `Debug` hides the text, so no error message, log line, or panic in this crate can repeat it. It leaves only through `narrow` into a class name or `excerpt` into the event. The sample is `Untrusted<String>` from the moment `scan` emits it, and stays tainted through the event, the facts (where `Untrusted::join` puts the clean header in front of it), the effect, and the outbox. Almanac's taint type has no accessor either. The text never reaches a prompt, and this workflow calls no model.
 - The tracker refuses a public target. `providers.rs` wraps the GitHub tracker in `PrivateOnly`, which asks `/repos/{target}` and files only when the repository answers `private: true`. A private answer is cached for the process, so a target is asked once. A public answer or a failed lookup refuses the delivery and is asked again on the retry, so an outage at GitHub never lets text through. The ownership table is a closed set of two private repositories, but a repository can go public later, and the body carries transcript text.
 - The identity regexes scan the whole `details` string, so error text could spoof `serverName`. v0 accepts that: the owner table is a closed two-repo map, both private, and every delivery still passes `PrivateOnly`.
 - Nothing in this repository holds transcript text. Fixtures are synthetic, errors name the shape and never repeat the text, and `scripts/check-forbidden` runs before every commit and push.
@@ -194,10 +194,10 @@ The binary has almanac's verbs. `synth` prints the manifest. `check` validates p
 
 Three things to know before trusting a build:
 
-- Plain `check` validates only the providers the workflow body uses. The transcript directory and the tracker are used by the scan and the effect, so run `ALMANAC_MODE=live brined-almanac check` to have them validated too (ivy/almanac#1).
-- `backfill --dry-run` spends the workflow's `runs_per_hour` budget (ivy/almanac#3). The first backfill over two months of transcripts produced 137 clusters, so the workflow declares `runs_per_hour = 1000`. Configuration can only lower it.
+- `check` validates what the scan needs too, because `scan` carries `#[scan]` (ivy/almanac#1). The tracker is used only by the effect, so `mise run live -- check` is still how to validate the GitHub side.
+- `backfill --dry-run` spends the workflow's `runs_per_hour` budget, and upstream keeps it that way because agents run in a dry run (ivy/almanac#3). The first backfill over two months of transcripts produced 137 clusters, so the workflow declares `runs_per_hour = 1000`. Configuration can only lower it.
 - v0 runs on the Mac, by hand, over transcripts pulled with `openclaw-ro`. The daemon, a timer, and reading picklelab's store directly are a deployment document.
-- A dry run against a real store admits every delivery id, so a dry run followed by a live run files nothing (verified 2026-11-06: 102 rows in `seen` after one `backfill --dry-run`, the next run all unchanged). Dry runs therefore stay on the in-memory store; only `mise run live` sets `DATABASE_URL`. The README's "Running it" section has the operator steps.
+- A dry run keeps its own rows in the store, under `<almanac>.dry-run`, so it no longer hides work from a live run (fixed upstream in ivy/almanac#3, after we saw 102 rows in `seen` from one dry run on 2026-11-06). Dry runs still need no database, and only `mise run live` sets `DATABASE_URL`. The README's "Running it" section has the operator steps.
 
 ## Errors
 
@@ -217,7 +217,7 @@ No transcript is ever committed. `tests/` holds a builder that writes synthetic 
 Tests, all offline, against almanac's in-memory store and fakes:
 
 - `transcript::read` yields the expected `ToolError` records for each of the three tool-id spellings, reads service and tool from `details` when present, falls back to the call id when not, uses `content` when `details` is empty, ignores results that are not errors, reads an event id once, and skips the non-JSON lines.
-- A 600-character error classifies from its full text, and its sample in the report is 500 characters. Printing a `ToolError` with `{:?}` never shows the text.
+- A 600-character error classifies from its full text, and its sample in the event is 500 characters. Printing a `ToolError` with `{:?}` never shows the text.
 - `classify` maps each sample text in the class table to its class, and an unknown text to `other`.
 - A directory with 12 `Approval timed out` results on `triage_apply` on one day produces one `ToolFailed` with count 12.
 - Scanning the same directory twice in one runtime reports the second scan as all duplicates. This is what proves the delivery ids are stable.
@@ -236,7 +236,7 @@ Checked again 2026-11-06 after the merge, by tabulating every cluster's target, 
 
 **The Python package this document replaces.** Dataclasses, a `str(dict)` parser, dedupe by markers in issue bodies, and an update path that rewrote the body when a count grew. The spike matched its counts in 285 lines of Rust, with the dedupe, the budget, and the dry run coming from almanac. Dropped 2026-11-06.
 
-**Fork almanac.** Would let the title and body limits be fixed locally. A fork of a library that changes hourly is a merge every day. The four issues are filed upstream, and the workarounds (a static title, the body composed in `scan`) cost nothing to remove later.
+**Fork almanac.** Would let the title and body limits be fixed locally. A fork of a library that changes hourly is a merge every day. The four issues were filed upstream, and all four were fixed within a day, which removed the workarounds (a static title, the body composed in `scan`).
 
 **No ledger.** The Python draft argued that the transcripts do not change, so replay is rerunning the scan, and a database would be scaffolding with no reader. That was wrong once the dedupe moved into almanac: the store is where "already filed" lives, and without it a live rerun files every cluster again. Reversed.
 
