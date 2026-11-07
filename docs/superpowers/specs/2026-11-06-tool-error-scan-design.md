@@ -1,16 +1,22 @@
 # Tool error scan: design
 
-Status: draft for review, 2026-11-06.
+Status: draft for review, 2026-11-06. Supersedes the Python design of the same date, after a spike built the same workflow on ivy/almanac and matched it cluster for cluster.
 
-brined-almanac watches Josh's running services the way [ivy/almanac](https://github.com/ivy/almanac) watches ivy's repositories. Events come in, code deduplicates and correlates them, a pure policy decides, and a small closed set of effects goes out. A model is called only where judgment is needed, and this first workflow needs none.
+brined-almanac is an almanac in the sense of [ivy/almanac](https://github.com/ivy/almanac): a Rust binary that receives events, deduplicates and correlates them, gathers facts, applies a pure policy, and produces a small closed set of effects. It watches Josh's running services the way ivy's almanac watches ivy's repositories. A model is called only where judgment is needed, and this first workflow needs none.
 
-This document designs the first workflow. It reads OpenClaw transcripts from the Brent deployment on picklelab, groups failed tool calls into clusters, and files one GitHub issue per cluster on the repository that owns the failing tool.
+This document designs the first workflow. It reads OpenClaw transcripts from the Brent deployment on picklelab, groups failed tool calls into clusters, and files one GitHub issue per cluster on the private repository that owns the failing tool.
 
 ## Why this workflow first
 
 Brent has no error tracker. The only record of a failed tool call is the session transcript, and the only alerting is Josh noticing. On 2026-11-06 a Claude session spent its whole run reading about 600 transcript messages to measure that `triage_apply` had timed out 12 times on Nov 4 and that session size had grown from 42 to 93 threads. Every one of those facts is arithmetic over JSONL. The judgment ("batch the Gmail calls, commit per item") took one paragraph at the end.
 
 The scan does the arithmetic. It leaves the judgment to whoever picks up the issue.
+
+## Why build on almanac
+
+The first draft of this design was a Python package with its own dedupe markers in issue bodies. A spike on 2026-11-06 rebuilt it as an almanac workflow in 285 lines of Rust and ran `backfill --dry-run` over the same three transcripts. It found the same 137 clusters and the same 37 clusters worth an issue. Almanac already owns the parts the Python draft had to invent: durable dedupe by delivery id, one run per key, a tracker adapter that files GitHub issues, a dry-run mode that calls no provider, a budget per workflow, and a taint type that keeps transcript text out of anything a model would read. The spike's code is the shape this document describes.
+
+The dependency is by git with a pinned revision, not a fork. The library is `publish = false` at version `0.0.0` and changes hourly, so the pin is the only stable reference. Bumping it is an edit to `Cargo.toml` and a rebuild. The spike proved this form builds at `32c2866` with both the `almanac` and `github` crates resolving as workspace members.
 
 ## What the data looks like
 
@@ -48,165 +54,187 @@ Error classes present in the data, by the text that identifies them:
 
 ## Shapes
 
-The scan is a pipeline of pure functions over these records. Names are final unless implementation finds a reason to change them, and the reason gets written here.
+The scan is a pipeline over these records. Names are final unless implementation finds a reason to change them, and the reason gets written here.
 
-```python
-@dataclass(frozen=True)
-class ToolError:
-	event_id: str
-	at: datetime            # UTC
-	run_id: str | None
-	source_file: str        # basename, for the issue body
-	service: str            # "brineworks", "gog", "openclaw"
-	tool: str               # "triage_apply", "read"; never the meta-tool
-	raw_tool_id: str        # what the model wrote, for the sample
-	message: str            # error text, untrusted, truncated to 500 chars
+```rust
+/// One failed tool call, as the reader yields it. The only type that knows the JSONL shape.
+pub struct ToolError {
+	pub event_id: String,
+	pub at: String,         // ISO 8601, UTC, as written in the transcript
+	pub service: String,    // "brineworks", "gog", "openclaw"
+	pub tool: String,       // "triage_apply", "read"; never the meta-tool
+	pub text: String,       // error text, untrusted, truncated to 500 chars
+}
 
-ErrorClass = str            # one of the table's class names
+/// What a cluster is grouped by.
+pub struct ClusterKey {
+	pub service: String,
+	pub tool: String,
+	pub class: &'static str, // a row of the class table, or "other"
+	pub day: String,         // "2026-11-04", UTC
+}
 
-@dataclass(frozen=True)
-class ClusterKey:
-	service: str
-	tool: str
-	error_class: ErrorClass
-	day: date               # UTC
+/// Everything the scan knows about one key.
+pub struct Cluster {
+	pub count: u64,
+	pub first: String,
+	pub last: String,
+	pub sample: String,     // the first error text seen
+}
 
-@dataclass(frozen=True)
-class Cluster:
-	key: ClusterKey
-	count: int
-	first_at: datetime
-	last_at: datetime
-	run_ids: frozenset[str]
-	samples: tuple[str, ...]   # up to 3 messages
+observed! {
+	/// One cluster, as the runtime sees it. `report` is composed from transcript text, so it is tainted.
+	pub struct ToolFailed {
+		pub service: Slug,
+		pub tool: Slug,
+		pub class: Slug,
+		pub day: Slug,
+		pub count: u64,
+		pub report: Untrusted<String>,
+	}
+}
 
-@dataclass(frozen=True)
-class FileIssue:
-	repo: str               # "technicalpickles/brineworks"
-	key: str                # "almanac:tool-errors:brineworks/triage_apply/approval-timeout/2026-11-04"
-	title: str
-	body: str
-
-@dataclass(frozen=True)
-class UpdateIssue:
-	repo: str
-	number: int
-	body: str               # rewritten facts, same key marker, new count marker
-	comment: str            # "count 10 -> 12, last seen 21:14Z"
-
-@dataclass(frozen=True)
-class Skip:
-	key: str
-	reason: str
-
-Effect = FileIssue | UpdateIssue | Skip
-
-@dataclass(frozen=True)
-class ExistingIssue:
-	repo: str
-	number: int
-	count: int              # read from the body's count marker
-	closed: bool
+/// What gather hands to policy.
+pub enum Facts {
+	Quiet,
+	Loud { target: Slug, body: Untrusted<String> },
+}
 ```
+
+`ToolFailed` is the workflow's event. Its `KIND` is `brent.tool.failed`, and `parse` reads each field from the payload with `Payload::field`, and `report` with `Payload::text`, so the text arrives tainted. `Slug` is almanac's validated identifier (ASCII alphanumerics and `._/-:@[]`, at most 200 characters), and the scan maps any other character to `-` before building one.
+
+Run ids are not read in v0. The spike did without them and the issue reader has the day and the sample to find the session.
 
 Two tables hold the domain knowledge, so adding a class or a service is a row, not a branch:
 
-- The class table maps a regular expression to a class name and a filing threshold.
-- The ownership table maps a service to a repository. `brineworks` goes to `technicalpickles/brineworks`. `gog`, `memory-core`, and OpenClaw's own tools go to `technicalpickles/pickleclaw`, because that repository owns the MCP manifest and the tool policy.
+- The class table maps a regular expression to a class name and a filing threshold. It is the table above, with `other` at 3.
+- The ownership table maps a service to a repository. `brineworks` goes to `technicalpickles/brineworks`. Every other service (`gog`, `memory-core`, and OpenClaw's own tools) goes to `technicalpickles/pickleclaw`, because that repository owns the MCP manifest and the tool policy.
 
 ## Modules
 
 ```
-brined_almanac/
-	sources/openclaw_transcript.py   # Path -> Iterable[ToolError]; the only code that knows the JSONL shape
-	workflows/tool_errors.py         # classify, cluster, decide; pure, no I/O
-	effects/github_issues.py         # find existing issues by key, apply FileIssue and UpdateIssue through gh
-	cli.py                           # brined-almanac errors scan DIR [--since DAY] [--min-count N] [--apply]
+Cargo.toml                  almanac and github by git, rev pinned; an empty [workspace] table so the crate stands alone
+almanac.toml                runtime settings, which can only tighten what the binary declares
+src/main.rs                 almanac::main("brined-almanac", workflows::all, providers::all)
+src/lib.rs
+src/transcript.rs           PathBuf -> Vec<ToolError>; the only code that knows the JSONL shape
+src/workflows/mod.rs        registers the workflows
+src/workflows/tool_failures.rs   the class and ownership tables, ToolFailed, cluster, scan, gather, policy
+src/providers.rs            Transcripts from BRENT_TRANSCRIPTS; a Tracker, wrapped in PrivateOnly
+tests/                      the synthetic transcript builder and the tests below
 ```
 
-`sources` and `effects` are the boundaries and hold all the validation and all the subprocess calls. `workflows` trusts its inputs and does no I/O, so a test runs it on fixtures with no network.
+`transcript.rs` and `providers.rs` are the boundaries. The reader holds every rule about the file format, including the Python-repr regexes and the skipped lines. The providers hold every environment variable and every network client. The workflow trusts its inputs. Policy does no I/O, so a test runs it on a `Facts` value with no network.
 
 ## Data flow
 
-1. `cli` lists `*.jsonl` under `DIR`.
-2. `sources.openclaw_transcript.read` parses each file, skips lines that are not JSON, joins each error result to its call by `toolCallId`, and yields one `ToolError` per event id. A second occurrence of an event id across files is dropped.
-3. `workflows.tool_errors.classify` assigns each error a class from the class table. The first matching row wins. No row matches gives `other`.
-4. `workflows.tool_errors.cluster` groups by `ClusterKey` and builds one `Cluster` per key.
-5. `workflows.tool_errors.decide` takes the clusters and a map from key to `ExistingIssue`, and returns effects. A cluster below its class threshold is a `Skip`. A cluster with no existing issue is a `FileIssue`. A cluster whose issue is open and whose count grew is an `UpdateIssue` with the rewritten body and one comment naming the old and new counts. A closed issue, or an unchanged count, is a `Skip`.
-6. `cli` prints every effect. With `--apply` it also runs them through `effects.github_issues`. Without `--apply` nothing is written, which is the same safe default as the scripts in `impressed-hosting`.
+1. The runtime calls `scan` once per `backfill`, or on its scan interval when the daemon runs.
+2. `scan` takes the `Transcripts` directory from the `Scanner`, and `transcript::read` parses every `*.jsonl` under it. For each event it records `toolCall` blocks by id, so an error result joins to the tool the model asked for through `toolCallId`. It reads service and tool from `details.tool.mcp` by regex, because `details` is a Python repr. When that fails and the tool is `tool_call`, it splits the call's id on `__` after stripping any `mcp:` prefix. Otherwise the service is `openclaw` and the tool is `toolName`. Empty `details` falls back to the result's `content`. A line that is not JSON is skipped and counted. A second occurrence of an event id is dropped.
+3. `scan` classifies each error with the class table. The first matching row wins, and no match is `other`. It clusters by `ClusterKey`, with the day taken from the first ten characters of the timestamp.
+4. For each cluster, `scan` composes the report (service, tool, class, day, count, first, last, and the sample) and emits one `Scanned<ToolFailed>` with delivery id `scan:brent/{service}/{tool}/{class}/{day}`.
+5. The runtime admits each scanned event through the store. A delivery id it has already seen is a duplicate and goes no further. The workflow key is `{service}:{tool}:{class}:{day}`, so one run is active per cluster.
+6. Gather compares `count` to the class threshold. Below it, the facts are `Quiet`. At or above it, they are `Loud` with the owning repository and the report.
+7. Policy maps `Quiet` to no effects and `Loud` to one `Effect::File` with the static title `Brent: failed tool calls`, the target, and the body.
+8. In live mode the runtime queues the effect in the outbox and the tracker files it. In dry-run mode it records what would have happened and calls no provider.
 
-`--min-count N` raises every class threshold to at least `N`. It cannot lower one. Configuration only tightens.
+The report is composed in `scan`, where the text is already tainted, because `Untrusted::map` takes a `fn` and cannot capture the clean fields (ivy/almanac#4). The title is `&'static str` (ivy/almanac#2), so the body's first lines carry what the title would. When either lands upstream, the body or title moves without changing the flow.
 
-## Idempotency
+Thresholds live in gather, not in `scan`. Every cluster becomes an event, so the run log records the quiet ones, and a replay with a changed threshold re-decides old events without re-reading transcripts.
 
-A rerun over the same files must change nothing. Three mechanisms:
+## Dedupe
 
-- Event ids deduplicate within a run.
-- The issue body carries `<!-- almanac-key: ... -->` and `<!-- almanac-count: N -->`. Before deciding, `effects.github_issues.existing` lists issues with the `almanac` label on each owned repository, open and closed, and reads both markers out of each body. That map is the "existing" input to `decide`. An update rewrites the body, so the count marker always holds the last count the scan saw.
-- A closed issue counts as existing and is never updated or reopened. A new day is a new key, so a recurring problem files again tomorrow.
+A rerun over the same files must change nothing. Three mechanisms, and only the first is this crate's:
 
-The scan has no state of its own. The issues are the ledger. If a later workflow needs replay or budgets, a ledger goes behind `effects/` and the pure middle does not change.
+- Event ids deduplicate within one scan.
+- The store deduplicates events by source and delivery id, durably (ivy/almanac requirement R-24). A scanned event with an id the store has seen is dropped before a run starts.
+- The GitHub tracker writes a marker into each issue body carrying the outbox key, and checks for it before posting, so a retried delivery never files twice.
+
+The delivery id carries no state. A cluster that grows during a day keeps the same id, so the store drops the second scan of it and the issue keeps the count it was filed with. v0 accepts losing intra-day growth. Carrying state in the id (a count, or a last-seen time) would file a new issue on every change, which is worse. A new day is a new id, so a recurring problem files again tomorrow.
+
+The durable dedupe lives in PostgreSQL. Without `DATABASE_URL`, almanac uses an in-memory store that forgets everything when the process exits, and the tracker's marker is the outbox key, which is per run, so a second live `backfill` would file every cluster again. Dry runs need no database. Live runs set `DATABASE_URL` to a PostgreSQL on loopback. Where that PostgreSQL comes from is a deployment step, not this design.
 
 ## Issue content
 
-Title: `<tool> <class> on <day>`, for example `triage_apply approval-timeout on 2026-11-04`. The count is not in the title because it changes.
+Title: `Brent: failed tool calls`. Static until ivy/almanac#2 lands, so the body opens with the specifics.
 
-Body:
+Body, which almanac's tracker fences as a code block so no mention or markup inside it does anything:
 
-- The key marker.
-- A facts table: service, tool, class, count, first and last time, run ids, source files.
-- Up to three sample error messages in a fenced block, each cut at 500 characters.
-- The count marker.
-- One line saying brined-almanac filed it from a transcript scan and that a rerun rewrites the facts and adds a comment when the count grows.
+- `service`, `tool`, `class`, `day`, `count`, `first`, `last`, one per line.
+- A blank line, then `sample:` and the first error text seen, cut at 500 characters.
 
-Label: `almanac`. The applier creates the label on a repository that lacks it.
+The tracker adds the `almanac` label and its own marker. Nothing else goes in the body. There is no count marker and no update path: the issue is a snapshot of the day the cluster crossed its threshold.
 
 ## Untrusted text
 
-Error messages come from a bot that reads Josh's email, so a sample can quote a message body. Two rules:
+Error messages come from a bot that reads Josh's email, so a sample can quote a message body. Three rules:
 
-- The scan never passes a message to a model. It is data in a table.
-- `effects.github_issues` refuses to file on a repository that is not private. It checks `gh repo view --json isPrivate` once per repository per run.
+- The report is `Untrusted<String>` from the moment `scan` composes it, and stays tainted through the event, the facts, the effect, and the outbox. Almanac's taint type has no accessor, so nothing in this crate can read the text back out. It never reaches a prompt, and this workflow calls no model.
+- The tracker refuses a public target. `providers.rs` wraps the GitHub tracker in `PrivateOnly`, which fetches `/repos/{target}` once per target per process and files only when the repository answers `private: true`. The ownership table is a closed set of two private repositories, but a repository can go public later, and the body carries transcript text.
+- Nothing in this repository holds transcript text. Fixtures are synthetic, errors name the shape and never repeat the text, and `scripts/check-forbidden` runs before every commit and push.
 
 Pulls made with `openclaw-ro` already pass through its gitleaks gate, which masks key-shaped strings. The scan does not add a second redactor.
 
+## Operations
+
+The binary has almanac's verbs. `synth` prints the manifest. `check` validates providers. `backfill [--dry-run]` runs the scan once. `run` stays up and scans on an interval. Settings come from the environment:
+
+| Variable | Holds |
+|---|---|
+| `BRENT_TRANSCRIPTS` | The directory of `*.jsonl` files. Defaults to `transcripts`. |
+| `GITHUB_TOKEN` | Enables the GitHub tracker. Without it, a `LogTracker` prints each would-be issue to stdout. |
+| `DATABASE_URL` | PostgreSQL. Required for live runs, optional for dry runs. |
+| `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
+
+Three things to know before trusting a build:
+
+- Plain `check` validates only the providers the workflow body uses. The transcript directory and the tracker are used by the scan and the effect, so run `ALMANAC_MODE=live brined-almanac check` to have them validated too (ivy/almanac#1).
+- `backfill --dry-run` spends the workflow's `runs_per_hour` budget (ivy/almanac#3). The first backfill over two months of transcripts produced 137 clusters, so the workflow declares `runs_per_hour = 1000`. Configuration can only lower it.
+- v0 runs on the Mac, by hand, over transcripts pulled with `openclaw-ro`. The daemon, a timer, and reading picklelab's store directly are a deployment document.
+
 ## Errors
 
-- A line that is not JSON is counted and reported at the end. It is never fatal.
-- An error result with no usable `details` becomes `service="openclaw"`, `tool=<toolName>`, class `other`, with the raw `content` as its message.
-- `gh` failing on one effect stops the run with a nonzero exit. Effects already applied are listed so the operator knows what landed. The next run is safe because of the idempotency rules above.
+- A line that is not JSON is counted and reported at the end of the scan. It is never fatal.
+- An error result with no usable `details` becomes `service = openclaw`, `tool = toolName`, class `other`, with the result's `content` as its text.
+- A transcript directory that cannot be read, or a file in it that cannot be read, fails the scan with the path. Almanac reports the failed scan and files nothing.
+- A tracker failure fails that delivery. Almanac retries it up to its attempt cap, and the marker check makes the retry safe.
+- A public target fails the delivery with the repository's name. Nothing is filed.
+
+Errors in this crate name the path or the repository, never the transcript text.
 
 ## Testing
 
-Fixtures under `tests/fixtures/` are trimmed and redacted slices of the pulled transcripts:
+No transcript is ever committed. `tests/` holds a builder that writes synthetic JSONL to a temporary directory: a call block with a tool id in any of the three spellings, an error result with a Python-repr `details`, an error result with empty `details`, and lines that are not JSON. `.forbidden-patterns` matches the role and metadata keys a real transcript line carries, so the builder spells those two keys through constants. The source then passes the hook, and a pasted real line still trips it.
 
-- Nov 4, the 12 approval timeouts on `triage_apply`.
-- Oct 22, the `too many clients` burst across `tasks_*`.
-- A file with the three tool-id spellings and two lines that are not JSON.
+Tests, all offline, against almanac's in-memory store and fakes:
 
-Tests, all offline:
+- `transcript::read` yields the expected `ToolError` records for each of the three tool-id spellings, reads service and tool from `details` when present, falls back to the call id when not, uses `content` when `details` is empty, and skips the non-JSON lines.
+- `classify` maps each sample text in the class table to its class, and an unknown text to `other`.
+- A directory with 12 `Approval timed out` results on `triage_apply` on one day produces one `ToolFailed` with count 12.
+- Scanning the same directory twice in one runtime reports the second scan as all duplicates. This is what proves the delivery ids are stable.
+- The policy files at the threshold with the owning repository as target, stays quiet one below it, and routes `brineworks` and `gog` to their repositories.
+- `PrivateOnly` refuses to file when a fake client answers `private: false`, and files when it answers `true`.
 
-- `read` yields the expected `ToolError` records from each fixture, including the join through `toolCallId` and the fallback when `details` is empty.
-- `classify` maps each sample text in the class table to its class.
-- `cluster` turns the Nov 4 fixture into one cluster with count 12.
-- `decide` files on an empty existing map, updates when the count grew, skips when it did not, skips a closed issue, and skips below threshold. Running `decide` twice on the same clusters with the first run's effects folded into the existing map yields only `Skip`. `--min-count` only raises.
-- The dry run prints a stable listing. A snapshot test guards it.
-
-The real check after implementation is a dry run over the three pulled transcripts on the Mac, compared by hand against the counts in the table above.
+The real check after implementation is `backfill --dry-run` over the three pulled transcripts on the Mac, compared by hand against the counts in the class table. The spike matched them.
 
 ## Alternatives considered
 
-**A ledger from day one.** ivy/almanac records every observation in PostgreSQL so a run can be replayed without re-reading the source. Here the source is a directory of files that do not change, so replay is rerunning the scan. The ledger would be scaffolding with no reader. It goes in when a workflow needs budgets or cross-run correlation.
+**The Python package this document replaces.** Dataclasses, a `str(dict)` parser, dedupe by markers in issue bodies, and an update path that rewrote the body when a count grew. The spike matched its counts in 285 lines of Rust, with the dedupe, the budget, and the dry run coming from almanac. Dropped 2026-11-06.
 
-**Bash and jq, next to the two picklehome watchdogs.** Cheapest today and consistent with how `exec-approvals-watch` and `brineworks-server-watch` are built. The join through `toolCallId`, the `str(dict)` parse, and the class table are where it falls over, and there is no way to commit a fixture and prove the Nov 4 case. The watchdogs are one-signal checks. This is a parser.
+**Fork almanac.** Would let the title and body limits be fixed locally. A fork of a library that changes hourly is a merge every day. The four issues are filed upstream, and the workarounds (a static title, the body composed in `scan`) cost nothing to remove later.
 
-**Taskwarrior instead of GitHub issues.** Taskwarrior is the backlog, and a task per cluster would land on Josh's list without opening GitHub. The facts table has nowhere to live in a task, and the scan would need the task database wherever it runs. Decided 2026-11-06 for issues on the owning repository, with a taskwarrior pointer left to the person triaging.
+**No ledger.** The Python draft argued that the transcripts do not change, so replay is rerunning the scan, and a database would be scaffolding with no reader. That was wrong once the dedupe moved into almanac: the store is where "already filed" lives, and without it a live rerun files every cluster again. Reversed.
 
-**Brineworks container logs as a second source.** Asked for, and right. Today the server logs nothing per MCP call (taskwarrior `34325580-f7f0-4141-8c15-7d2c0f13780a`), so the source is empty until that lands. The `sources/` boundary is where it plugs in.
+**Filter quiet clusters in `scan`.** Would spend fewer runs on the budget, because only clusters at threshold would become events. It would also leave the quiet clusters out of the run log, and a threshold change would need a rescan instead of a replay. Thresholds stay in gather.
+
+**Bash and jq, next to the two picklehome watchdogs.** Cheapest today and consistent with how `exec-approvals-watch` and `brineworks-server-watch` are built. The join through `toolCallId`, the Python-repr parse, and the class table are where it falls over, and there is no way to commit a fixture and prove the Nov 4 case. The watchdogs are one-signal checks. This is a parser.
+
+**Taskwarrior instead of GitHub issues.** Taskwarrior is the backlog, and a task per cluster would land on Josh's list without opening GitHub. The facts have nowhere to live in a task, and the scan would need the task database wherever it runs. Decided 2026-11-06 for issues on the owning repository, with a taskwarrior pointer left to the person triaging.
+
+**Brineworks container logs as a second source.** Asked for, and right. Today the server logs nothing per MCP call, so the source is empty until that lands. A second reader beside `transcript.rs` is where it plugs in.
 
 ## Out of scope
 
 - Telegram alerts. The issue is the alert. Josh can watch the `almanac` label.
-- Running on picklelab. First runs happen on the Mac over `openclaw-ro` pulls. A timer that reads the SQLite store directly is a deployment step with its own design.
-- impressed-hosting. Same shape, different source. Next workflow.
+- Running on picklelab. First runs happen on the Mac over `openclaw-ro` pulls. A timer that reads the SQLite store directly, and the PostgreSQL it needs, are a deployment document.
+- OSS maintenance on Josh's public repositories. That is almanac's native GitHub source and the second workflow.
 - Any model call.
