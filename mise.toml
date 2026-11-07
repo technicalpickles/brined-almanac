@@ -1,7 +1,12 @@
 [tools]
 hk = "2.7.1"
 gitleaks = "8.30.1"
+rust = "1.99.0"
 
 [tasks.check]
 description = "Run every guardrail by hand (gitleaks and the forbidden-strings check)"
 run = "hk check"
+
+[tasks.test]
+description = "Run the unit and integration tests"
+run = "cargo test"

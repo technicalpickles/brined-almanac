@@ -33,21 +33,39 @@ local forbidden_tree = new Step {
   }
 }
 
+local cargo_fmt = new Step {
+  check = new CommandSpec {
+    command = "cargo fmt --check"
+    effect = "read"
+  }
+}
+
+local cargo_clippy = new Step {
+  check = new CommandSpec {
+    command = "cargo clippy --all-targets -- -D warnings"
+    effect = "read"
+  }
+}
+
 hooks {
   ["pre-commit"] {
     steps {
+      ["fmt"] = cargo_fmt
       ["gitleaks"] = gitleaks_staged
       ["forbidden"] = forbidden_files
     }
   }
   ["check"] {
     steps {
+      ["fmt"] = cargo_fmt
+      ["clippy"] = cargo_clippy
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
     }
   }
   ["pre-push"] {
     steps {
+      ["clippy"] = cargo_clippy
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
     }
