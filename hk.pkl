@@ -47,12 +47,20 @@ local cargo_clippy = new Step {
   }
 }
 
+local shellcheck = new Step {
+  check = new CommandSpec {
+    command = "shellcheck puller/pull.sh puller/pull.test.sh scripts/check-forbidden scripts/image-smoke"
+    effect = "read"
+  }
+}
+
 hooks {
   ["pre-commit"] {
     steps {
       ["fmt"] = cargo_fmt
       ["gitleaks"] = gitleaks_staged
       ["forbidden"] = forbidden_files
+      ["shellcheck"] = shellcheck
     }
   }
   ["check"] {
@@ -61,6 +69,7 @@ hooks {
       ["clippy"] = cargo_clippy
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
+      ["shellcheck"] = shellcheck
     }
   }
   ["pre-push"] {
