@@ -14,7 +14,7 @@ cat >"$TMP/bin/ssh" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$TMP/ssh.log"
-shift 7
+shift 13
 case "$1" in
   sessions)
     [ ! -e "$TMP/fail-sessions" ] || { echo "ssh: connection refused"; exit 1; }
@@ -76,6 +76,7 @@ check "key file exit" 0 "$rc"
 check "key file mode" 600 "$(stat -c %a "$KEY_FILE" 2>/dev/null || stat -f %Lp "$KEY_FILE")"
 check "key file contents" "$key_text" "$(cat "$KEY_FILE")"
 check "ssh uses key" 1 "$(head -n1 "$TMP/ssh.log" | grep -c -e "-i $KEY_FILE")"
+check "ssh timeouts" 1 "$(head -n1 "$TMP/ssh.log" | grep -c -e "-o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4")"
 
 # 2. empty key
 rm -f "$TMP/ssh.log" "$KEY_FILE"

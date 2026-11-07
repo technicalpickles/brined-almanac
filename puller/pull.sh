@@ -37,7 +37,7 @@ install_key() {
 }
 
 remote() {
-  ssh -i "$KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes "$PULL_USER@$PULL_HOST" "$@"
+  ssh -i "$KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$PULL_USER@$PULL_HOST" "$@"
 }
 
 list_sessions() {

@@ -57,13 +57,18 @@ The item and field names above must match it.
 
 ### State directory
 
-Create the directory and write the service account token to it. Replace
-`<token>` with the token from step 4:
+Create the directory. Copy the token from step 4 in 1Password, then write it
+from the clipboard so it never appears on a command line:
 
 ```sh
 mkdir -p "$STATE/transcripts"
-printf '%s' '<token>' | install -m 600 /dev/stdin "$STATE/op-token"
+(umask 077; pbpaste > "$STATE/op-token")
+chmod 600 "$STATE/op-token"
 ```
+
+To paste into the terminal instead, use `read -rs token` and then
+`(umask 077; printf '%s' "$token" > "$STATE/op-token"); unset token`. Never put
+the token itself in a command.
 
 Write `$STATE/prod.env`:
 
@@ -146,36 +151,60 @@ start, and a restore into a migrated database fails on existing tables.
    mise run deploy --db-only
    ```
 
-2. Copy the interim store into prod's database:
+2. Make sure the interim database is running, then copy its store into prod's
+   database. Both commands stop on the first error:
 
    ```sh
-   docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac | env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac
+   docker start brined-almanac-d34bd55b-db-1
+   set -o pipefail
+   docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac | env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac
    ```
 
-   The dump carries `_sqlx_migrations`, so the almanac sees its migrations as
-   applied on start.
+   `docker start` does nothing if the container is already up. The dump carries
+   `_sqlx_migrations`, so the almanac sees its migrations as applied on start.
 
-3. Deploy the whole stack:
+   A failed dump or restore must not pass quietly. If either command exits
+   non-zero, stop here and fix it.
+
+3. Compare the two databases. Both pairs of counts must be equal:
+
+   ```sh
+   for q in 'select count(*) from seen' 'select count(*) from _sqlx_migrations'; do
+     docker exec brined-almanac-d34bd55b-db-1 psql -U almanac almanac -Atc "$q"
+     env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac -Atc "$q"
+   done
+   ```
+
+   The first two lines are `seen` (interim, then prod). The last two are
+   `_sqlx_migrations`. If either pair differs, the deploy stops here. Do not run
+   step 4. The restore is wrong, and the daemon would refile every cluster.
+
+4. Deploy the whole stack:
 
    ```sh
    mise run deploy
    ```
 
-4. Run the acceptance test:
+   The daemon's first scan is immediate, and the puller pulls every session
+   from the start.
+
+5. Confirm with a live backfill:
 
    ```sh
    mise run prod -- backfill
    ```
 
-   It must report 0 queued and every cluster unchanged. A different result
-   means the restore is wrong. Do not leave the stack running in live mode
+   It must report 0 queued and every cluster unchanged. This is the final
+   confirmation after the count comparison, not a probe. If the restore had
+   silently failed, this run would file every cluster again. A different result
+   means something is still wrong. Do not leave the stack running in live mode
    until you know why. To stop the daemon:
 
    ```sh
    env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml stop almanac
    ```
 
-5. Confirm the connection:
+6. Confirm the connection:
 
    ```sh
    mise run prod -- check
@@ -204,8 +233,12 @@ To run a verb against prod's store with prod's token:
 
 ```sh
 mise run prod -- check
-mise run prod -- backfill --dry-run
+mise run prod -- backfill
 ```
+
+Do not run `backfill --dry-run` against prod. A dry run still admits every
+delivery id into `seen`, so the filings a real run would make are suppressed
+for good.
 
 The `--` hands the verb and its arguments to `brined-almanac` in the running
 `almanac` container. Argument pass-through is not yet confirmed. If a flag does
@@ -234,7 +267,31 @@ on the Mac. Find the SHA with `docker images brined-almanac`.
 
 Migrations are forward-only. If the newer build ran a migration that the older
 build does not know, the rollback fails or misbehaves. In that case, restore
-the database from a `pg_dump` taken before the migration (see Backups).
+a dump taken before the migration (see Backups). A restore into a migrated
+database fails on existing tables, so recreate the database first. This uses
+`$STATE/backups/almanac-<date>.sql`; pick the dump you want.
+
+1. Stop the almanac container:
+
+   ```sh
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml stop almanac
+   ```
+
+2. Drop and recreate the database. This keeps the volume:
+
+   ```sh
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec db dropdb -U almanac --force almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec db createdb -U almanac almanac
+   ```
+
+3. Restore the dump:
+
+   ```sh
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac < "$STATE/backups/almanac-<date>.sql"
+   ```
+
+4. Retag the older images and recreate the containers through `op run`, as in
+   the two steps at the top of this section.
 
 Do not run `mise run deploy` to roll back. It rebuilds from the current commit
 and moves `prod` back.
@@ -250,8 +307,12 @@ and moves `prod` back.
   the file:
 
   ```sh
-  printf '%s' '<new token>' | install -m 600 /dev/stdin "$STATE/op-token"
+  (umask 077; pbpaste > "$STATE/op-token")
+  chmod 600 "$STATE/op-token"
   ```
+
+  Copy the new token from 1Password first. The `read -rs` flow from "State
+  directory" works too.
 
   The next `mise run deploy` uses it.
 
@@ -324,11 +385,12 @@ None are scheduled. Losing the `pgdata` volume refiles every issue. To take a
 dump by hand:
 
 ```sh
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db pg_dump -U almanac almanac > almanac-$(date +%F).sql
+mkdir -p "$STATE/backups"
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db pg_dump -U almanac almanac > "$STATE/backups/almanac-$(date +%F).sql"
 ```
 
-Take one before any deploy that adds a migration. Keep the file outside the
-repo.
+Take one before any deploy that adds a migration. The dump lives in the state
+directory, outside the repo.
 
 ## First deploy, 2026-11
 

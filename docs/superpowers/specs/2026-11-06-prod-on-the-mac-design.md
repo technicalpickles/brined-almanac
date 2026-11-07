@@ -243,8 +243,9 @@ process and the containers it creates.
 
 `mise run prod -- <verb>` runs `docker compose -f compose.prod.yaml exec
 almanac brined-almanac <verb>`, for an ad hoc `check` or `backfill` against
-prod's store with prod's token. A `backfill --dry-run` there is fine: prod's
-`seen` already holds everything prod has filed.
+prod's store with prod's token. Never `backfill --dry-run` there: backfill
+admits every delivery id into `seen` in either mode, so a dry run suppresses
+the filings a real run would make.
 
 Rollback: `docker tag brined-almanac:<older sha> brined-almanac:prod` and
 `up -d`. The migrations are forward-only, so rolling back past one that added
@@ -257,12 +258,16 @@ migrated database fails on existing tables:
 
 1. `mise run deploy` builds, then `up -d db` only (the task takes
    `--db-only`, used here and never again).
-2. `docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac |
-   docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac`.
+2. `docker start brined-almanac-d34bd55b-db-1`, then, under `set -o pipefail`,
+   `docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac |
+   docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac`.
    The dump carries `_sqlx_migrations`, so the almanac's start sees them applied.
 3. `mise run deploy` again, now the whole stack.
-4. `mise run prod -- backfill` must report 0 queued and every cluster
-   unchanged. That line is the acceptance test for the migration.
+4. Before this step, the counts of `seen` and `_sqlx_migrations` must match
+   between the interim container and prod's db; that comparison is the
+   acceptance test for the migration. `mise run prod -- backfill` must then
+   report 0 queued and every cluster unchanged. It is the confirmation, not a
+   probe: if the restore had failed it would file every cluster again.
 
 After that the main checkout's store is an ordinary dev store. The same change
 removes the `db:down` refusal on main, unpins its portool block, and rewrites
@@ -292,8 +297,9 @@ Proof, in order. Each step gates the next.
    tracker (it verifies providers are registered, not that the directory
    exists; the mount is proven by the backfill in step 3 and by the image
    smoke test's dry run against a mounted empty directory).
-3. After the restore: `mise run prod -- backfill` reports 0 queued, 102
-   unchanged. Nothing new appears in either repo's `almanac` label.
+3. After the restore, `seen` and `_sqlx_migrations` have equal counts in the
+   interim and prod databases. Then the live `mise run prod -- backfill`
+   confirms it: 0 queued, 102 unchanged. Nothing new appears in either repo's `almanac` label.
 4. The forced command: with the puller key, `ssh ... sessions` lists sessions;
    `ssh ... transcript <key> --since <ms>` streams events; `ssh ... version`,
    `ssh ... transcript <key> --last 5`, and an interactive `ssh` all exit 2
