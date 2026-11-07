@@ -136,12 +136,15 @@ pub fn read(dir: &Path) -> Result<Read, ReadError> {
     let mut skipped = Skipped::default();
 
     for path in paths {
-        let text = fs::read_to_string(&path).map_err(|source| ReadError::File {
+        let bytes = fs::read(&path).map_err(|source| ReadError::File {
             path: path.clone(),
             source,
         })?;
-        for line in text.lines() {
-            let Ok(event) = serde_json::from_str::<Value>(line) else {
+        for line in bytes.split(|b| *b == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(event) = serde_json::from_slice::<Value>(line) else {
                 skipped.not_json += 1;
                 continue;
             };

@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::io::Write;
 
 use brined_almanac::transcript::{At, Read, ReadError, read};
 use support::{Details, Failure, Fixture, Spelling};
@@ -127,6 +128,31 @@ fn lines_that_are_not_json_are_skipped_and_counted() {
     let result = read(fixture.path()).unwrap();
     assert_eq!(result.skipped.not_json, 12);
     assert_eq!(result.errors.len(), 1);
+}
+
+#[test]
+fn a_line_with_invalid_utf8_is_skipped_and_counted() {
+    let fixture = Fixture::new();
+    fixture
+        .file("a.jsonl")
+        .with(Failure::mcp("brineworks", "triage_apply"))
+        .write();
+    let path = fixture.path().join("a.jsonl");
+    let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    file.write_all(b"\xff\xfe not json\n").unwrap();
+    drop(file);
+    fixture
+        .file("b.jsonl")
+        .with(Failure::mcp("brineworks", "triage_apply"))
+        .write();
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.extend(fs::read(fixture.path().join("b.jsonl")).unwrap());
+    fs::write(&path, bytes).unwrap();
+    fs::remove_file(fixture.path().join("b.jsonl")).unwrap();
+
+    let result = read(fixture.path()).unwrap();
+    assert_eq!(result.errors.len(), 2);
+    assert_eq!(result.skipped.not_json, 1);
 }
 
 #[test]
