@@ -47,15 +47,25 @@ A repository can be in more than one tier. bktide is maintained and active while
 
 - **Status:** next.
 - **Watches:** pending taskwarrior tasks for active and deployed repositories.
-- **Closes:** a task when a merged pull request or a commit on main names it by UUID. The workflow annotates the task with the evidence and tags it `+almanac`, so I can review what it closed and reopen a mistake.
-- **Reports:** tasks that are probably done on weaker evidence, each with its evidence. Closing those is my decision, so the report goes to taskwarrior: one task per project per day that lists them.
-- **Model:** none for the first version. It checks evidence in code:
-  - a merged pull request whose title, body, or commits name the task. A UUID is enough to close it. A title or a description match only marks it.
-  - a file or line the task cites that no longer looks the way the task describes
-  - a later commit that mentions the task
+- **Closes:** a task when code confirms one of these:
+  - a merged pull request or a commit on main names the task by UUID
+  - the task cites a pull request that has merged, or an issue that has closed
+  - an agent's proof checks out (see below)
 
-  A model may judge the ambiguous cases later, under the budget rule.
-- **Why first:** it shrinks the backlog that the task-resurfacer has to choose from, and it needs no model. parked-handoffs checks the same kinds of evidence, so the two share that code.
+  Each closed task gets the evidence as an annotation and the `+almanac` tag. One taskwarrior task per day lists what closed, so I see every close and can reopen a mistake.
+- **Reports:** tasks that are probably done on weaker evidence, such as a merged pull request that touched the files the task cites, or a cited line that no longer looks the way the task describes. The report is one task per project per day.
+- **Evidence hunt:** for a task code can't decide, an agent reads the task and the repository and returns a proof. A proof is a list of checks code can run: a commit SHA on main, a file that must contain or lack a pattern, a test that must exist and pass, an issue or pull request that must be closed. Code runs every check. The task closes only if all of them pass. If the agent finds the work isn't done, it annotates the task with what's left, which is useful on its own. The proof is agent output, so it is untrusted until code has checked it.
+- **Model:** none for the UUID and cited-link checks. The evidence hunt is agent work under the budget rule, and suits the end of a window that would otherwise expire.
+- **Why first:** it shrinks the backlog that the task-resurfacer has to choose from, and its first version needs no model. parked-handoffs checks the same kinds of evidence, so the two share that code.
+
+### security-alerts
+
+- **Status:** next.
+- **Watches:** Dependabot, code scanning, and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API.
+- **Reports:** one item per repository per day that lists its open alerts by severity, and says whether an open Renovate or Dependabot pull request already fixes each one. A fix that is a pull request in a private repository files there as an issue. Everything else is a task, including alerts on public repositories and a leaked secret to rotate.
+- **Model:** none.
+- **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for picklelab's images and hosts instead of writing that here.
+- **Retired repositories:** their alerts are not reported. The count is evidence for the open question about archiving them.
 
 ### task-resurfacer
 
@@ -172,4 +182,4 @@ A repository can be in more than one tier. bktide is maintained and active while
 - **Filing to a public repository.** Issue bodies carry private text.
 - **Transcripts from the dev VM.** They are test traffic and would file noise.
 - **Work repositories.** I can't reach them from here.
-- **Closing tasks on weak evidence.** The reconciler closes a task only when the evidence names it by UUID. Everything else waits for me.
+- **Closing a task on a model's word.** An agent can find evidence. Only code that checks the evidence closes a task.

@@ -15,7 +15,8 @@ Questions about [vision.md](vision.md) and [workflows.md](workflows.md) that nee
 ## Agent work
 
 - Closing a taskwarrior task needs a new effect. Is it a method on the taskwarrior tracker, or an effect of its own? Does it also suit upstream, whose M4 plans a tracker provider?
-- Is a UUID in a merged pull request or a commit on main the right bar for closing a task? A commit can mention a task it only touches, as in "part of <uuid>".
+- A commit can mention a task it only touches, as in "part of <uuid>". Should a UUID close the task only after a keyword like "closes", or anywhere?
+- Which checks can an agent's proof contain? The draft allows a commit on main, a file pattern, a test that passes, and a closed issue or pull request. Running a test means running repository code, so it needs the sandbox.
 - Rerunning CI needs a new effect. Add it in this repository, or propose it upstream? Which principle covers it?
 
 ## Workflow design

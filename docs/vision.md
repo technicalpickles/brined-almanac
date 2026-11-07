@@ -14,6 +14,7 @@ Between bursts, nothing moves, and these things go stale.
 - **Lessons.** A burst in one project finds a gotcha and fixes it there. Other projects that have the same problem keep it until a burst happens to hit it again. On 2026-10-18 I reviewed a week of my own sessions for friction by hand and found items that had cost time in up to 16 sessions each. Nobody had done that review before, and nothing repeats it.
 - **Running services.** In October a service stopped after a reboot and stayed down for six days with nothing alerting. A plugin was enabled in config but never ran. Pull requests merged before CI finished, and some of them merged on red.
 - **Repositories.** Repos I am not working on go weeks without a dependency update, including ones that are deployed and still in use.
+- **Ops and security work.** On 2026-11-07, 13 of my repositories had 286 open Dependabot alerts. 103 were on jeweler, which is retired. dotfiles, cq and pickled-claude-plugins, which I use every day, had 34 between them. Nothing turns an alert into work I've planned, so it waits until a burst happens to land in that repository.
 
 I don't need more output during bursts. I need steady progress between them.
 
@@ -24,6 +25,8 @@ brined-almanac is a steady lane under the bursts. It has two tiers.
 **Watchers** make no model calls. They read transcripts, the forge, the backlog, and the services, and they report what they find. They cost nothing against my usage limits, so they run all the time.
 
 **Agent work** uses a model, either to judge something code can't decide or to do a small repair. It runs only on capacity I am not using, under the budget rule below.
+
+Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes almanac as how things outside the plan get into it, and it names vulnerability response as the same shape of problem as broken dependency updates. Here the plan is taskwarrior. Ops and security work that nobody scheduled, like an open advisory on a deployed app, is exactly what should get in.
 
 Everything upstream's [core principles](https://github.com/ivy/almanac/blob/main/docs/core-principles.md) say still holds. Behaviour is code, inference is the last resort, hostile text is a type, and almanac reports while the repository decides.
 
@@ -74,7 +77,7 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 
 - **Not a merge bot.** It reports. Branch protection and the repository's own rules merge.
 - **Not the backlog.** Taskwarrior is. Almanac reads the backlog and reports on it.
-- **Not a closer on a guess.** It closes a task only when a merged pull request or a commit on main names the task by UUID. It annotates the closed task with that evidence, so I can review it and reopen it. Weaker evidence marks the task as probably done, and I close it.
+- **Not a closer on a model's word.** It closes a task when code confirms the evidence, and an agent may go looking for that evidence. A model's opinion that a task is done never closes it, which is upstream's principle 4, ["a model can veto, never approve"](https://github.com/ivy/almanac/blob/main/docs/core-principles.md). Every close carries its evidence, so I can review it and reopen a mistake.
 - **Not a chat surface.** No Telegram alerts. Someone else's front end can read the issues.
 - **Not a reason to hit the limit.** If directed work ever stops because almanac spent the window, the budget rule is wrong.
 
@@ -86,4 +89,5 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 - A maintainer's question on one of my upstream issues gets an answer within days, and an upstream fix leads to deleting my workaround.
 - A service that stops is reported before I notice it.
 - Deployed repositories stay current without my attention.
+- An open security alert on a deployed, active, or maintained repository becomes tracked work within a day.
 - Directed work never runs into the usage limit because of something almanac did.
