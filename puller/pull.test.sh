@@ -23,6 +23,7 @@ case "$1" in
   transcript)
     key=$2
     since=$((10#$4))
+    cat >/dev/null
     [ ! -e "$TMP/fail.$key" ] || { echo '{"id":"partial"}'; exit 1; }
     jq -c --argjson s "$since" 'select(.timestamp_ms >= $s)' "$TMP/transcript.$key.jsonl"
     ;;
@@ -68,6 +69,8 @@ ssh_lines() { wc -l <"$TMP/ssh.log" | tr -d ' '; }
 
 # 1. key file
 echo '{"sessions":[]}' >"$TMP/sessions.json"
+echo old >"$KEY_FILE"
+chmod 644 "$KEY_FILE"
 run_pull
 check "key file exit" 0 "$rc"
 check "key file mode" 600 "$(stat -c %a "$KEY_FILE" 2>/dev/null || stat -f %Lp "$KEY_FILE")"
@@ -90,6 +93,7 @@ echo '[{"key":"agent:main:a","updatedAt":5000},{"key":"agent:main:heartbeat:x","
 run_pull
 check "first pass exit" 0 "$rc"
 check "first pass lines" 2 "$(lines "$TRANSCRIPTS/agent-main-a.jsonl")"
+check "transcript readable by daemon uid" 1 "$(( $(( 8#$(stat -c %a "$TRANSCRIPTS/agent-main-a.jsonl" 2>/dev/null || stat -f %Lp "$TRANSCRIPTS/agent-main-a.jsonl") )) & 4 ? 1 : 0 ))"
 check "first pass cursor" '{"agent:main:a":5001}' "$(cursor)"
 check "heartbeat file" absent "$(ls "$TRANSCRIPTS"/*heartbeat* >/dev/null 2>&1 && echo present || echo absent)"
 check "heartbeat not pulled" 0 "$(grep -c 'transcript agent:main:heartbeat' "$TMP/ssh.log" || true)"
@@ -137,6 +141,15 @@ echo '[{"key":"agent:main:direct:abc","updatedAt":3000}]' | jq -c '{sessions: .}
 event 1000 >"$TMP/transcript.agent:main:direct:abc.jsonl"
 run_pull
 check "safe key file" present "$([ -e "$TRANSCRIPTS/agent-main-direct-abc.jsonl" ] && echo present || echo absent)"
+
+# 9. two changed sessions in one pass
+echo '[{"key":"agent:main:p","updatedAt":3000},{"key":"agent:main:q","updatedAt":4000}]' |
+  jq -c '{sessions: .}' >"$TMP/sessions.json"
+event 1000 >"$TMP/transcript.agent:main:p.jsonl"
+event 2000 >"$TMP/transcript.agent:main:q.jsonl"
+run_pull
+check "two sessions p" 1 "$(lines "$TRANSCRIPTS/agent-main-p.jsonl")"
+check "two sessions q" 1 "$(lines "$TRANSCRIPTS/agent-main-q.jsonl")"
 
 [ "$fails" -eq 0 ] || { echo "$fails failed"; exit 1; }
 echo "all passed"

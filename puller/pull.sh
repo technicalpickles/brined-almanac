@@ -21,13 +21,18 @@ log() { echo "puller: $*" >&2; }
 safe_key() { printf '%s\n' "$1" | tr -c 'A-Za-z0-9_\n-' '-'; }
 
 install_key() {
+  local tmp
   if [ -z "${PULLER_KEY:-}" ]; then
     log "PULLER_KEY is empty"
     return 1
   fi
-  umask 077
   mkdir -p "$(dirname "$KEY_FILE")"
-  printf '%s\n' "$PULLER_KEY" >"$KEY_FILE"
+  tmp=$(mktemp "$KEY_FILE.XXXXXX")
+  if ! { printf '%s\n' "$PULLER_KEY" >"$tmp" && chmod 600 "$tmp" && mv "$tmp" "$KEY_FILE"; }; then
+    rm -f "$tmp"
+    log "could not write $KEY_FILE"
+    return 1
+  fi
   unset PULLER_KEY
 }
 
@@ -43,23 +48,29 @@ list_sessions() {
 set_cursor() {
   local tmp
   tmp=$(mktemp "$TRANSCRIPTS/.cursors.XXXXXX")
-  jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$cursors" >"$tmp"
-  mv "$tmp" "$cursors"
+  if jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$cursors" >"$tmp" && mv "$tmp" "$cursors"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 pull_one() {
   local key=$1 updated=$2 cursor since safe tmp bytes
-  cursor=$(jq -r --arg k "$key" '.[$k] // 0' "$cursors")
+  cursor=$(jq -r --arg k "$key" '.[$k] // 0' "$cursors") || {
+    log "could not read cursors"
+    return 0
+  }
   [ "$updated" -gt "$cursor" ] || return 0
 
   safe=$(safe_key "$key")
   since=$cursor
   [ "$cursor" -ne 0 ] || since=0000000000000
   tmp=$(mktemp "$TRANSCRIPTS/.pull.XXXXXX")
-  if remote transcript "$key" --since "$since" >"$tmp"; then
-    bytes=$(wc -c <"$tmp" | tr -d ' ')
-    cat "$tmp" >>"$TRANSCRIPTS/$safe.jsonl"
-    set_cursor "$key" $((updated + 1))
+  if remote transcript "$key" --since "$since" </dev/null >"$tmp" &&
+    bytes=$(wc -c <"$tmp" | tr -d ' ') &&
+    cat "$tmp" >>"$TRANSCRIPTS/$safe.jsonl" &&
+    set_cursor "$key" $((updated + 1)); then
     log "pulled $safe since=$cursor bytes=$bytes"
   else
     log "failed $safe since=$cursor"
