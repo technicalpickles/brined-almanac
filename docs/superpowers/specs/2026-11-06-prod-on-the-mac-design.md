@@ -28,8 +28,11 @@ per-call logging), the OSS-PR workflow (its own spec).
   running an almanac; `contrib/` holds systemd units only.
 - `openclaw-ro` on picklelab lists sessions (`sessions`) and streams one
   session's transcript (`transcript <key> --since <epoch-ms|ISO-8601>`), already
-  redacted and gated. `scripts/openclaw-ro/remote` in pickleclaw reaches it with
-  `ssh picklelab`, signed by Automic Vault on the Mac.
+  redacted and gated. Today a person runs it through
+  `scripts/openclaw-ro/remote` in pickleclaw, which uses `ssh picklelab` with
+  the Mac's own identity, signed by Automic Vault. In prod the puller makes
+  those same two calls itself, over its own fenced key (see The puller);
+  `remote` stays a hand tool and is not on the prod path.
 - The reader scans every `*.jsonl` directly in `BRENT_TRANSCRIPTS` (not
   recursive), and deduplicates events by their `id`, so a file that repeats an
   event is read once.
@@ -48,7 +51,7 @@ Prod state lives outside every checkout at `~/.local/share/brined-almanac/`
 |---|---|---|
 | `transcripts/` | `<safe-key>.jsonl` per session, plus `.cursors.json` and `.last-pull` | `almanac` read-only, `puller` read-write |
 | `prod.env` | Non-secret settings: `ALMANAC_MODE=live`, `ALMANAC_SCAN_INTERVAL_MINUTES`, `PULL_INTERVAL_MINUTES`, `PULL_HOST`, `PULL_USER` | `env_file` for both services |
-| `puller_key` | The puller's ed25519 private key, mode 0600 | compose `secrets:` into `puller` |
+| `op-token` | The 1Password service account token, mode 0600. The only secret on disk. | Read by the deploy task, never mounted |
 | `known_hosts` | picklelab's host key, from `ssh-keyscan` at first deploy | `puller` read-only |
 
 The repo gains:
@@ -58,6 +61,7 @@ The repo gains:
 | `Containerfile` | The almanac image |
 | `puller/Containerfile`, `puller/pull.sh` | The puller image and its loop |
 | `compose.prod.yaml` | The stack; project name fixed to `brined-almanac-prod` |
+| `prod.secrets.env` | `op://` references for the two secrets, resolved by `op run` at deploy. References, not values, so safe in a public repo |
 | `mise.toml` tasks `deploy`, `prod` | Build and start; exec a verb in prod |
 | `docs/runbooks/prod-on-the-mac.md` | First deploy, rollback, rotation, what to do when it breaks |
 
@@ -99,7 +103,7 @@ services:
       DATABASE_URL: postgres://almanac@db:5432/almanac
       BRENT_TRANSCRIPTS: /transcripts
       ALMANAC_LISTEN: 0.0.0.0:8788
-      GITHUB_TOKEN: ${BRINED_ALMANAC_GITHUB_TOKEN:?run `mise run deploy`, which injects it}
+      GITHUB_TOKEN: ${BRINED_ALMANAC_GITHUB_TOKEN:?run `mise run deploy`, which resolves it through op run}
     ports: ["127.0.0.1:8788:8788"]
     volumes: ["${BRINED_ALMANAC_STATE}/transcripts:/transcripts:ro"]
     healthcheck: curl -fsS http://127.0.0.1:8788/healthz
@@ -107,13 +111,13 @@ services:
     image: brined-almanac-puller:prod
     restart: unless-stopped
     env_file: ${BRINED_ALMANAC_STATE}/prod.env
-    secrets: [puller_key]
+    environment:
+      PULLER_KEY: ${BRINED_ALMANAC_PULLER_KEY:?run `mise run deploy`, which resolves it through op run}
+    tmpfs: [/run/puller]
     volumes:
       - "${BRINED_ALMANAC_STATE}/transcripts:/transcripts"
       - "${BRINED_ALMANAC_STATE}/known_hosts:/etc/ssh/ssh_known_hosts:ro"
     healthcheck: .last-pull is younger than 3 × PULL_INTERVAL_MINUTES
-secrets:
-  puller_key: { file: "${BRINED_ALMANAC_STATE}/puller_key" }
 volumes:
   pgdata:
 ```
@@ -125,9 +129,11 @@ so a person can `curl` it.
 
 ## The puller
 
-`pull.sh` loops every `PULL_INTERVAL_MINUTES` (default 10). One pass:
+`pull.sh` starts by writing `$PULLER_KEY` to `/run/puller/key` with mode 0600
+and unsetting the variable, then loops every `PULL_INTERVAL_MINUTES` (default
+10). One pass:
 
-1. `ssh -i /run/secrets/puller_key $PULL_USER@$PULL_HOST sessions`, parse
+1. `ssh -i /run/puller/key $PULL_USER@$PULL_HOST sessions`, parse
    `.sessions[] | {key, updatedAt}`. Skip keys containing `heartbeat`.
 2. For each session whose `updatedAt` is after its cursor (0 when unknown):
    `ssh ... transcript <key> --since <cursor>`, appended to
@@ -152,10 +158,11 @@ never in a repo.
 
 ### The key and the forced command
 
-The puller has its own ed25519 key, generated at first deploy into
-`puller_key`, never saved to Automic Vault (a container can't ask av). What
-fences it is picklelab's `authorized_keys` line for the ssh user `remote`
-already uses:
+The puller has its own ed25519 key, a 1Password SSH key item named `puller`
+in the `brined-almanac` vault (see Secrets). 1Password generates it and shows
+the public half, so no private key is ever on a disk outside a container's
+tmpfs. What fences it is picklelab's `authorized_keys` line for the ssh user
+`remote` already uses:
 
 ```
 restrict,from="<the Mac's tailnet address>",command="/opt/pickleclaw/scripts/openclaw-ro/openclaw-ro-pull" ssh-ed25519 <public key> brined-almanac-puller
@@ -183,25 +190,40 @@ quoted there.
 
 ## Secrets
 
-Automic Vault supplies the GitHub token; nothing in prod reads `gh auth token`
-and no token sits in a file. A fine-grained PAT scoped to
-`technicalpickles/brineworks` and `technicalpickles/pickleclaw` with Issues
-write and Metadata read is saved once by Josh as
-`av save BRINED_ALMANAC_GITHUB_TOKEN`. The deploy task runs
+1Password supplies both secrets; nothing in prod reads `gh auth token`, and
+no token or private key sits in a file. The deploy task resolves them at
+deploy time and they exist only in the environment of that one `op run`
+process and the containers it creates.
 
-```
-av inject +BRINED_ALMANAC_GITHUB_TOKEN -- docker compose -f compose.prod.yaml up -d --wait
-```
+- **Vault** `brined-almanac`, used for nothing else. Two items: `github-token`,
+  a fine-grained PAT scoped to `technicalpickles/brineworks` and
+  `technicalpickles/pickleclaw` with Issues write and Metadata read; and
+  `puller`, an SSH key item whose public key goes in picklelab's
+  `authorized_keys`.
+- **Service account** with read access to that vault only. Its token is the
+  one bootstrap secret, stored at `${BRINED_ALMANAC_STATE}/op-token` with mode
+  0600. What that file unlocks is read access to a two-item vault; the PAT is
+  scoped and the key is fenced by the forced command. The same token serves a
+  later picklelab deployment under systemd (`LoadCredential=`), which is the
+  reason for a service account over Automic Vault: av is Mac-only.
+- **References in the repo.** `prod.secrets.env` holds
+  `BRINED_ALMANAC_GITHUB_TOKEN=op://brined-almanac/github-token/credential` and
+  `BRINED_ALMANAC_PULLER_KEY="op://brined-almanac/puller/private key?ssh-format=openssh"`.
+  Verified against `op` 2.41.1: `?ssh-format=openssh` returns the key in the
+  format `ssh -i` reads.
+- **Deploy** runs
+  `OP_SERVICE_ACCOUNT_TOKEN=$(cat op-token) op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait`,
+  so compose interpolates both values into the services' environments. A
+  `restart: unless-stopped` restart, including OrbStack coming back at login,
+  reuses the containers as created, with their environments. `docker inspect`
+  on this Mac shows both values, the trade accepted here over files on disk.
+- **Rotation** is editing the item in 1Password (or regenerating the SSH key
+  and replacing the `authorized_keys` line), then `mise run deploy`.
+- If the confirmation step is ever wanted back, the task changes by one line:
+  `av inject +OP_SERVICE_ACCOUNT_TOKEN -- op run ...` and the `op-token` file
+  goes away.
 
-so compose interpolates it into the `almanac` service's environment. That's
-one approval per deploy. The token then lives only in the container's
-environment: a `restart: unless-stopped` restart, including OrbStack coming
-back at login, reuses the container as created. `docker inspect` on this Mac
-shows it, which is the trade accepted here over a file on disk. The puller
-holds no GitHub token at all.
-
-`prod.env` is therefore non-secret, and `BRINED_ALMANAC_GITHUB_TOKEN` is the
-only name `av` ever hears from this repo.
+`prod.env` is therefore non-secret.
 
 ## Deploy
 
@@ -210,9 +232,11 @@ only name `av` ever hears from this repo.
 1. Refuse a dirty tree. Warn (don't refuse) when the branch isn't `main`.
 2. `sha=$(git rev-parse --short HEAD)`; build both images with the sha tag and
    the `prod` tag.
-3. Check `${BRINED_ALMANAC_STATE}` has `prod.env`, `puller_key`, and
+3. Check `${BRINED_ALMANAC_STATE}` has `prod.env`, `op-token`, and
    `known_hosts`; point at the runbook if not.
-4. `av inject ... docker compose -f compose.prod.yaml up -d --wait`.
+4. `op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait`,
+   with the service account token read from `op-token` into the task's
+   environment and nowhere else.
 5. `docker compose -f compose.prod.yaml ps` and `curl` the health endpoint.
 
 `mise run prod -- <verb>` runs `docker compose -f compose.prod.yaml exec
@@ -253,7 +277,8 @@ for a deliberate live run from a checkout) and "Prod" (pointer to the runbook).
 - Backups: none yet, same as the interim store. The runbook has the
   `pg_dump` line. Losing the volume refiles everything; that's the known risk
   carried over from the tool error scan spec.
-- Key rotation: generate a new key, replace the line on picklelab, `up -d`.
+- Key rotation: regenerate the `puller` item in 1Password, replace the line
+  on picklelab, `mise run deploy`.
 
 ## Testing
 
@@ -274,7 +299,11 @@ Proof, in order. Each step gates the next.
    advances its cursor, and writes `.last-pull`. A second pass with nothing
    new appends nothing and still writes `.last-pull`.
 6. The stack survives `docker compose restart` and an OrbStack restart with
-   the token still in the almanac's environment (`check` passes again).
+   both secrets still in the containers' environments (`check` passes again,
+   the next puller pass succeeds).
+7. The state dir contains no private key and no GitHub token: `grep -rl` for
+   `PRIVATE KEY` and `github_pat_` under it finds nothing. `op-token` is the
+   only file with mode 0600.
 
 `mise run check` gains nothing slow: `docker compose -f compose.prod.yaml
 config` with a stub state dir validates the compose file, and shellcheck
@@ -289,6 +318,9 @@ the deploy task, not the hook.
   repo; merges and deploys through picklehome as usual.
 - picklelab: one `authorized_keys` line, by hand, recorded in this repo's
   runbook.
+- 1Password: the `brined-almanac` vault, its two items, and the service
+  account, created by Josh once. The runbook lists the exact item and field
+  names the references expect.
 - dotfiles: nothing. OrbStack supervises the stack.
 
 ## Upstream
