@@ -83,6 +83,15 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for the images and hosts on picklelab and the WordPress droplet instead of writing that here. A Dependabot alert covers a lockfile. It says nothing about a host's base images, its CA package, or a release past end of life, which is what the eMudhra advisory turned on.
 - **Inactive repositories:** an alert there files the archive question instead of the alert.
 
+### continue-work
+
+- **Status:** next, in M5 with the budget rule.
+- **Watches:** resumable parked handoffs, open tasks in active repositories that I've marked as fair game, and almanac's own open pull requests.
+- **Does:** starts a worker, a headless Claude Code session in its own worktree and sandbox, to continue one piece of work toward a pull request. The worker opens or updates the pull request, answers review comments, and fixes failing checks. It never merges.
+- **Stops:** when the budget rule says stop, when a burst starts in the same repository, or when it needs a decision only I can make. It parks its state in a handoff before it stops, and the next window resumes from that handoff.
+- **Model:** yes. This is the main use of agent work.
+- **Feeds:** task-resurfacer. A burst in a repository sees the handoffs and pull requests that workers left there.
+
 ### task-resurfacer
 
 - **Status:** next, after task-reconciler.

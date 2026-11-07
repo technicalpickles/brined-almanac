@@ -18,7 +18,7 @@ Between bursts, nothing moves, and these things go stale.
 
 Hosts are worse, because no alert exists. The clearest case is a few WordPress sites I host on a droplet. On 2026-10-20, eight of eMudhra's intermediate certificate authorities turned out to have recoverable private keys. I checked every container on the droplet by hand. Nearly all of them still trusted the compromised chains, and WordPress ships its own CA bundle, so patching the OS wasn't enough. While I was orienting for that fix, I found that one of the sites had been compromised. Webshells first ran on 2026-08-31, and on 2026-09-14 its web root was replaced with an SEO-spam dropper. The site had returned HTTP 500 for weeks, and nothing reported it. The fix took two days and left six follow-up plans, among them hardening, a database upgrade, and base images on a Debian release past end of life with no CA fix. None of that work was on the backlog until the advisory made me look.
 
-I don't need more output during bursts. I need steady progress between them.
+I don't need more output during bursts. I need the work to keep going between them, instead of waiting for the next burst.
 
 ## The thesis
 
@@ -26,7 +26,7 @@ brined-almanac is a steady lane under the bursts. It has two tiers.
 
 **Watchers** make no model calls. They read transcripts, the forge, the backlog, and the services, and they report what they find. They cost nothing against my usage limits, so they run all the time.
 
-**Agent work** uses a model, either to judge something code can't decide or to do a small repair. It runs only on capacity I am not using, under the budget rule below.
+**Agent work** uses a model to keep my projects moving. Mostly that means continuing what a burst left unfinished, from a parked handoff or an open task through to a pull request. It also judges what code can't decide and makes small repairs. It runs only on capacity I am not using, under the budget rule below.
 
 Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes almanac as how things outside the plan get into it, and it names vulnerability response as the same shape of problem as broken dependency updates. Here the plan is taskwarrior. Ops and security work that nobody scheduled, like an open advisory on a deployed app, is exactly what should get in.
 
@@ -57,9 +57,18 @@ Each input is observable today.
 
 Watchers ignore the budget rule.
 
+## Work continues between bursts
+
+When a burst ends, its work usually isn't finished. It's parked in a handoff, left as open tasks, or sitting in a pull request with review comments. Agent work picks it up and keeps going on capacity I'm not using, until the work is done or it needs me.
+
+- **What it picks up.** Resumable parked handoffs, which already say what comes next. Open tasks in active repositories that I've marked as fair game. Follow-ups on its own pull requests, such as review comments and failing checks.
+- **How far it goes.** As far as the work goes. It writes code, runs the tests, and opens or updates a pull request. The limits are the budget rule, the sandbox, and the repository's rules, which still decide what merges.
+- **When it stops.** When the window runs out, a burst starts, or it reaches a decision only I can make. It parks its state in a handoff, the same way my own sessions do, and the next window picks up from there. A burst that starts in the same repository finds that handoff first.
+- **Who does the work.** Almanac decides what continues and when. A worker does the work: a headless Claude Code session in its own worktree and sandbox. Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes the same split, with almanac upstream of a tracker and workers.
+
 ## Small steps
 
-A workflow may take a small, reversible step itself instead of only reporting it. Examples are bringing a pull request's branch up to date with main, or rerunning a CI job that failed for a reason unrelated to the change.
+Some steps are small enough that a workflow takes them itself, without a worker. Examples are bringing a pull request's branch up to date with main, or rerunning a CI job that failed for a reason unrelated to the change.
 
 A small step goes through almanac's closed set of effects, like everything else a workflow does. Updating a branch is a `Push`, which commits a checked patch to the pull request's own branch. The forge refuses the patch if the branch moved after the check. Rerunning CI has no effect yet. The narrow version is one rerun per commit, only for a failure code classifies as infrastructure, with an `Attest` that says it reran. It goes to upstream as a proposal, so other people building on almanac can say whether they need it too.
 
@@ -85,6 +94,7 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 
 ## What success looks like
 
+- A burst ends with work parked, and the next burst finds it moved forward: a pull request opened or updated, or a handoff that names the decision it's waiting on.
 - A task that a later burst fixed is closed, or flagged as probably done, within a day.
 - A burst in a repository starts with the open tasks and parked handoffs that matter there.
 - A parked handoff whose work was never captured anywhere else is reported before it is forgotten.

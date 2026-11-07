@@ -61,18 +61,20 @@ Threads on public repositories get answered between bursts.
 
 **Done when** a maintainer's reply on one of my upstream issues becomes a task within a day, and an upstream fix names the workaround it makes deletable.
 
-## M5: Spending idle capacity
+## M5: Work continues between bursts
 
-Agent work runs on capacity I'm not using.
+Work a burst left unfinished keeps going on capacity I'm not using.
 
 - The budget rule in code, with its starting numbers next to it
 - A probe that reads `unifiedWindows.five_hour` from a headless `claude -p` run
 - Burst and working detection from transcript writes under `~/.claude/projects/`
+- A worker runner: a headless Claude Code session in its own worktree and sandbox, started by almanac and stopped when the budget rule says so
+- continue-work, picking up resumable handoffs, tasks marked as fair game, and follow-ups on its own pull requests, and parking a handoff whenever it stops
 - task-reconciler's evidence hunt, where an agent returns a proof of read-only checks and code runs them before closing
 - session-friction's summary, with a model ranking the week's items
 - lesson-spread, finding repositories where a recorded lesson applies and has not been applied
 
-**Done when** an agent proof closes a task code alone couldn't, a session-friction summary runs in a window that would otherwise expire, and four weeks pass with no directed session stopping on a usage limit because of almanac.
+**Done when** a handoff I park at the end of a burst has a pull request opened from it before my next burst, that burst starts from the handoff the worker left, an agent proof closes a task code alone couldn't, a session-friction summary runs in a window that would otherwise expire, and four weeks pass with no directed session stopping on a usage limit because of almanac.
 
 ## M6: Services watched
 
