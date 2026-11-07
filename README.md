@@ -53,6 +53,8 @@ mise run db:down     # worktrees only: drop the container, the volume and the po
 
 The main checkout's store is the interim store for live runs. Its port block is pinned in portool, the container restarts with OrbStack, and `db:down` refuses to touch it. There's no backup of the volume yet; losing it means the next live run files everything again.
 
+Run `mise run db:pending` before deploying a change to an event's payload. Events the old binary admitted but hasn't run fail under the new shape, and their delivery ids stay seen, so they never run again ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). The task fails while anything is pending.
+
 `wt remove` runs `db:down` through the hook in `.config/wt.toml`, so removing a worktree also removes its Postgres. A worktree's store is empty, which makes a live run from a worktree refile every cluster, so live runs happen from main.
 
 ### Live runs

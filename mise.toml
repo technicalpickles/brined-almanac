@@ -39,6 +39,15 @@ DB_PORT=${port:-0} docker compose down -v
 portool release
 """
 
+[tasks."db:pending"]
+description = "Fail if this checkout's store holds events not yet run; check before deploying a change to an event's payload"
+run = """
+set -euo pipefail
+count=$(docker compose exec -T db psql -U almanac -d almanac -tAc 'select count(*) from pending')
+[ "$count" = 0 ] || { echo "db:pending: $count event(s) wait in pending. A binary with a different payload shape fails them and never retries (ivy/almanac#10). Let them run on the current binary first." >&2; exit 1; }
+echo "db:pending: nothing pending"
+"""
+
 [tasks.live]
 description = "Run a verb live against this checkout's store and GitHub: mise run live -- check | backfill"
 run = """
