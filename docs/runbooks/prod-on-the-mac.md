@@ -76,9 +76,11 @@ PULL_USER=technicalpickles
 - `ALMANAC_MODE=live` is required. Without it, nothing files.
 - `PULL_HOST` is the name the puller container uses for picklelab. If the
   container cannot resolve `picklelab`, set it to picklelab's tailnet address
-  (`tailscale ip -4 picklelab` prints it). Then add that address to
-  `known_hosts`, because the puller checks host keys strictly and the file is
-  keyed by hostname: `ssh-keyscan <address> >> "$STATE/known_hosts"`. Keep the
+  (`tailscale ip -4 picklelab` prints it). On the Mac the CLI may not be on
+  `PATH`. It lives at `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
+  The puller checks host keys strictly and `known_hosts` is keyed by hostname,
+  so also run `ssh-keyscan <address> >> "$STATE/known_hosts"` after the
+  "Record picklelab's host key" step below. Keep the
   address out of the repo.
 - `ALMANAC_SCAN_INTERVAL_MINUTES` is optional. The default is 15.
 - `PULL_INTERVAL_MINUTES` is optional. The default is 10.
@@ -112,7 +114,7 @@ restrict,from="<the Mac's tailnet address>",command="/opt/pickleclaw/scripts/ope
   `transcript <key> --since <epoch-ms>`. Anything else exits 2.
 - `restrict` turns off forwarding, pty, and X11.
 - `from=` limits the key to the Mac's tailnet address. Get it with
-  `tailscale ip -4` on the Mac. If a container's ssh
+  `tailscale ip -4` on the Mac (same `PATH` caveat as above). If a container's ssh
   does not arrive from that address, the puller is refused. Drop `from=` and
   keep the rest.
 
