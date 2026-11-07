@@ -188,7 +188,7 @@ The binary has almanac's verbs. `synth` prints the manifest. `check` validates p
 |---|---|
 | `BRENT_TRANSCRIPTS` | The directory of `*.jsonl` files. Defaults to `transcripts`. |
 | `GITHUB_TOKEN` | Enables the GitHub tracker. Without it, a `LogTracker` prints each would-be issue to stdout. |
-| `DATABASE_URL` | PostgreSQL. Required for live runs, optional for dry runs. |
+| `DATABASE_URL` | PostgreSQL. Required for live runs, optional for dry runs. With `GITHUB_TOKEN` set and this unset, every filing is refused. |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
 
 Three things to know before trusting a build:

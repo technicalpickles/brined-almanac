@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use almanac::prelude::*;
 use almanac::testing::FakeTracker;
-use brined_almanac::providers::{PrivateOnly, Visibility};
+use brined_almanac::providers::{PrivateOnly, StoreRequired, Visibility};
 
 struct FakeVisibility {
     answer: Result<bool, String>,
@@ -99,4 +99,21 @@ async fn ask_is_guarded_like_file() {
         .unwrap_err();
     assert!(err.0.contains("technicalpickles/brineworks"));
     assert!(inner.filed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_live_run_without_a_store_refuses_to_file_or_ask() {
+    let filed = StoreRequired
+        .file("k1", &target(), "title", &body())
+        .await
+        .unwrap_err();
+    let asked = StoreRequired
+        .ask("k1", &target(), "question?", &body())
+        .await
+        .unwrap_err();
+    for err in [filed, asked] {
+        assert!(err.0.contains("DATABASE_URL"), "{}", err.0);
+        assert!(!err.0.contains("synthetic body"));
+        assert!(!err.0.contains("technicalpickles/brineworks"));
+    }
 }
