@@ -324,6 +324,9 @@ fn py_str(text: &str) -> String {
 }
 
 fn add_seconds(iso: &str, seconds: u64) -> String {
+    if iso.len() < 19 || !iso.is_ascii() {
+        return iso.to_string();
+    }
     let n = |range: std::ops::Range<usize>| -> i64 { iso[range].parse().expect("ISO timestamp") };
     let (year, month, day) = (n(0..4), n(5..7), n(8..10));
     let secs_of_day = n(11..13) * 3600 + n(14..16) * 60 + n(17..19);
