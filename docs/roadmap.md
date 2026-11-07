@@ -27,12 +27,13 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 
 The backlog and the parking lot stop going stale on their own.
 
-- task-reconciler, flagging tasks that a later burst probably finished, with the evidence
+- task-reconciler, closing tasks that a merged pull request or commit names by UUID, and flagging the ones a later burst probably finished, with the evidence
+- A close effect for taskwarrior tasks. Almanac's effect set has no way to close anything yet
 - parked-handoffs, sorting each handoff older than a week into captured, resumable, or orphaned
 - Shared evidence code for both: merged pull requests, cited files that changed, commits that mention a task or a branch
 - A read-only mount of `~/github.com` and the vault in the prod stack
 
-**Done when** a task that a merged pull request fixed is flagged within a day, and every handoff older than a week is sorted.
+**Done when** a task that a merged pull request names by UUID is closed within a day with its evidence attached, a task with weaker evidence is flagged instead, and every handoff older than a week is sorted.
 
 ## M3: Bursts start informed
 
@@ -85,5 +86,5 @@ Almanac reports problems in running services and deployed repositories.
 ## Deliberately unscheduled
 
 - **Merging pull requests.** The repository's rules merge. See [vision.md](vision.md) "What it is not".
-- **Closing tasks automatically.** The reconciler marks a task as probably done, and I close it.
+- **Closing tasks on weak evidence.** The reconciler closes only on a UUID match. See [workflows.md](workflows.md) "Decided against".
 - **Telegram alerts, filing to public repositories, dev VM transcripts, and work repositories.** See [workflows.md](workflows.md) "Decided against".

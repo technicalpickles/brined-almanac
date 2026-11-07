@@ -74,13 +74,13 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 
 - **Not a merge bot.** It reports. Branch protection and the repository's own rules merge.
 - **Not the backlog.** Taskwarrior is. Almanac reads the backlog and reports on it.
-- **Not a closer.** It marks a task as probably done and shows the evidence. I close it.
+- **Not a closer on a guess.** It closes a task only when a merged pull request or a commit on main names the task by UUID. It annotates the closed task with that evidence, so I can review it and reopen it. Weaker evidence marks the task as probably done, and I close it.
 - **Not a chat surface.** No Telegram alerts. Someone else's front end can read the issues.
 - **Not a reason to hit the limit.** If directed work ever stops because almanac spent the window, the budget rule is wrong.
 
 ## What success looks like
 
-- A task that a later burst fixed is flagged as probably done within a day.
+- A task that a later burst fixed is closed, or flagged as probably done, within a day.
 - A burst in a repository starts with the open tasks and parked handoffs that matter there.
 - A parked handoff whose work was never captured anywhere else is reported before it is forgotten.
 - A maintainer's question on one of my upstream issues gets an answer within days, and an upstream fix leads to deleting my workaround.

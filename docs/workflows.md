@@ -47,9 +47,10 @@ A repository can be in more than one tier. bktide is maintained and active while
 
 - **Status:** next.
 - **Watches:** pending taskwarrior tasks for active and deployed repositories.
-- **Reports:** tasks that are probably done, each with its evidence. Closing a task is my decision, so the report goes to taskwarrior: one task per project per day that lists them.
+- **Closes:** a task when a merged pull request or a commit on main names it by UUID. The workflow annotates the task with the evidence and tags it `+almanac`, so I can review what it closed and reopen a mistake.
+- **Reports:** tasks that are probably done on weaker evidence, each with its evidence. Closing those is my decision, so the report goes to taskwarrior: one task per project per day that lists them.
 - **Model:** none for the first version. It checks evidence in code:
-  - a merged pull request whose title, body, or commits name the task
+  - a merged pull request whose title, body, or commits name the task. A UUID is enough to close it. A title or a description match only marks it.
   - a file or line the task cites that no longer looks the way the task describes
   - a later commit that mentions the task
 
@@ -171,4 +172,4 @@ A repository can be in more than one tier. bktide is maintained and active while
 - **Filing to a public repository.** Issue bodies carry private text.
 - **Transcripts from the dev VM.** They are test traffic and would file noise.
 - **Work repositories.** I can't reach them from here.
-- **Closing tasks automatically.** The reconciler marks a task as probably done. A person closes it.
+- **Closing tasks on weak evidence.** The reconciler closes a task only when the evidence names it by UUID. Everything else waits for me.
