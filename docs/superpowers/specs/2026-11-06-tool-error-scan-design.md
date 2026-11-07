@@ -229,6 +229,8 @@ The real check after implementation is `backfill --dry-run` over the three pulle
 
 Verified 2026-11-06 on the implementation: `backfill --dry-run` over the three pulled transcripts found 137 clusters, queued 137, rejected 0, produced 37 `File` effects, and skipped 12 lines that were not JSON. Those are the spike's numbers. `ALMANAC_MODE=live check` passed with the transcript provider and the stdout tracker.
 
+Checked again 2026-11-06 after the merge, by tabulating every cluster's target, service, tool, and class over the two pulls still on the Mac: the reader only split `svc__tool` when the call went through the generic `tool_call` wrapper, and the model calls MCP tools directly by that name far more often (4053 of 7413 call blocks), so most brineworks and gog failures were landing on `pickleclaw` as service `openclaw`. Fixed in the reader; the same split now applies to a direct tool name. The spike shared the bug, which is why the counts matched. A dry run reports targets per effect (`--format json`) but not which cluster each came from, since the body is tainted and hidden.
+
 ## Alternatives considered
 
 **The Python package this document replaces.** Dataclasses, a `str(dict)` parser, dedupe by markers in issue bodies, and an update path that rewrote the body when a count grew. The spike matched its counts in 285 lines of Rust, with the dedupe, the budget, and the dry run coming from almanac. Dropped 2026-11-06.

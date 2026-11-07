@@ -231,19 +231,22 @@ fn identity(text: &str, called: Option<&str>, tool_name: Option<&str>) -> (Strin
         return (s[1].to_string(), t[1].to_string());
     }
     if tool_name == Some("tool_call") {
-        let Some(id) = called else {
-            return ("openclaw".into(), "unknown".into());
-        };
-        let id = id.rsplit(':').next().unwrap_or(id);
-        return match id.split_once("__") {
-            Some((s, t)) => (s.to_string(), t.to_string()),
-            None => ("openclaw".into(), id.to_string()),
+        return match called {
+            Some(id) => split_id(id),
+            None => ("openclaw".into(), "unknown".into()),
         };
     }
-    (
-        "openclaw".into(),
-        tool_name.unwrap_or("unknown").to_string(),
-    )
+    split_id(tool_name.unwrap_or("unknown"))
+}
+
+/// Splits a tool id in any of its spellings (`svc__tool`, `mcp:svc:svc__tool`, bare `tool`)
+/// into service and tool. A bare name is one of OpenClaw's own tools.
+fn split_id(id: &str) -> (String, String) {
+    let id = id.rsplit(':').next().unwrap_or(id);
+    match id.split_once("__") {
+        Some((s, t)) => (s.to_string(), t.to_string()),
+        None => ("openclaw".into(), id.to_string()),
+    }
 }
 
 fn slug(raw: &str) -> Slug {

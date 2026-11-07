@@ -76,6 +76,18 @@ fn a_builtin_tool_belongs_to_openclaw() {
 }
 
 #[test]
+fn a_tool_called_directly_by_its_prefixed_name_belongs_to_its_service() {
+    assert_eq!(
+        identity(Failure::builtin("brineworks__email_rules_add")),
+        pair("brineworks", "email_rules_add")
+    );
+    assert_eq!(
+        identity(Failure::builtin("gog__calendar")),
+        pair("gog", "calendar")
+    );
+}
+
+#[test]
 fn a_json_object_in_details_falls_back_to_the_call_id() {
     let failure = Failure::mcp("brineworks", "triage_apply")
         .details(Details::Object)
