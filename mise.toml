@@ -42,10 +42,9 @@ echo "postgres: 127.0.0.1:$port (compose project $COMPOSE_PROJECT_NAME, volume $
 """
 
 [tasks."db:down"]
-description = "Worktrees only: remove this checkout's Postgres and volume and release its ports"
+description = "Remove this checkout's Postgres and volume and release its ports"
 run = """
 set -euo pipefail
-[ -f .git ] || { echo "mise run db:down: refusing in the main checkout; its store is the interim store for live runs. Use docker compose down (no -v) to stop it." >&2; exit 1; }
 [ -f .env.portool ] || { echo "db:down: no .env.portool, nothing to tear down"; exit 0; }
 port=$(sed -n 's/^DB_PORT=//p' .env.portool)
 DB_PORT=${port:-0} docker compose down -v

@@ -196,7 +196,7 @@ Three things to know before trusting a build:
 
 - `check` validates what the scan needs too, because `scan` carries `#[scan]` (ivy/almanac#1). The tracker is used only by the effect, so `mise run live -- check` is still how to validate the GitHub side.
 - `backfill --dry-run` spends the workflow's `runs_per_hour` budget, and upstream keeps it that way because agents run in a dry run (ivy/almanac#3). The first backfill over two months of transcripts produced 137 clusters, so the workflow declares `runs_per_hour = 1000`. Configuration can only lower it.
-- v0 runs on the Mac, by hand, over transcripts pulled with `openclaw-ro`. The daemon, a timer, and reading picklelab's store directly are a deployment document.
+- Prod runs on the Mac as a compose stack: Postgres, the daemon, and a puller that fetches transcripts from picklelab through `openclaw-ro`. The design is `docs/superpowers/specs/2026-11-06-prod-on-the-mac-design.md` and the operations are `docs/runbooks/prod-on-the-mac.md`.
 - A dry run keeps its own rows in the store, under `<almanac>.dry-run`, so it no longer hides work from a live run (fixed upstream in ivy/almanac#3, after we saw 102 rows in `seen` from one dry run on 2026-11-06). Dry runs still need no database, and only `mise run live` sets `DATABASE_URL`. The README's "Running it" section has the operator steps.
 
 ## Errors
