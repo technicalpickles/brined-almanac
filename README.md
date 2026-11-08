@@ -40,7 +40,7 @@ A dry run needs no database and no token, so this is the loop for poking at the 
 BRENT_TRANSCRIPTS=path/to/pulls mise exec -- cargo run -- backfill --dry-run
 ```
 
-Don't point a dry run at the real store. Almanac admits every delivery id it sees, dry run or not, so a dry run against the database followed by a live run files nothing. Dry runs stay on the in-memory store, and only the `live` task sets `DATABASE_URL`.
+Only the `live` task sets `DATABASE_URL`, so dry runs use the in-memory store. A dry run pointed at the real store is harmless anyway, because almanac keeps a dry run's rows apart from a live run's.
 
 ### The store
 
@@ -52,6 +52,8 @@ mise run db:down     # worktrees only: drop the container, the volume and the po
 ```
 
 The main checkout's store is the interim store for live runs. Its port block is pinned in portool, the container restarts with OrbStack, and `db:down` refuses to touch it. There's no backup of the volume yet; losing it means the next live run files everything again.
+
+Run `mise run db:pending` before deploying a change to an event's payload. Events the old binary admitted but hasn't run fail under the new shape, and their delivery ids stay seen, so they never run again ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). The task fails while anything is pending.
 
 `wt remove` runs `db:down` through the hook in `.config/wt.toml`, so removing a worktree also removes its Postgres. A worktree's store is empty, which makes a live run from a worktree refile every cluster, so live runs happen from main.
 

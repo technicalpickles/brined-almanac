@@ -8,8 +8,8 @@ use almanac::testing::FakeTracker;
 use brined_almanac::transcript::read;
 use brined_almanac::workflows;
 use brined_almanac::workflows::tool_failures::{
-    CLASSES, Facts, TITLE, ToolFailed, ToolFailures, class_named, classify, cluster, facts,
-    owner_of, policy, report,
+    CLASSES, Facts, ToolFailed, ToolFailures, class_named, classify, cluster, facts, owner_of,
+    policy,
 };
 use serde_json::json;
 use support::{Failure, Fixture};
@@ -130,24 +130,44 @@ fn the_delivery_id_matches_the_spec() {
 }
 
 #[test]
-fn report_lists_fields_then_a_blank_line_then_the_sample() {
+fn a_cluster_spans_its_first_and_last_error() {
     let errors = errors_of(vec![
         Failure::mcp("brineworks", "triage_apply")
             .error("Approval timed out")
             .times(2),
     ]);
     let clusters = cluster(errors);
-    let (key, c) = &clusters[0];
-    let text = serde_json::to_value(report(key, c)).unwrap();
-    let text = text.as_str().unwrap();
-    assert!(text.starts_with("service: brineworks\n"), "{text}");
-    assert!(
-        text.contains(
-            "\ntool: triage_apply\nclass: approval-timeout\nday: 2026-11-04\ncount: 2\nfirst: 2026-11-04T10:00:00Z\nlast: 2026-11-04T10:00:01Z\n\nsample:\n"
-        ),
-        "{text}"
+    let (_, c) = &clusters[0];
+    assert_eq!(c.count, 2);
+    assert_eq!(c.first.as_str(), "2026-11-04T10:00:00Z");
+    assert_eq!(c.last.as_str(), "2026-11-04T10:00:01Z");
+}
+
+/// Reads tainted text by position: `.forbidden-patterns` forbids the literal key in source.
+fn text_of(body: &Untrusted<String>) -> String {
+    let shown = serde_json::to_value(body).unwrap();
+    shown
+        .as_object()
+        .and_then(|fields| fields.values().next())
+        .and_then(|value| value.as_str())
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn the_body_lists_fields_then_a_blank_line_then_the_sample() {
+    let Facts::Loud { body, .. } = facts(&tool_failed(
+        "brineworks",
+        "triage_apply",
+        "approval-timeout",
+        3,
+    )) else {
+        panic!("three approval timeouts are loud");
+    };
+    assert_eq!(
+        text_of(&body),
+        "service: brineworks\ntool: triage_apply\nclass: approval-timeout\nday: 2026-11-04\ncount: 3\nfirst: 2026-11-04T10:00:00Z\nlast: 2026-11-04T10:00:02Z\n\nsample:\nsynthetic sample"
     );
-    assert!(text.ends_with("Approval timed out'}"), "{text}");
 }
 
 fn tool_failed(service: &str, tool: &str, class: &str, count: u64) -> ToolFailed {
@@ -157,7 +177,9 @@ fn tool_failed(service: &str, tool: &str, class: &str, count: u64) -> ToolFailed
         "class": class,
         "day": "2026-11-04",
         "count": count,
-        "report": "synthetic report",
+        "first": "2026-11-04T10:00:00Z",
+        "last": "2026-11-04T10:00:02Z",
+        "sample": "synthetic sample",
     }))
     .expect("payload parses")
 }
@@ -212,11 +234,15 @@ fn brineworks_and_gog_route_to_their_repositories() {
 }
 
 #[test]
-fn policy_files_once_with_the_static_title() {
+fn policy_files_once_with_a_title_naming_the_cluster() {
     let loud = facts(&tool_failed("brineworks", "t", "mcp-timeout", 1));
     let effects = policy(&loud);
     assert_eq!(effects.len(), 1);
-    assert!(matches!(&effects[0], Effect::File { title, .. } if *title == TITLE));
+    assert!(matches!(
+        &effects[0],
+        Effect::File { title, .. }
+            if title.to_string() == "Brent: brineworks/t mcp-timeout on 2026-11-04 (count 1)"
+    ));
     assert!(policy(&Facts::Quiet).is_empty());
 }
 
@@ -300,7 +326,10 @@ async fn a_live_run_files_once_per_loud_cluster() {
     let filed = tracker.filed.lock().unwrap();
     assert_eq!(filed.len(), 1);
     assert_eq!(filed[0].1, "technicalpickles/brineworks");
-    assert_eq!(filed[0].2, TITLE);
+    assert_eq!(
+        filed[0].2,
+        "Brent: brineworks/triage_apply approval-timeout on 2026-11-04 (count 12)"
+    );
 }
 
 #[tokio::test]

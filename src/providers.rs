@@ -83,12 +83,13 @@ impl<T: Tracker, V: Visibility> Tracker for PrivateOnly<T, V> {
         &'a self,
         key: &'a str,
         target: &'a Slug,
+        pull: Option<u64>,
         question: &'a str,
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         Box::pin(async move {
             self.check(target).await?;
-            self.inner.ask(key, target, question, body).await
+            self.inner.ask(key, target, pull, question, body).await
         })
     }
 }
@@ -115,6 +116,7 @@ impl Tracker for StoreRequired {
         &'a self,
         _key: &'a str,
         _target: &'a Slug,
+        _pull: Option<u64>,
         _question: &'a str,
         _body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
@@ -150,6 +152,7 @@ impl Tracker for LogTracker {
         &'a self,
         key: &'a str,
         target: &'a Slug,
+        _pull: Option<u64>,
         question: &'a str,
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {

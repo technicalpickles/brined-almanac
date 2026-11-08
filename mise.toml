@@ -5,8 +5,7 @@ rust = "1.99.0"
 shellcheck = "0.10.0"
 
 # DB_PORT and PORTOOL_WORKTREE_ID come from portool (.portool.toml). DATABASE_URL is set only
-# by the `live` task, on purpose: a dry run against the store admits every delivery id, so a
-# dry run followed by a live run files nothing. Dry runs stay on the in-memory store.
+# by the `live` task, so dry runs need no database.
 [env]
 _.file = ".env.portool"
 COMPOSE_PROJECT_NAME = "brined-almanac-{{ env.PORTOOL_WORKTREE_ID | default(value='unsynced') | truncate(length=8, end='') }}"
@@ -51,6 +50,15 @@ set -euo pipefail
 port=$(sed -n 's/^DB_PORT=//p' .env.portool)
 DB_PORT=${port:-0} docker compose down -v
 portool release
+"""
+
+[tasks."db:pending"]
+description = "Fail if this checkout's store holds events not yet run; check before deploying a change to an event's payload"
+run = """
+set -euo pipefail
+count=$(docker compose exec -T db psql -U almanac -d almanac -tAc 'select count(*) from pending')
+[ "$count" = 0 ] || { echo "db:pending: $count event(s) wait in pending. A binary with a different payload shape fails them and never retries (ivy/almanac#10). Let them run on the current binary first." >&2; exit 1; }
+echo "db:pending: nothing pending"
 """
 
 [tasks.live]

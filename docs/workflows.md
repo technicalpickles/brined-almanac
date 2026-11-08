@@ -1,0 +1,230 @@
+# Workflows
+
+The workflows brined-almanac runs or plans to run. [vision.md](vision.md) explains why they exist and the budget rule that agent work follows. [open-questions.md](open-questions.md) lists the decisions still open.
+
+Each workflow has a status:
+
+| Status | Meaning |
+|---|---|
+| shipped | Runs today. |
+| next | The next thing to build. |
+| later | Wanted, not scheduled. |
+| blocked | Waits on work somewhere else. |
+| no | Decided against. The entry says why. |
+
+## Repository tiers
+
+A repository's tier decides which workflows watch it. Tiers are declared, and moving a repository between tiers is a one-line change. Public repositories, and private ones that something public already names, are declared in code. Private repositories that nothing public names are declared in a gitignored `local/tiers.toml`, which prod gets the same way it gets its secrets. That file can only add a repository to a tier that code defines. It can't define a tier or a behaviour. Inactive repositories aren't declared at all, because the rule below computes them.
+
+| Tier | What it is | What watches it |
+|---|---|---|
+| dormant | Not being worked on and not deployed, like an iOS app on hold. | Nothing. Its tasks are marked as parked, so they don't count as stale. |
+| deployed | Running somewhere and in use, but not being developed, like a hobby web app I still use or the WordPress sites I host. | Service health, dependency and security updates, and drift between main and what is deployed. |
+| active | Being worked on now. Today these are pickleclaw, brineworks, and picklehome. | Every workflow. |
+| maintained | Public and used by other people, like bktide and pickled-claude-plugins. | Outside issues and pull requests, plus whatever its deployed or active tier adds. |
+| handed off | Someone else maintains it, like homesick, where another maintainer merged updates in July 2026. | Only the archive question below, if that person stops too. Its README names who maintains it now. |
+| retired | Public and inactive, like jeweler, whose last human commit was in 2019. | Only the archive question below. |
+
+A repository can be in more than one tier. bktide is maintained and active while I work on it.
+
+## Host state
+
+A workflow that checks a host reads a host-state report. The report is the results of the host's checks, collected as JSON.
+
+A check is a small executable that tests one thing and follows the Nagios plugin convention. It exits 0 for OK, 1 for warning, 2 for critical, and 3 for unknown, and it prints one line of status with optional metrics after a `|`, as in `DISK OK - / at 61% | used=61%;80;90`. Nagios, Icinga, Sensu, Checkmk, and Zabbix run checks in this shape unchanged, and so can cron or a systemd timer, so a check written here works with other monitoring tools. A check can be written in any language and tested on its own.
+
+Checks cover container images, CA package versions, operating system releases past end of life, site checksums, systemd units that should be running, and the HTTP status of the sites a host serves. A workflow never knows how the report arrived. Two transports deliver it:
+
+- **Pull.** Almanac connects with a fenced SSH key whose forced command prints the report and does nothing else. This is the pattern the prod design uses for picklelab. It suits hosts on the tailnet.
+- **Push.** The host writes the report on a schedule to a place almanac reads. It suits hosts almanac can't or shouldn't reach, because the host needs no inbound key. A host whose report stops arriving is itself a finding.
+
+Each host declares its transport. picklelab and the WordPress droplet use pull. The droplet joins the tailnet first, which also lets it close SSH to the internet.
+
+## Rules every workflow follows
+
+- A workflow files an issue only when a pull request in a private repository closes the finding. Everything else, including findings about public repositories like picklehome or dotfiles, ops actions, and decisions, goes to taskwarrior. Issue bodies can carry transcript text or task text, so nothing files to a public repository. "Where output goes" in [vision.md](vision.md) has the full rule.
+- Maintenance on an inactive repository asks first whether to archive it. A repository is inactive when no person has committed to it in 12 months. Commits from bots such as Dependabot don't count. When a workflow finds maintenance there, like an alert or an outside pull request, it files one task that asks whether to archive the repository, and it holds the maintenance until I answer. The task includes a README notice to add before archiving, which points people to a recommended path: a successor project, a maintained fork, or the tool to use instead. The workflow checks that an existing pointer still leads somewhere alive. jeweler's README points to Juwelier, which hasn't been pushed to since 2021. If I archive it, the maintenance goes away with it. If I keep it, I give it a tier, and the held findings file. A repository someone else still commits to is active by this rule, even when I don't commit to it.
+- Work repositories are out of scope. I can't reach them from here.
+- A workflow that calls a model follows the budget rule. A watcher calls no model.
+- Every workflow has a dry run that needs no database and no token.
+
+## Catalog
+
+### tool-failures
+
+- **Status:** shipped.
+- **Watches:** OpenClaw transcripts pulled from picklelab.
+- **Reports:** one issue per cluster of failed tool calls, grouped by service, tool, error class, and day, once a cluster crosses its threshold. Brineworks failures go to brineworks, and everything else goes to pickleclaw.
+- **Model:** none.
+- **Design:** [the tool error scan design](superpowers/specs/2026-11-06-tool-error-scan-design.md).
+
+### task-reconciler
+
+- **Status:** next.
+- **Watches:** pending taskwarrior tasks for active and deployed repositories.
+- **Closes:** a task when code confirms one of these:
+  - a merged pull request or a commit on main names the task by UUID, after "closes", "fixes", or "resolves", or with no not-done phrase in the same sentence. The starting not-done phrases are "still open", "tracked in", "phase N", "follow-up", "part of", and "refs". A UUID next to one of them only marks the task as probably done. On commits from 2026-06 to 2026-11, this rule closes 32 of the 35 tasks commits cited and marks the other 3, which are all still open.
+  - the task cites a pull request that has merged, or an issue that has closed
+  - an agent's proof checks out (see below)
+
+  Each closed task gets the evidence as an annotation and the `+almanac` tag. One taskwarrior task per day lists what closed, so I see every close and can reopen a mistake.
+- **Reports:** tasks that are probably done on weaker evidence, such as a merged pull request that touched the files the task cites, or a cited line that no longer looks the way the task describes. The report is one task per project per day.
+- **Model veto:** later, a small model reads the sentence around a cited UUID and can stop a close it reads as not done. It can't close anything itself.
+- **Evidence hunt:** for a task code can't decide, an agent reads the task and the repository and returns a proof. A proof is a list of read-only checks code can run: a commit that must be on main, a file on main that must contain or lack a pattern, an issue or pull request that must be closed, and CI that must have passed on main at or after a given commit. A test that exists and passed in CI stands in for running it, so a proof never runs repository code. Running a test in a sandbox gets added only if proofs keep falling short without it. Code runs every check. The task closes only if all of them pass. If the agent finds the work isn't done, it annotates the task with what's left, which is useful on its own. The proof is agent output, so it is untrusted until code has checked it.
+- **Model:** none for the UUID and cited-link checks. The evidence hunt is agent work under the budget rule, and suits the end of a window that would otherwise expire.
+- **Why first:** it shrinks the backlog that the task-resurfacer has to choose from, and its first version needs no model. parked-handoffs checks the same kinds of evidence, so the two share that code.
+
+### security-alerts
+
+- **Status:** next.
+- **Watches:** Dependabot, code scanning, and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API.
+- **Reports:** one item per repository per day that lists its open alerts by severity, and says whether an open Renovate or Dependabot pull request already fixes each one. A fix that is a pull request in a private repository files there as an issue. Everything else is a task, including alerts on public repositories and a leaked secret to rotate.
+- **Model:** none.
+- **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for the images and hosts on picklelab and the WordPress droplet instead of writing that here. A Dependabot alert covers a lockfile. It says nothing about a host's base images, its CA package, or a release past end of life, which is what the eMudhra advisory turned on.
+- **Inactive repositories:** an alert there files the archive question instead of the alert.
+
+### continue-work
+
+- **Status:** next, in M4 with the budget rule.
+- **Watches:** resumable parked handoffs, open tasks in fair-game repositories, and almanac's own open pull requests.
+- **Fair game:** a repository is fair game or it isn't, declared next to its tier. Every open task in a fair-game repository is eligible unless it's tagged `+mine`, and workers take them in task-resurfacer's ranked order. A task that turns out to need a decision gets parked with the question written down. brineworks is the first fair-game repository. Others join once workers have earned it there.
+- **Handoffs:** a handoff is eligible when its repository is fair game, parked-handoffs sorts it as resumable, its next steps are code a worker can do in its worktree, and it has no `**Worker:** no` line. Newest go first. The worker runs the same validation as the `unpark` skill before it changes anything. If the handoff is stale, or a next step needs a deploy, a host, a sign-in, or a decision, the worker records what blocked it in the handoff and stops there. Those handoffs stay mine.
+- **Does:** starts a worker to continue one piece of work toward a pull request. The worker is a headless Claude Code session in a container under upstream's rootless Podman sandbox, with a fresh clone, the handoff or task text that almanac passes in, and no credentials. It returns a patch and a description. Code checks the patch, and almanac pushes it through a GitHub App to the pull request's branch, or opens the pull request on the first round. The App is installed only on fair-game repositories, with write access to contents and pull requests. Later rounds answer review comments and fix failing checks the same way. Nothing merges.
+- **How many:** at most one worker per repository, so two workers never edit the same files. One worker in total to start. When the budget rule's about-to-expire exception applies, up to three, each in a different repository. Both numbers live in code next to the budget rule.
+- **Local CI first:** when a repository has a local CI command, such as brineworks' `mise run ci`, the worker runs it in its sandbox before returning a patch, so a pull request reaches the forge's CI only after local CI has passed.
+- **Portable handoffs:** `.parkinglot/` is gitignored and a container sees only the forge, so a handoff is eligible only when its branch is pushed and nothing it needs is uncommitted or at an absolute Mac path. The `park` skill should push the branch, commit work in progress to it, and write repository-relative paths.
+- **Stops:** when the budget rule says stop, when a burst starts in the same repository, or when a step needs me. It parks its state in a handoff before it stops, and the next window resumes from that handoff. A stop that needs me records its reason from a fixed set: deploy, host, sign-in, decision, or stale. session-friction counts those reasons each week, and a common one becomes a task to give workers a safe way through that step.
+- **Model:** yes. This is the main use of agent work.
+- **Feeds:** task-resurfacer. A burst in a repository sees the handoffs and pull requests that workers left there.
+
+### task-resurfacer
+
+- **Status:** next, after task-reconciler.
+- **Watches:** pending tasks and resumable parked handoffs, ranked per repository by age, priority, and recent activity.
+- **Reports:** a short list of open tasks and handoffs for each repository, which a Claude Code SessionStart hook shows when a session starts there. Almanac computes the list. The hook only reads it, because almanac is not a chat surface.
+- **Model:** none.
+
+### parked-handoffs
+
+- **Status:** next.
+- **Watches:** `.parkinglot/*.md` handoffs in every checkout under `~/github.com`, and the vault's.
+- **Reports:** each handoff older than a week, sorted into one of three groups by evidence in code:
+  - **captured.** Its branch merged, its pull request closed, or a task names it. It can go.
+  - **resumable.** Its branch or worktree still exists and nothing else tracks the work.
+  - **orphaned.** Nothing else tracks the work and its branch is gone. Only the handoff remembers it.
+
+  Orphaned handoffs matter most. Deciding what to do with one is my call, so the workflow files one task per repository per day.
+- **Model:** none.
+- **Needs:** read access to the checkouts. The compose stack in [the prod design](superpowers/specs/2026-11-06-prod-on-the-mac-design.md) mounts `~/github.com` and the vault read-only. Add the mount to that design when this workflow is built.
+
+### oss-maintained
+
+- **Status:** next.
+- **Watches:** issues and pull requests from other people on maintained-tier repositories, through almanac's native GitHub source.
+- **Reports:** a pull request that needs my review, an issue that waits on my answer, or a thread that has gone quiet.
+- **Model:** none to start.
+- **Needs:** the GitHub App that continue-work sets up in M4, installed on maintained-tier repositories too.
+
+### oss-contributions
+
+- **Status:** next, after oss-maintained.
+- **Watches:** issues and pull requests I opened on other people's projects, such as ivy/almanac, openclaw, and get-bb/bb.
+- **Reports:**
+  - a maintainer who replied or asked me a question
+  - a pull request with failing checks or merge conflicts
+  - an issue that was closed or fixed upstream, together with the workaround in my code that it makes deletable
+
+  To find workarounds, a workaround names its upstream issue in a comment, and the workflow searches for that link.
+- **Model:** none.
+- **Needs:** only a token. The repositories are not mine, so webhooks are not available. This workflow polls on a schedule.
+
+### session-friction
+
+- **Status:** next.
+- **Watches:** my Claude Code transcripts under `~/.claude/projects/`, read through [cq](https://github.com/technicalpickles/pickled-claude-plugins/tree/main/plugins/cq). tool-failures does this for Brent's transcripts. This workflow does it for mine.
+- **Schedule:** weekly, at the end of the week, the same window as the review I did by hand for picklelab on 2026-10-18. Running it when a burst ends waits until the weekly version shows the counts are useful.
+- **Counts:** only what transcripts record exactly. That review found its regex counts overcounted when agents quoted error text, and it couldn't measure hand-backs at all. The first version counts:
+  - auto-mode classifier denials and permission rule denials, grouped by reason
+  - usage-limit stops
+  - failed tool calls, grouped by command. Sandbox denials count only when the call itself failed, not when a result quotes the error.
+  - the same command attempted three or more times in one session
+  - worker stops by reason, from continue-work
+
+  Hand-backs and the time friction costs stay out until something measures them.
+- **Reports:** by whether a task tracks the item. An untracked item over its threshold becomes a task with its count and the sessions it came from. A tracked item gets the week's count annotated on its existing task, so the evidence stays current without a new task.
+- **Model:** none for the counts, which are SQL over cq. A model may rank the items and write the summary, under the budget rule. This work suits the end of a window that would otherwise expire.
+- **Feeds:** lesson-spread. A friction item with a fix becomes a lesson.
+
+### lesson-spread
+
+- **Status:** later, after session-friction.
+- **Watches:** lessons I already record, in this order:
+  1. Claude Code `feedback` memories. On 2026-11-07 there were 69 of 243 memory files. Each holds one lesson with how to apply it, scoped to one project, so the open question for each is whether my other projects need it too.
+  2. Devlog entries in the vault, 106 session notes in the inbox alone. They're prose, so pulling a check out of one is model work under the budget rule.
+
+  Rules in dotfiles are where a lesson ends up, not a source. They already apply everywhere.
+- **Reports:** other repositories where a lesson applies and has not been applied. A repository qualifies when it uses the same tool and lacks the fix. For example, a lesson about hk's `builtins.gitleaks` scanning gitignored files applies to every repository with an `hk.pkl` that uses it.
+- **How:** each lesson names a check that code can run against a repository, such as "has `hk.pkl`" plus "uses `builtins.gitleaks`". Where a lesson can't name such a check, a model may judge whether it applies, under the budget rule.
+- **Prefer structure:** a lesson that applies to every repository files one task to promote it to a dotfiles rule or a lint. A lesson that applies to a few files one task per repository that lacks it.
+- **Model:** none for lessons with a check.
+
+### service-down
+
+- **Status:** next, in M1 with security-alerts.
+- **Watches:** host-state reports from picklelab and deployed-tier hosts, including the WordPress droplet. One of its sites returned HTTP 500 for weeks while it was compromised, and nothing reported it.
+- **Reports:** a check that turned critical or stayed at warning, such as a unit that should be running and isn't, or a site that doesn't return 200.
+- **Model:** none.
+- **Order:** checks for the gaps come first: units that should be running, and site status. picklehome's watchdogs (disk_monitor, exec-approvals-watch, brineworks-server-watch) then become checks one at a time, starting with disk_monitor, which already has thresholds and stays silent when all is well. Each watchdog's timer and Telegram alert retire once its check files through almanac.
+
+### merged-on-red
+
+- **Status:** later.
+- **Watches:** merges to main on active repositories and their CI status at merge time.
+- **Reports:** a pull request that merged before CI finished or with a failing check, and whether main went red after it.
+- **Model:** none.
+
+### deploy-drift
+
+- **Status:** later.
+- **Watches:** the difference between what is merged and what is running, starting with `openclaw-ro drift` on picklelab.
+- **Reports:** a plugin enabled in config but not loaded, a stale checkout, or a container built from an old image.
+- **Model:** none.
+
+### skill-drift
+
+- **Status:** later.
+- **Watches:** skill copies that Brent edits in its workspace against their source.
+- **Reports:** an edit that the next sync would overwrite.
+- **Model:** none.
+
+### credential-expiry
+
+- **Status:** later.
+- **Watches:** authentication errors in transcripts and service logs.
+- **Reports:** a credential that has started failing, such as an expired OAuth refresh token.
+- **Model:** none.
+
+### deployed-upkeep
+
+- **Status:** later. This is Renovate plus upstream's `almanacs/renovate`, not a workflow of ours.
+- **Why:** on 2026-11-07 only dotfiles and dotfiles-devcontainer had Renovate, and most deployed-tier repositories had no update bot at all. The gap is that update pull requests never open.
+- **Steps:**
+  1. Turn on Renovate for deployed-tier repositories, including Docker base images and digests. On the WordPress droplet's repository, that would have flagged the end-of-life base images before the eMudhra advisory did.
+  2. Run upstream's `almanacs/renovate` unchanged to repair the Renovate pull requests that break. It shares the GitHub App that continue-work sets up.
+  3. Its repairs are agent work, so they run only under the budget rule. Upstream caps each session by tokens, turns, and dollars, but not by the five-hour window.
+- **Model:** upstream's, for repair.
+
+### container-logs
+
+- **Status:** blocked on per-call logging in brineworks.
+- **Watches:** brineworks container logs.
+- **Reports:** failures that don't reach an OpenClaw transcript.
+- **Model:** none.
+
+## Decided against
+
+- **Telegram alerts.** The issue is the alert.
+- **Filing to a public repository.** Issue bodies carry private text.
+- **Transcripts from the dev VM.** They are test traffic and would file noise.
+- **Work repositories.** I can't reach them from here.
+- **Closing a task on a model's word.** An agent can find evidence. Only code that checks the evidence closes a task.

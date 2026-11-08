@@ -229,7 +229,7 @@ fn a_sample_never_prints_its_text() {
 }
 
 #[test]
-fn a_sample_keeps_the_full_text_and_compose_cuts_it() {
+fn a_sample_keeps_the_full_text_and_its_excerpt_cuts_it() {
     let long = "x".repeat(2000);
     let failure = Failure::mcp("brineworks", "triage_apply")
         .details(Details::Empty)
@@ -237,10 +237,8 @@ fn a_sample_keeps_the_full_text_and_compose_cuts_it() {
     let result = read_one(failure);
     let sample = &result.errors[0].text;
     assert_eq!(sample.narrow(str::len), 2000);
-    let report = serde_json::to_value(sample.compose("h")).unwrap();
-    let report = report.as_str().unwrap();
-    let after = report.split("sample:\n").nth(1).unwrap();
-    assert_eq!(after.chars().count(), 500);
+    let excerpt = serde_json::to_value(sample.excerpt()).unwrap();
+    assert_eq!(excerpt.as_str().unwrap().chars().count(), 500);
 }
 
 #[test]

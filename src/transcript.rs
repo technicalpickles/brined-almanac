@@ -64,7 +64,7 @@ impl At {
 }
 
 /// Error text from a transcript. It is untrusted, so `Debug` hides it and the only ways out are
-/// a question about it (`narrow`) or a bounded report (`compose`).
+/// a question about it (`narrow`) or a bounded excerpt (`excerpt`).
 pub struct Sample(String);
 
 impl fmt::Debug for Sample {
@@ -80,15 +80,14 @@ impl Sample {
         f(&self.0)
     }
 
-    pub fn compose(&self, header: &str) -> Report {
-        let cut: String = self.0.chars().take(Self::MAX).collect();
-        Report(format!("{header}\n\nsample:\n{cut}"))
+    pub fn excerpt(&self) -> Excerpt {
+        Excerpt(self.0.chars().take(Self::MAX).collect())
     }
 }
 
 #[derive(Serialize)]
 #[serde(transparent)]
-pub struct Report(String);
+pub struct Excerpt(String);
 
 #[derive(Debug)]
 pub enum ReadError {
