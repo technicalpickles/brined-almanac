@@ -1,5 +1,5 @@
 # This checkout's almanac store. `mise run db` brings it up on the port portool gave this
-# checkout; the main checkout's is the interim store for live runs (README, "Running it").
+# checkout.
 # Loopback only, no password: trust auth never leaves 127.0.0.1.
 services:
   db:

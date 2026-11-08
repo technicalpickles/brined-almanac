@@ -47,12 +47,27 @@ local cargo_clippy = new Step {
   }
 }
 
+local shellcheck = new Step {
+  check = new CommandSpec {
+    command = "shellcheck puller/pull.sh puller/pull.test.sh scripts/check-forbidden scripts/image-smoke scripts/deploy scripts/compose-config-check"
+    effect = "read"
+  }
+}
+
+local compose_config = new Step {
+  check = new CommandSpec {
+    command = "scripts/compose-config-check"
+    effect = "read"
+  }
+}
+
 hooks {
   ["pre-commit"] {
     steps {
       ["fmt"] = cargo_fmt
       ["gitleaks"] = gitleaks_staged
       ["forbidden"] = forbidden_files
+      ["shellcheck"] = shellcheck
     }
   }
   ["check"] {
@@ -61,6 +76,8 @@ hooks {
       ["clippy"] = cargo_clippy
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
+      ["shellcheck"] = shellcheck
+      ["compose"] = compose_config
     }
   }
   ["pre-push"] {

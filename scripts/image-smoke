@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Build brined-almanac:<tag> (default: smoke) and check what the compose stack relies on.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+tag=${1:-smoke}
+image=brined-almanac:$tag
+
+fail() {
+  echo "image-smoke: $*" >&2
+  exit 1
+}
+
+empty=$(mktemp -d)
+errs=$(mktemp)
+trap 'rm -rf "$empty" "$errs"' EXIT
+
+docker build -f Containerfile -t "$image" .
+
+docker run --rm "$image" synth --format json |
+  jq -e '.[0].workflow == "tool-failures" and .[0].scans == true' >/dev/null ||
+  fail "synth manifest lacks the tool-failures workflow with scans"
+
+uid=$(docker run --rm --entrypoint id "$image" -u)
+[[ $uid == 10001 ]] || fail "runs as uid '$uid', want 10001"
+
+docker run --rm --entrypoint curl "$image" --version >/dev/null ||
+  fail "curl is missing"
+
+out=$(docker run --rm "$image" check)
+[[ $out == *"1 workflow(s)"* ]] || fail "check output lacks '1 workflow(s)': $out"
+
+docker run --rm -v "$empty:/transcripts:ro" -e BRENT_TRANSCRIPTS=/transcripts \
+  "$image" backfill --dry-run >/dev/null ||
+  fail "backfill --dry-run failed on an empty transcripts mount"
+
+if docker run --rm -e BRENT_TRANSCRIPTS=/transcripts "$image" backfill --dry-run >/dev/null 2>"$errs"; then
+  fail "backfill --dry-run succeeded without a transcripts mount"
+fi
+grep -q /transcripts "$errs" || fail "missing-mount error does not name /transcripts: $(cat "$errs")"
+
+echo "image-smoke: ok"

@@ -1,0 +1,7 @@
+target/
+local/
+transcripts/
+.env*
+.claude/
+docs/
+.git/

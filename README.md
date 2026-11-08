@@ -32,7 +32,15 @@ The binary has almanac's verbs: `synth` prints the manifest, `check` validates t
 | `DATABASE_URL` | The Postgres store that remembers what's been filed. Required for live runs; set by `mise run live`, never by hand (see below). |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
 
-### Dry runs
+### Prod
+
+Prod runs on the Mac as a compose stack: Postgres, the daemon, and a puller that fetches Brent's transcripts from picklelab every 10 minutes. Deploys, rollback, rotation and what to do when it breaks are in [the prod runbook](docs/runbooks/prod-on-the-mac.md).
+
+### Dev
+
+Everything below runs from a checkout and shares nothing with prod.
+
+#### Dry runs
 
 A dry run needs no database and no token, so this is the loop for poking at the scan:
 
@@ -40,24 +48,24 @@ A dry run needs no database and no token, so this is the loop for poking at the 
 BRENT_TRANSCRIPTS=path/to/pulls mise exec -- cargo run -- backfill --dry-run
 ```
 
-Only the `live` task sets `DATABASE_URL`, so dry runs use the in-memory store. A dry run pointed at the real store is harmless anyway, because almanac keeps a dry run's rows apart from a live run's.
+Only the `live` task sets `DATABASE_URL`, so dry runs use the in-memory store. A dry run pointed at this checkout's store is harmless anyway, because almanac keeps a dry run's rows apart from a live run's.
 
-### The store
+#### The store
 
 Each checkout gets its own Postgres, on a port portool (`cargo install portool`) hands out. `.portool.toml` declares the `db` slot, portool writes `DB_PORT` into the gitignored `.env.portool` (its git hooks keep it current), and `mise.toml` reads it from there.
 
 ```bash
 mise run db          # start this checkout's Postgres; data lives in a named volume
-mise run db:down     # worktrees only: drop the container, the volume and the ports
+mise run db:down     # drop this checkout's container, volume and ports
 ```
-
-The main checkout's store is the interim store for live runs. Its port block is pinned in portool, the container restarts with OrbStack, and `db:down` refuses to touch it. There's no backup of the volume yet; losing it means the next live run files everything again.
 
 Run `mise run db:pending` before deploying a change to an event's payload. Events the old binary admitted but hasn't run fail under the new shape, and their delivery ids stay seen, so they never run again ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). The task fails while anything is pending.
 
-`wt remove` runs `db:down` through the hook in `.config/wt.toml`, so removing a worktree also removes its Postgres. A worktree's store is empty, which makes a live run from a worktree refile every cluster, so live runs happen from main.
+`wt remove` runs `db:down` through the hook in `.config/wt.toml`, so removing a worktree also removes its Postgres.
 
-### Live runs
+#### Live runs
+
+A live run from a checkout is deliberate and rare. Its store shares nothing with prod's, so it refiles every cluster prod has already filed. Point it at a transcript directory prod never sees, or don't run it.
 
 ```bash
 mise run db

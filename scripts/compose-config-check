@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Asserts compose.prod.yaml renders the intended stack, using stub values only.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+printf 'ALMANAC_MODE=live\nPULL_HOST=h\nPULL_USER=u\n' >"$tmp/prod.env"
+: >"$tmp/known_hosts"
+mkdir "$tmp/transcripts"
+
+render() {
+  env -u BRINED_ALMANAC_GITHUB_TOKEN -u BRINED_ALMANAC_PULLER_KEY -u COMPOSE_PROJECT_NAME \
+    BRINED_ALMANAC_STATE="$tmp" "$@" \
+    docker compose -f compose.prod.yaml config --format json
+}
+
+rendered=$(render BRINED_ALMANAC_GITHUB_TOKEN=x BRINED_ALMANAC_PULLER_KEY=y)
+
+jq -e '
+  .name == "brined-almanac-prod"
+  and .services.db.ports == null
+  and .services.almanac.environment.DATABASE_URL == "postgres://almanac@db:5432/almanac"
+  and .services.almanac.environment.BRENT_TRANSCRIPTS == "/transcripts"
+  and ([.services.almanac.volumes[] | select(.target == "/transcripts")] | length == 1 and .[0].read_only == true)
+  and .services.almanac.ports[0].published == "8788"
+  and .services.almanac.ports[0].host_ip == "127.0.0.1"
+  and .services.puller.environment.PULLER_KEY == "y"
+  and ([.services.puller.tmpfs[]? | select(startswith("/run/puller:") and contains("uid=10002"))] | length == 1)
+' >/dev/null <<<"$rendered" || {
+  echo "compose-config-check: rendered config failed an assertion" >&2
+  exit 1
+}
+
+expect_guard_failure() {
+  local missing=$1 present=$2 err
+  if err=$(render "BRINED_ALMANAC_$present=x" 2>&1 >/dev/null); then
+    echo "compose-config-check: config succeeded without BRINED_ALMANAC_$missing" >&2
+    exit 1
+  fi
+  grep -q 'mise run deploy' <<<"$err" || {
+    echo "compose-config-check: missing BRINED_ALMANAC_$missing did not point at mise run deploy" >&2
+    exit 1
+  }
+}
+
+# ps and exec interpolate the whole file too; dummy values must be enough for them.
+render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused >/dev/null || {
+  echo "compose-config-check: dummy guard values do not render, so ps/exec would fail" >&2
+  exit 1
+}
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  docker compose -f compose.prod.yaml ps >/dev/null
+
+expect_guard_failure GITHUB_TOKEN PULLER_KEY
+expect_guard_failure PULLER_KEY GITHUB_TOKEN
+
+echo "compose-config-check: ok"

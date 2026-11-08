@@ -1,5 +1,5 @@
 # Ports for a checkout's Postgres. Each key becomes <KEY>_PORT in the gitignored .env.portool;
-# mise.toml reads DB_PORT from there. Every checkout, main included, gets its own block, so a
-# worktree's store never collides with the interim store in the main checkout.
+# mise.toml reads DB_PORT from there. Every checkout, main included, gets its own block, so no
+# two checkouts' stores collide.
 [ports]
 db = 0

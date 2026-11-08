@@ -209,7 +209,7 @@ process and the containers it creates.
   later picklelab deployment under systemd (`LoadCredential=`), which is the
   reason for a service account over Automic Vault: av is Mac-only.
 - **References in the repo.** `prod.secrets.env` holds
-  `BRINED_ALMANAC_GITHUB_TOKEN=op://brined-almanac/github-token/credential` and
+  `BRINED_ALMANAC_GITHUB_TOKEN=op://brined-almanac/github-token/token` and
   `BRINED_ALMANAC_PULLER_KEY="op://brined-almanac/puller/private key?ssh-format=openssh"`.
   Verified against `op` 2.41.1: `?ssh-format=openssh` returns the key in the
   format `ssh -i` reads.
@@ -243,8 +243,9 @@ process and the containers it creates.
 
 `mise run prod -- <verb>` runs `docker compose -f compose.prod.yaml exec
 almanac brined-almanac <verb>`, for an ad hoc `check` or `backfill` against
-prod's store with prod's token. A `backfill --dry-run` there is fine: prod's
-`seen` already holds everything prod has filed.
+prod's store with prod's token. Never `backfill --dry-run` there: backfill
+admits every delivery id into `seen` in either mode, so a dry run suppresses
+the filings a real run would make.
 
 Rollback: `docker tag brined-almanac:<older sha> brined-almanac:prod` and
 `up -d`. The migrations are forward-only, so rolling back past one that added
@@ -257,12 +258,18 @@ migrated database fails on existing tables:
 
 1. `mise run deploy` builds, then `up -d db` only (the task takes
    `--db-only`, used here and never again).
-2. `docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac |
-   docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac`.
+2. `docker start brined-almanac-d34bd55b-db-1`, then, under `set -o pipefail`,
+   `docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac |
+   docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac`.
    The dump carries `_sqlx_migrations`, so the almanac's start sees them applied.
 3. `mise run deploy` again, now the whole stack.
-4. `mise run prod -- backfill` must report 0 queued and every cluster
-   unchanged. That line is the acceptance test for the migration.
+4. Before this step, the counts of `seen` and `_sqlx_migrations` must match
+   between the interim container and prod's db; that comparison is the
+   acceptance test for the migration. A backfill previewed on a copy of prod's
+   db then shows every restored live id unchanged, and the clusters new since
+   the interim store's last scan as queued; those file once the daemon runs.
+   A live `mise run prod -- backfill` after that reports 0 queued. If the
+   restore had failed, every cluster would show as new.
 
 After that the main checkout's store is an ordinary dev store. The same change
 removes the `db:down` refusal on main, unpins its portool block, and rewrites
@@ -292,8 +299,10 @@ Proof, in order. Each step gates the next.
    tracker (it verifies providers are registered, not that the directory
    exists; the mount is proven by the backfill in step 3 and by the image
    smoke test's dry run against a mounted empty directory).
-3. After the restore: `mise run prod -- backfill` reports 0 queued, 102
-   unchanged. Nothing new appears in either repo's `almanac` label.
+3. After the restore, `seen` and `_sqlx_migrations` have equal counts in the
+   interim and prod databases. A preview on a copy shows 102 unchanged and
+   only clusters new since the interim store's last scan as queued, and the
+   live backfill after the daemon's first scan reports 0 queued.
 4. The forced command: with the puller key, `ssh ... sessions` lists sessions;
    `ssh ... transcript <key> --since <ms>` streams events; `ssh ... version`,
    `ssh ... transcript <key> --last 5`, and an interactive `ssh` all exit 2
@@ -334,14 +343,18 @@ service, in a container. What we learned that it should mention:
 `ALMANAC_LISTEN` must be set to a non-loopback address for a container
 healthcheck from the outside; `sd_notify` is harmless without systemd; the
 scaffold could ship a Containerfile and a compose example next to the systemd
-units. Text drafted in the plan, shown to Josh before posting. A PR with this
-repo's Containerfile generalized can follow once it has run for a while.
+units. Filed as [ivy/almanac#11](https://github.com/ivy/almanac/issues/11).
+A PR with this repo's Containerfile generalized can follow once it has run
+for a while.
 
 ## Open questions
 
 - Does the container resolve `picklelab` by MagicDNS, or does `PULL_HOST` need
   the tailnet address? The first deploy finds out; `PULL_HOST` exists so
   either answer works without a code change.
+  Answered 2026-11-08: MagicDNS works. `PULL_HOST=picklelab` resolved from
+  the puller container on OrbStack, and the hostname-keyed `known_hosts`
+  matched.
 - Transcript file growth: append-only files are read whole every 15 minutes.
   Fine at tens of MB; revisit when a scan takes longer than a minute.
 - Whether to also pull from the dev VM. Not now: dev transcripts are test
@@ -350,6 +363,13 @@ repo's Containerfile generalized can follow once it has run for a while.
   tailnet address, which is how OrbStack NATs container traffic. Testing step
   4 proves or disproves it; if it fails, drop `from=` and keep `restrict` and
   the forced command.
+  Partly answered 2026-11-08: from the Mac host, with the puller key alone
+  (`-F /dev/null`, no agent), picklelab accepted the key under `from=`.
+  `sessions` returned 12 sessions; `version`, `transcript ... --last 5`, a
+  bare login, and piped shell input were refused with exit 2; pty and port
+  forwarding were refused. Answered for the container at the first deploy the
+  same day: the puller's ssh arrived from the Mac's address, `from=` held,
+  and the first pass pulled all 12 sessions. Keep `from=`.
 - A separate picklelab user for the pulls, owning only the puller's key and
   the docker group membership `openclaw-ro` needs, would keep the forced
   command off the interactive user's `authorized_keys`. Worth doing once this
