@@ -343,8 +343,9 @@ service, in a container. What we learned that it should mention:
 `ALMANAC_LISTEN` must be set to a non-loopback address for a container
 healthcheck from the outside; `sd_notify` is harmless without systemd; the
 scaffold could ship a Containerfile and a compose example next to the systemd
-units. Text drafted in the plan, shown to Josh before posting. A PR with this
-repo's Containerfile generalized can follow once it has run for a while.
+units. Filed as [ivy/almanac#11](https://github.com/ivy/almanac/issues/11).
+A PR with this repo's Containerfile generalized can follow once it has run
+for a while.
 
 ## Open questions
 
