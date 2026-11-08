@@ -6,23 +6,22 @@ Sources, all read-only: assistant-message timestamps from Claude Code transcript
 
 ## How bursty the work is
 
-The vision says I work in bursts. The shape is sharper than that: bursts are usually one day long, and the quiet between them is usually three or four days.
+The vision says I work in bursts. The shape is sharper than that: bursts are usually one or two days long, and the quiet between them is usually about three days.
 
 | Measure | Value |
 |---|---|
 | Days in range | 69 |
-| Median assistant messages per day | 890 |
-| Days with 2,000 or more | 18 |
-| Days with fewer than 500 | 20, six of them zero |
-| Top 6 days' share of all messages | 24% |
-| Top 17 days' share | 56% |
-| Burst runs (consecutive days at 2,000 or more) | 11 |
-| Median run length | 1 day |
-| Median quiet gap between runs | 3.5 days |
+| Median assistant messages per day | 992 |
+| Days with 2,000 or more | 23 |
+| Days with fewer than 500 | 17, six of them zero |
+| Top 17 days' share of all messages | 56% |
+| Burst runs (consecutive days at 2,000 or more) | 10 |
+| Median run length | 1.5 days |
+| Median quiet gap between runs | 3 days |
 | Longest quiet gap | 18 days (2026-09-28 to 10-15) |
-| Weekend mean vs weekday mean | 1,604 vs 1,179 per day |
+| Weekend mean vs weekday mean | 1,926 vs 1,486 per day |
 
-Eval-harness sessions (plugin evals run from hash-suffixed scratch directories) were 19% of all assistant messages and are excluded from these numbers. Left in, they would look like bursts.
+Eval-harness sessions, the `claude plugin eval` runs under `/private/tmp/claude-501/`, were 0.6% of all assistant messages and are excluded. The first version of this review excluded 19% as evals by mistake: it took the hash-suffixed project directories for eval scratch dirs, and they are Claude Code worktree sessions, real work that names its repository. The numbers above are the corrected ones.
 
 **The day has two humps.** Messages peak at 09:00 to 11:00 and again at 20:00 to 21:00, with a trough from 13:00 to 17:00 and nothing from 04:00 to 06:00. Git commits show the same humps (peaks at 11:00 and 21:00).
 
@@ -78,8 +77,8 @@ Ordered by how much they cost, judging by how many sources name them and how lon
 10. **Parallel sessions collide.** Partial. Worktree sessions share a dev database, deploys refuse a tree another session dirtied (15 minutes per hit), subagents commit to main instead of their worktree, and one worktree session cannot write a sibling's files. session-friction will count the symptoms. The structural fix is in dotfiles and the project skills, not almanac, so the right output is a lesson-spread lesson once a fix exists. Nothing to add here beyond counting it.
 
 11. **Measurement gaps found while measuring.** Gap, and they bite the M4 design directly.
-    - Since about 2026-10-16 nearly every session runs from the `~/github.com` working directory and works in worktrees, so the transcript `project` field is "github.com" for 28k of 91k non-eval messages and cannot attribute work to a repository. continue-work's "stop when a burst starts in the same repository" and the budget rule's burst detection need the repository from tool-call paths or from git, not from `project`.
-    - Eval-harness sessions are 19% of assistant messages and spend the same five-hour window. Burst detection has to exclude them, and the budget rule has to count them.
+    - Since about 2026-10-16 most sessions start from the `~/github.com` working directory, so the transcript `project` field is "github.com" for 28k of 113k messages, 67% of them since that date, and cannot attribute work to a repository on its own. Every message does carry a `cwd`, and 68% of messages have one inside a repository or its worktree. For the rest, tool-call file paths named a repository in 34 of the last 40 sessions. Attribution is cwd first, tool paths second.
+    - Eval-harness sessions run from `/private/tmp/claude-501/` and were 0.6% of assistant messages. Their project path tells them apart, and the budget rule counts them.
     - Two cq processes running at once fight over the DuckDB lock, and a retry loop on that lock hung the Mac badly enough to stop this review. session-friction must be the only cq reader when it runs, use `--no-reindex`, or read the JSONL directly the way tool-failures does.
 
 12. **Agents claim done without a durable artifact.** Covered by nothing, and probably rightly: this is a process rule, recorded in four memories and a devlog (delegated agent reports done, nothing committed). It is a lesson-spread candidate once the rule is written down once in dotfiles.
@@ -115,7 +114,7 @@ Answered the same day on a review page, and recorded in [workflows.md](../workfl
 - **merged-on-red reports CI queue time and runner count.**
 - **The budget rule takes the hour-of-day histogram as a prior.**
 - **cq is the tool for session-friction.** Its gaps are sorted into integration points, feature gaps and ops in [open-questions.md](../open-questions.md).
-- **Eval sessions and repository attribution** need more context before deciding. Both are written up as open questions. The eval note also produced the eval-queue idea: run queued evals in likely-free hours.
+- **Eval sessions and repository attribution** were answered the same evening by looking harder at the data. Evals are 0.6% of messages and their `/private/tmp` path identifies them. Attribution comes from each message's `cwd`, then from tool-call paths. The eval note also produced the eval-queue idea: run queued evals in likely-free hours.
 - Nothing in the findings was flagged as wrong, and nothing was named as missing. The transcript hand-back counts are still missing from this pass.
 
 ### Added after the review: tools I use from several machines

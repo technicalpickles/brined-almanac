@@ -4,7 +4,7 @@ brined-almanac keeps my projects moving between bursts of attention. It is a set
 
 ## The problem
 
-I work in bursts. Since 2026-09-01, busy days have run 20 to 50 Claude Code sessions and four to seven thousand assistant messages. Quiet stretches follow, like the first half of October, when most days had fewer than a thousand. A burst is usually one day long, and the quiet after it is usually three or four days; the [2026-11-08 review](reviews/2026-11-08-work-pattern-review.md) has the shape. Of 149 five-hour usage windows in that period, 31 had more than 2,000 assistant messages, and most of those ran the full five hours. On 2026-10-26, 25 parallel sessions used up a window in 1.1 hours and a session stopped with its work committed but not pushed.
+I work in bursts. Since 2026-09-01, busy days have run 20 to 50 Claude Code sessions and four to seven thousand assistant messages. Quiet stretches follow, like the first half of October, when most days had fewer than a thousand. A burst is usually one or two days long, and the quiet after it is usually about three days; the [2026-11-08 review](reviews/2026-11-08-work-pattern-review.md) has the shape. Of 149 five-hour usage windows in that period, 31 had more than 2,000 assistant messages, and most of those ran the full five hours. On 2026-10-26, 25 parallel sessions used up a window in 1.1 hours and a session stopped with its work committed but not pushed.
 
 Between bursts, nothing moves, and these things go stale.
 
@@ -49,7 +49,7 @@ The exception is capacity that is about to expire. When the window resets soon a
 - **About to expire** means more than half the window is unused and it resets in less than 90 minutes.
 - **Likely free** and **likely mine**, decided 2026-11-08, are a prior from the hour-of-day histogram of 2026-09-01 to 2026-11-08. The day has two humps: messages peak at 09:00 to 11:00 and again at 20:00 to 21:00, with a trough from 13:00 to 17:00 and nothing from 04:00 to 06:00. Weekday afternoons from 13:00 to 17:00 and every night from 23:00 to 07:00 are likely free. Mornings from 08:00 to 12:00 and evenings from 18:00 to 22:00, and weekend mornings especially, are likely mine. The prior tilts the starting numbers, so an agent run in a likely-free hour may start sooner after the last transcript write. It never overrides the burst and working checks.
 
-Bursts are short. From 2026-09-01 to 2026-11-08 there were 11 runs of burst days (2,000 assistant messages or more), the median run was one day, the median quiet gap between runs was 3.5 days, and the longest was 18 days. A worker therefore has about three days to move a handoff before the next burst, and that burst lands in a different project more often than not, since a burst day touches six or seven projects. The resurfacer, which tells the next burst what is open where it lands, pays off sooner than worker speed does.
+Bursts are short. From 2026-09-01 to 2026-11-08 there were 10 runs of burst days (2,000 assistant messages or more), the median run was a day and a half, the median quiet gap between runs was 3 days, and the longest was 18 days. A worker therefore has about three days to move a handoff before the next burst, and that burst lands in a different project more often than not, since a burst day touches six or seven projects. The resurfacer, which tells the next burst what is open where it lands, pays off sooner than worker speed does.
 
 The numbers live in code next to the rule, so changing one is a one-line change.
 

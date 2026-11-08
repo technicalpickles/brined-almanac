@@ -63,7 +63,7 @@ Work a burst left unfinished keeps going on capacity I'm not using.
 
 - The budget rule in code, with its starting numbers next to it, and the likely-free and likely-mine hours from the 2026-11-08 histogram as a prior
 - A probe that reads `unifiedWindows.five_hour` from a headless `claude -p` run
-- Burst and working detection from transcript writes under `~/.claude/projects/`, with the repository taken from tool-call paths or git rather than the transcript's project field, and eval-harness sessions handled as the open question decides
+- Burst and working detection from transcript writes under `~/.claude/projects/`, with the repository taken from each message's `cwd`, then tool-call paths, rather than the transcript's project field, and eval-harness sessions excluded by their `/private/tmp` project path
 - A GitHub App, installed on fair-game repositories with contents and pull request write access, and later on maintained-tier repositories for M5, following upstream's [deploying guide](https://github.com/ivy/almanac/blob/main/docs/deploying.md)
 - A worker runner: a headless Claude Code session in a container under upstream's rootless Podman sandbox, with no credentials, started by almanac and stopped when the budget rule says so. It returns a patch that almanac checks and pushes
 - An effect that opens a pull request. Upstream's `Push` only commits to an existing pull request's branch, so propose it upstream ([ivy/almanac#9](https://github.com/ivy/almanac/issues/9))
