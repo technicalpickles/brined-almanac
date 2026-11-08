@@ -100,6 +100,33 @@ impl<I: Tracker, T: Tracker> Tracker for Router<I, T> {
     }
 }
 
+/// A boxed tracker, so the router's two sides can be chosen at runtime. The orphan rule rules
+/// out implementing almanac's `Tracker` for `Box` or `Arc` directly.
+pub struct AnyTracker(pub Box<dyn Tracker>);
+
+impl Tracker for AnyTracker {
+    fn file<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        title: &'a str,
+        body: &'a Untrusted<String>,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        self.0.file(key, target, title, body)
+    }
+
+    fn ask<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        pull: Option<u64>,
+        question: &'a str,
+        body: &'a Untrusted<String>,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        self.0.ask(key, target, pull, question, body)
+    }
+}
+
 fn not_a_task_target(target: &Slug, why: &str) -> StepError {
     StepError(format!("{target} is not a task target: {why}"))
 }
