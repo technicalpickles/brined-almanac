@@ -129,10 +129,15 @@ delete it:
 ```sh
 key=$(mktemp)
 OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op read "op://brined-almanac/puller/private key?ssh-format=openssh" > "$key"
-ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab sessions | jq '.sessions | length'
-ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab version; echo "exit $?"
+ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab sessions | jq '.sessions | length'
+ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab version; echo "exit $?"
 rm -f "$key"
 ```
+
+`-F /dev/null` and `IdentityAgent=none` matter. Without them, an `IdentityFile`
+or agent from your ssh config is offered after the puller key, so a refused
+puller key falls back to your own key and the check tests the wrong thing
+(the symptom is `bash: sessions: command not found`).
 
 `sessions` prints a number. `version` prints nothing and exits 2. If `sessions`
 is refused with a permission error, either `from=` does not match the Mac's

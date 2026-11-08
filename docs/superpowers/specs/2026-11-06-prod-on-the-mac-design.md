@@ -356,6 +356,12 @@ repo's Containerfile generalized can follow once it has run for a while.
   tailnet address, which is how OrbStack NATs container traffic. Testing step
   4 proves or disproves it; if it fails, drop `from=` and keep `restrict` and
   the forced command.
+  Partly answered 2026-11-08: from the Mac host, with the puller key alone
+  (`-F /dev/null`, no agent), picklelab accepted the key under `from=`.
+  `sessions` returned 12 sessions; `version`, `transcript ... --last 5`, a
+  bare login, and piped shell input were refused with exit 2; pty and port
+  forwarding were refused. The container path is still untested until the
+  first deploy.
 - A separate picklelab user for the pulls, owning only the puller's key and
   the docker group membership `openclaw-ro` needs, would keep the forced
   command off the interactive user's `authorized_keys`. Worth doing once this
