@@ -190,26 +190,41 @@ start, and a restore into a migrated database fails on existing tables.
    mise run deploy
    ```
 
-   The daemon's first scan is immediate, and the puller pulls every session
-   from the start.
-
-5. Confirm with a live backfill:
-
-   ```sh
-   mise run prod -- backfill
-   ```
-
-   It must report 0 queued and every cluster unchanged. This is the final
-   confirmation after the count comparison, not a probe. If the restore had
-   silently failed, this run would file every cluster again. A different result
-   means something is still wrong. Do not leave the stack running in live mode
-   until you know why. To stop the daemon:
+   The puller pulls every session from the start, so the deploy waits several
+   minutes for its first pass. The daemon is live from the moment it starts,
+   and its first scan is immediate. On a first deploy the transcripts are
+   still empty then, but its next scan comes 15 minutes later. As soon as the
+   deploy returns, stop the daemon:
 
    ```sh
    env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml stop almanac
    ```
 
-6. Confirm the connection:
+   Then check the issue counts in both repos' `almanac` label. A scan during
+   the deploy may already have filed.
+
+5. Preview on a copy (below). The live `unchanged` will equal the restored
+   live ids, and the new clusters in the preview are what files. If the
+   restore had silently failed, every cluster would show as new. Do not go on
+   until the numbers make sense.
+
+6. Start the daemon. Its first scan files what the preview showed:
+
+   ```sh
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml start almanac
+   ```
+
+   Then confirm with a live backfill:
+
+   ```sh
+   mise run prod -- backfill
+   ```
+
+   It reports 0 queued, and `unchanged` is every cluster in the transcripts.
+   Anything queued means the scan and the preview disagree. Stop the daemon
+   again and find out why.
+
+7. Confirm the connection:
 
    ```sh
    mise run prod -- check
@@ -218,6 +233,36 @@ start, and a restore into a migrated database fails on existing tables.
    It prints `ok`.
 
 After this, the main checkout's database is an ordinary dev store.
+
+### Preview a backfill on a copy
+
+Never dry-run against prod's database. Copy it into a throwaway Postgres and
+run the backfill there with no `GITHUB_TOKEN`. Without a token the almanac
+uses a tracker that only prints, so nothing can file, whatever the mode.
+
+```sh
+docker network create ba-preview
+docker run -d --name ba-preview-db --network ba-preview -e POSTGRES_USER=almanac -e POSTGRES_DB=almanac -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17-alpine
+until docker exec ba-preview-db pg_isready -U almanac -q; do sleep 1; done
+(set -o pipefail; docker exec brined-almanac-prod-db-1 pg_dump -U almanac almanac | docker exec -i ba-preview-db psql -q -v ON_ERROR_STOP=1 -U almanac almanac)
+docker run --rm --network ba-preview -e DATABASE_URL=postgres://almanac@ba-preview-db:5432/almanac -e BRENT_TRANSCRIPTS=/transcripts -v "$STATE/transcripts:/transcripts:ro" brined-almanac:prod backfill > "$STATE/preview.out"
+```
+
+A dry run records ids under the almanac name `brined-almanac.dry-run`, apart
+from the live rows, so its own summary reports every cluster as queued. The
+live answer is the difference:
+
+```sh
+docker exec ba-preview-db psql -U almanac almanac -Atc "select delivery_id from seen where almanac = 'brined-almanac.dry-run' and delivery_id not in (select delivery_id from seen where almanac = 'brined-almanac') order by 1"
+```
+
+Not every new cluster files. The `WouldApply` lines in `$STATE/preview.out` are what
+files; the ones whose title names a new cluster file on the live run. Then
+clean up:
+
+```sh
+docker rm -f ba-preview-db && docker network rm ba-preview && rm "$STATE/preview.out"
+```
 
 ## Every deploy
 
@@ -371,8 +416,8 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 The puller writes these under `$STATE/transcripts/`:
 
 - `<safe-key>.jsonl`, one per session.
-- `.cursors.json`, mode 600, owned by the puller's uid 10002. The daemon
-  ignores dotfiles.
+- `.cursors.json`, mode 600. Inside the container the puller's uid 10002 owns
+  it; on the Mac, OrbStack shows it as your user. The daemon ignores dotfiles.
 - `.last-pull`, the time the last completed pass ended.
 
 The state directory must hold no private key and no GitHub token. To check:
@@ -399,4 +444,27 @@ directory, outside the repo.
 
 ## First deploy, 2026-11
 
-The controller records here what each step printed.
+Deployed 2026-11-08 from branch `prod-on-the-mac` at `6125d77`, after main
+(almanac bumped to `416e8e6`) was merged in.
+
+- Fence check from the Mac, puller key alone: `sessions` returned 12;
+  `version`, `transcript ... --last 5`, a bare login, and piped shell input
+  exited 2; pty and port forwarding were refused.
+- `mise run image:smoke`: ok. The interim store held 0 pending events.
+- Step 1, `mise run deploy --db-only`: db healthy on a new `pgdata` volume.
+- Step 2, dump and restore: exit 0.
+- Step 3, counts (interim, prod): `seen` 102, 102. `_sqlx_migrations` 5, 5.
+  The almanac at `416e8e6` applied a sixth migration on its first start.
+- Step 4, `mise run deploy`: db and almanac healthy; the deploy exited 1
+  because the puller was still in its first pass. That pass pulled all 12
+  sessions (51 MB, 49 MB of it one telegram session) in about 5 minutes, then
+  went healthy. The puller's `start_period` is now 20 minutes so `up --wait`
+  waits the pass out. `PULL_HOST=picklelab` resolved by MagicDNS, and `from=`
+  held for the container.
+- The almanac daemon was stopped before its second scan, with nothing filed,
+  to preview step 5 on a copy. The preview: 162 clusters, 102 unchanged
+  against the restored ids, 0 restored ids missing, 60 new. 10 of the new
+  ones file (8 brineworks, 2 pickleclaw, dated 2026-10-30 to 2026-11-07);
+  the rest file nothing.
+- Hygiene: no private key and no GitHub token under `$STATE`.
+- Step 5, live backfill, and step 6, `check`: pending.

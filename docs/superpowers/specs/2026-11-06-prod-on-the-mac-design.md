@@ -265,9 +265,11 @@ migrated database fails on existing tables:
 3. `mise run deploy` again, now the whole stack.
 4. Before this step, the counts of `seen` and `_sqlx_migrations` must match
    between the interim container and prod's db; that comparison is the
-   acceptance test for the migration. `mise run prod -- backfill` must then
-   report 0 queued and every cluster unchanged. It is the confirmation, not a
-   probe: if the restore had failed it would file every cluster again.
+   acceptance test for the migration. A backfill previewed on a copy of prod's
+   db then shows every restored live id unchanged, and the clusters new since
+   the interim store's last scan as queued; those file once the daemon runs.
+   A live `mise run prod -- backfill` after that reports 0 queued. If the
+   restore had failed, every cluster would show as new.
 
 After that the main checkout's store is an ordinary dev store. The same change
 removes the `db:down` refusal on main, unpins its portool block, and rewrites
@@ -298,8 +300,9 @@ Proof, in order. Each step gates the next.
    exists; the mount is proven by the backfill in step 3 and by the image
    smoke test's dry run against a mounted empty directory).
 3. After the restore, `seen` and `_sqlx_migrations` have equal counts in the
-   interim and prod databases. Then the live `mise run prod -- backfill`
-   confirms it: 0 queued, 102 unchanged. Nothing new appears in either repo's `almanac` label.
+   interim and prod databases. A preview on a copy shows 102 unchanged and
+   only clusters new since the interim store's last scan as queued, and the
+   live backfill after the daemon's first scan reports 0 queued.
 4. The forced command: with the puller key, `ssh ... sessions` lists sessions;
    `ssh ... transcript <key> --since <ms>` streams events; `ssh ... version`,
    `ssh ... transcript <key> --last 5`, and an interactive `ssh` all exit 2
@@ -348,6 +351,9 @@ repo's Containerfile generalized can follow once it has run for a while.
 - Does the container resolve `picklelab` by MagicDNS, or does `PULL_HOST` need
   the tailnet address? The first deploy finds out; `PULL_HOST` exists so
   either answer works without a code change.
+  Answered 2026-11-08: MagicDNS works. `PULL_HOST=picklelab` resolved from
+  the puller container on OrbStack, and the hostname-keyed `known_hosts`
+  matched.
 - Transcript file growth: append-only files are read whole every 15 minutes.
   Fine at tens of MB; revisit when a scan takes longer than a minute.
 - Whether to also pull from the dev VM. Not now: dev transcripts are test
@@ -360,8 +366,9 @@ repo's Containerfile generalized can follow once it has run for a while.
   (`-F /dev/null`, no agent), picklelab accepted the key under `from=`.
   `sessions` returned 12 sessions; `version`, `transcript ... --last 5`, a
   bare login, and piped shell input were refused with exit 2; pty and port
-  forwarding were refused. The container path is still untested until the
-  first deploy.
+  forwarding were refused. Answered for the container at the first deploy the
+  same day: the puller's ssh arrived from the Mac's address, `from=` held,
+  and the first pass pulled all 12 sessions. Keep `from=`.
 - A separate picklelab user for the pulls, owning only the puller's key and
   the docker group membership `openclaw-ro` needs, would keep the forced
   command off the interactive user's `authorized_keys`. Worth doing once this
