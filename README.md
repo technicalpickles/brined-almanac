@@ -59,7 +59,7 @@ mise run db          # start this checkout's Postgres; data lives in a named vol
 mise run db:down     # drop this checkout's container, volume and ports
 ```
 
-Run `mise run db:pending` before deploying a change to an event's payload. Events the old binary admitted but hasn't run fail under the new shape, and their delivery ids stay seen, so they never run again ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). The task fails while anything is pending.
+Events the old binary admitted but hasn't run fail under a new payload shape, and their delivery ids stay seen, so they never run again ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). `mise run deploy` refuses while prod has pending events, and `mise run db:pending` runs the same check against this checkout's store.
 
 `wt remove` runs `db:down` through the hook in `.config/wt.toml`, so removing a worktree also removes its Postgres.
 
