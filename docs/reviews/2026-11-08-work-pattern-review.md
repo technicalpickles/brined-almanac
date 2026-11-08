@@ -124,7 +124,8 @@ Raised the same evening. cq, the Claude plugins and dotfiles run at home, at wor
 
 | Repository | Finding |
 |---|---|
-| cq | Checkout's main 69 commits and ten weeks behind origin/main, which moved from another machine and an outside contributor. The installed binary was built from a commit newer than the checkout. |
+| cq | Checkout's main 69 commits and ten weeks behind origin/main, which moved from another machine and an outside contributor. The installed binary (v0.7.0, from a 2026-09-11 commit) was newer than the checkout but 29 commits behind origin's v0.11.0, which includes the 2026-10-16 fix capping DuckDB threads and memory per process. The hang that stopped this review's cq agents is what that fix prevents. Root cause, found by a parallel session the same afternoon: a September `cargo install` left 0.7.0 in `~/.cargo/bin` ahead of the mise shims on `PATH`, shadowing mise's 0.11.0. Fixed by hand that day; the PATH order and the leftover `cargo:` mise entry in dotfiles were still open. |
+| dotfiles | main in sync. Seven origin branches carry unmerged work, four with no local branch, one 61 commits deep. |
 | pickled-claude-plugins | Main in sync. Twelve origin branches carry work with no local branch, two at 23 commits each, the newest from the week before. |
 | plugin cache | Installed versions ahead of the marketplace manifest for one plugin, behind for two. |
 | bktide | Main unchanged since July; one outside bot contribution. |
