@@ -11,8 +11,8 @@ name = "brined-almanac"
 path = "src/main.rs"
 
 [dependencies]
-almanac = { git = "https://github.com/ivy/almanac", rev = "416e8e6" }
-github = { git = "https://github.com/ivy/almanac", rev = "416e8e6" }
+almanac = { git = "https://github.com/ivy/almanac", rev = "b8bdefa" }
+github = { git = "https://github.com/ivy/almanac", rev = "b8bdefa" }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
