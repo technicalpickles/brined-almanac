@@ -4,6 +4,8 @@ Milestones are named by what becomes possible, not by dates. [vision.md](vision.
 
 ## M0: Running on the Mac
 
+**Done 2026-11-08.** Went live at 19:53Z and filed the 10 previewed issues from transcripts the puller fetched. The [runbook](runbooks/prod-on-the-mac.md) records the first deploy.
+
 tool-failures runs all the time instead of when I remember to run it. [The prod design](superpowers/specs/2026-11-06-prod-on-the-mac-design.md) has the details.
 
 - A Docker Compose stack with the almanac, its Postgres store, and a puller that fetches fresh OpenClaw transcripts from picklelab
