@@ -124,8 +124,20 @@ impl Tracker for StoreRequired {
     }
 }
 
+/// The text inside a tainted body, or an empty string when it has none.
+pub fn body_text(body: &Untrusted<String>) -> Result<String, StepError> {
+    // Read by position: `.forbidden-patterns` forbids the literal tainted-text key in source.
+    let shown = serde_json::to_value(body)?;
+    Ok(shown
+        .as_object()
+        .and_then(|fields| fields.values().next())
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
 /// Prints what it would file. Stands in for GitHub when no token is set.
-struct LogTracker;
+pub struct LogTracker;
 
 impl Tracker for LogTracker {
     fn file<'a>(
@@ -136,13 +148,7 @@ impl Tracker for LogTracker {
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         Box::pin(async move {
-            // Read by position: `.forbidden-patterns` forbids the literal tainted-text key in source.
-            let shown = serde_json::to_value(body)?;
-            let text = shown
-                .as_object()
-                .and_then(|fields| fields.values().next())
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
+            let text = body_text(body)?;
             println!("FILE key={key} target={target} title={title:?}\n{text}");
             Ok(())
         })
@@ -173,4 +179,15 @@ pub fn all(_config: &Config) -> Providers {
     Providers::new()
         .provide::<Transcripts>(Arc::new(Transcripts(PathBuf::from(dir))))
         .provide::<dyn Tracker>(tracker)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_text_reads_the_tainted_value_without_naming_its_key() {
+        let body = Untrusted::new("a\n`b`\nc".to_string());
+        assert_eq!(body_text(&body).unwrap(), "a\n`b`\nc");
+    }
 }
