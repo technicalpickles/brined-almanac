@@ -57,6 +57,53 @@ impl Project {
     }
 }
 
+/// Sends `task:<project>` targets to the tasks tracker and everything else to the issues tracker.
+pub struct Router<I, T> {
+    issues: I,
+    tasks: T,
+}
+
+impl<I: Tracker, T: Tracker> Router<I, T> {
+    pub fn new(issues: I, tasks: T) -> Self {
+        Self { issues, tasks }
+    }
+}
+
+impl<I: Tracker, T: Tracker> Tracker for Router<I, T> {
+    fn file<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        title: &'a str,
+        body: &'a Untrusted<String>,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        match Project::from_target(target) {
+            None => self.issues.file(key, target, title, body),
+            Some(Ok(_)) => self.tasks.file(key, target, title, body),
+            Some(Err(why)) => Box::pin(async move { Err(not_a_task_target(target, &why)) }),
+        }
+    }
+
+    fn ask<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        pull: Option<u64>,
+        question: &'a str,
+        body: &'a Untrusted<String>,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        match Project::from_target(target) {
+            None => self.issues.ask(key, target, pull, question, body),
+            Some(Ok(_)) => self.tasks.ask(key, target, pull, question, body),
+            Some(Err(why)) => Box::pin(async move { Err(not_a_task_target(target, &why)) }),
+        }
+    }
+}
+
+fn not_a_task_target(target: &Slug, why: &str) -> StepError {
+    StepError(format!("{target} is not a task target: {why}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
