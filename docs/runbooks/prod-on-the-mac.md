@@ -41,7 +41,7 @@ Do this once, before the first deploy. The four steps in 1Password come first.
 ### 1Password
 
 1. Create a vault named `brined-almanac`. Put nothing else in it.
-2. Create an item `github-token` with a field `credential`. The value is a
+2. Create an item `github-token` with a field `token`. The value is a
    fine-grained personal access token with these settings:
    - Repositories: `technicalpickles/brineworks` and
      `technicalpickles/pickleclaw`.
@@ -298,7 +298,7 @@ and moves `prod` back.
 
 ## Rotation
 
-- **GitHub token.** Edit the `credential` field of `github-token` in
+- **GitHub token.** Edit the `token` field of `github-token` in
   1Password. Run `mise run deploy`.
 - **Puller key.** Regenerate the SSH key in the `puller` item. Replace the
   `authorized_keys` line on picklelab with the new public key. Run

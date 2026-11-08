@@ -209,7 +209,7 @@ process and the containers it creates.
   later picklelab deployment under systemd (`LoadCredential=`), which is the
   reason for a service account over Automic Vault: av is Mac-only.
 - **References in the repo.** `prod.secrets.env` holds
-  `BRINED_ALMANAC_GITHUB_TOKEN=op://brined-almanac/github-token/credential` and
+  `BRINED_ALMANAC_GITHUB_TOKEN=op://brined-almanac/github-token/token` and
   `BRINED_ALMANAC_PULLER_KEY="op://brined-almanac/puller/private key?ssh-format=openssh"`.
   Verified against `op` 2.41.1: `?ssh-format=openssh` returns the key in the
   format `ssh -i` reads.
