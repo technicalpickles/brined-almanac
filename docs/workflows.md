@@ -16,12 +16,14 @@ Each workflow has a status:
 
 A repository's tier decides which workflows watch it. Tiers are declared, and moving a repository between tiers is a one-line change. Public repositories, and private ones that something public already names, are declared in code. Private repositories that nothing public names are declared in a gitignored `local/tiers.toml`, which prod gets the same way it gets its secrets. That file can only add a repository to a tier that code defines. It can't define a tier or a behaviour. Inactive repositories aren't declared at all, because the rule below computes them.
 
+Dormant stays declared, decided 2026-11-08. Commits and task activity say a thing is being developed, not that it is used: a deployed app can serve every day with no commit for a year, and 29 taskwarrior projects with no activity in 60 days include things in daily use. Computing dormant from development activity would park their tasks wrongly. What could compute it is usage signals, such as Brent receiving messages, cq being invoked, or a site serving requests. Which signals exist per repository is an [open question](open-questions.md).
+
 | Tier | What it is | What watches it |
 |---|---|---|
 | dormant | Not being worked on and not deployed, like an iOS app on hold. | Nothing. Its tasks are marked as parked, so they don't count as stale. |
 | deployed | Running somewhere and in use, but not being developed, like a hobby web app I still use or the WordPress sites I host. | Service health, dependency and security updates, and drift between main and what is deployed. |
 | active | Being worked on now. Today these are pickleclaw, brineworks, and picklehome. | Every workflow. |
-| maintained | Public and used by other people, like bktide and pickled-claude-plugins. | Outside issues and pull requests, plus whatever its deployed or active tier adds. |
+| maintained | Public and used by other people, or by me from more than one machine, like bktide, cq and pickled-claude-plugins. | Outside issues and pull requests, my own lag behind the repository (own-upstream), plus whatever its deployed or active tier adds. |
 | handed off | Someone else maintains it, like homesick, where another maintainer merged updates in July 2026. | Only the archive question below, if that person stops too. Its README names who maintains it now. |
 | retired | Public and inactive, like jeweler, whose last human commit was in 2019. | Only the archive question below. |
 
@@ -33,7 +35,9 @@ A workflow that checks a host reads a host-state report. The report is the resul
 
 A check is a small executable that tests one thing and follows the Nagios plugin convention. It exits 0 for OK, 1 for warning, 2 for critical, and 3 for unknown, and it prints one line of status with optional metrics after a `|`, as in `DISK OK - / at 61% | used=61%;80;90`. Nagios, Icinga, Sensu, Checkmk, and Zabbix run checks in this shape unchanged, and so can cron or a systemd timer, so a check written here works with other monitoring tools. A check can be written in any language and tested on its own.
 
-Checks cover container images, CA package versions, operating system releases past end of life, site checksums, systemd units that should be running, and the HTTP status of the sites a host serves. A workflow never knows how the report arrived. Two transports deliver it:
+Checks cover container images, CA package versions, operating system releases past end of life, site checksums, systemd units that should be running, and the HTTP status of the sites a host serves.
+
+One more check shape matters as much as any of those: a **dead-man's switch**, which reports the age of the last successful run of a scheduled job and goes critical past a maximum age. Five failures in 2026 were invisible because nothing had it: a backup cron that failed 101 consecutive runs over 13 days and recorded that only in a field nobody reads, a launchd sweep that silently dropped runs, a poller whose failed sweeps wrote no row so "ran and found nothing" looked like "never ran", two systemd units down for days, and almanac's own daemon, which logs nothing on a scan that finds nothing. The check lives on the host with the job, like every other check, and the Mac counts as a host for almanac's own puller and daemon. Whether almanac also keeps its own list of expected jobs is an [open question](open-questions.md). A workflow never knows how the report arrived. Two transports deliver it:
 
 - **Pull.** Almanac connects with a fenced SSH key whose forced command prints the report and does nothing else. This is the pattern the prod design uses for picklelab. It suits hosts on the tailnet.
 - **Push.** The host writes the report on a schedule to a place almanac reads. It suits hosts almanac can't or shouldn't reach, because the host needs no inbound key. A host whose report stops arriving is itself a finding.
@@ -44,7 +48,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 - A workflow files an issue only when a pull request in a private repository closes the finding. Everything else, including findings about public repositories like picklehome or dotfiles, ops actions, and decisions, goes to taskwarrior. Issue bodies can carry transcript text or task text, so nothing files to a public repository. "Where output goes" in [vision.md](vision.md) has the full rule.
 - Maintenance on an inactive repository asks first whether to archive it. A repository is inactive when no person has committed to it in 12 months. Commits from bots such as Dependabot don't count. When a workflow finds maintenance there, like an alert or an outside pull request, it files one task that asks whether to archive the repository, and it holds the maintenance until I answer. The task includes a README notice to add before archiving, which points people to a recommended path: a successor project, a maintained fork, or the tool to use instead. The workflow checks that an existing pointer still leads somewhere alive. jeweler's README points to Juwelier, which hasn't been pushed to since 2021. If I archive it, the maintenance goes away with it. If I keep it, I give it a tier, and the held findings file. A repository someone else still commits to is active by this rule, even when I don't commit to it.
-- Work repositories are out of scope. I can't reach them from here.
+- Work repositories are out of scope. I can't reach them from here. My own public repositories that I use at work are in scope: the work machine's pushes land on the same origin this Mac fetches, so origin is where the two machines meet.
 - A workflow that calls a model follows the budget rule. A watcher calls no model.
 - Every workflow has a dry run that needs no database and no token.
 
@@ -102,20 +106,46 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Status:** next, after task-reconciler.
 - **Watches:** pending tasks and resumable parked handoffs, ranked per repository by age, priority, and recent activity.
 - **Reports:** a short list of open tasks and handoffs for each repository, which a Claude Code SessionStart hook shows when a session starts there. Almanac computes the list. The hook only reads it, because almanac is not a chat surface.
+- **Weekly, burst orphans:** tasks created during the last burst that nothing has touched since, per project. Half of all completions happen within a day of creation, and the rest is a long tail: in the week of 2026-10-26 a burst created 166 tasks and completed 74. Neither the reconciler nor the ranked list says which burst a task came from, and this list is what to review before parking a project.
 - **Model:** none.
 
 ### parked-handoffs
 
 - **Status:** next.
-- **Watches:** `.parkinglot/*.md` handoffs in every checkout under `~/github.com`, and the vault's.
+- **Watches:** three places a handoff can live. Since 2026-11-08 `park` writes to the vault's parked-sessions folder when second-brain is configured, so that folder comes first. The legacy `.parkinglot/*.md` files in every checkout under `~/github.com` come second: 242 of them on 2026-11-08, 167 older than 30 days and 5 touched in the last week. Third, Claude Code memory files of `type: project` whose body describes unfinished work. 141 of 243 memory files were project type on 2026-11-08 and many are parked-work snapshots; a handoff there is a handoff in the wrong place, and the report says so.
 - **Reports:** each handoff older than a week, sorted into one of three groups by evidence in code:
-  - **captured.** Its branch merged, its pull request closed, or a task names it. It can go.
+  - **captured.** Its branch merged, its pull request closed, or a task names it by path or by topic. It can go.
   - **resumable.** Its branch or worktree still exists and nothing else tracks the work.
   - **orphaned.** Nothing else tracks the work and its branch is gone. Only the handoff remembers it.
 
   Orphaned handoffs matter most. Deciding what to do with one is my call, so the workflow files one task per repository per day.
 - **Model:** none.
-- **Needs:** read access to the checkouts. The compose stack in [the prod design](superpowers/specs/2026-11-06-prod-on-the-mac-design.md) mounts `~/github.com` and the vault read-only. Add the mount to that design when this workflow is built.
+- **Needs:** read access to the checkouts, the vault, and `~/.claude/projects/*/memory/`. The compose stack in [the prod design](superpowers/specs/2026-11-06-prod-on-the-mac-design.md) mounts `~/github.com` and the vault read-only. Add the mounts to that design when this workflow is built.
+
+### left-behind
+
+- **Status:** next, in M2 with parked-handoffs.
+- **Watches:** the working state of every checkout under `~/github.com`: commits ahead of the remote, local branches with no remote, dirty working trees, stashes, and worktrees by last commit date.
+- **Why:** nothing watches checkout state, and a burst leaves a lot of it. On 2026-11-08 five repositories had real unpushed commits (41 in one), 26 had dirty trees, 107 local branches were unmerged into their default with 51 of them on no remote, and 145 worktrees existed, 22 of them last committed in July to September. The vision's one session that stopped with work committed but not pushed is the small version of this.
+- **Reports:** everything at first, one task per repository per week, with the thresholds in code next to the workflow. Decided 2026-11-08: start loud, quiet it down quickly, and keep recording the counts under each threshold so the thresholds can be retuned from data instead of guessed. A dirty tree in a repository with a session active today is noise, so the first threshold to add is "idle for N days".
+- **Model:** none.
+- **Feeds:** continue-work, which needs to know whether a handoff's branch is pushed before a worker can take it, and parked-handoffs, whose "resumable" group depends on whether a branch or worktree still exists.
+- **Needs:** the same read-only mount of `~/github.com` as parked-handoffs.
+
+### own-upstream
+
+- **Status:** next, in M2 with left-behind, which it shares code with. left-behind looks at what this machine has that origin lacks. own-upstream looks the other way: what origin has that this machine, and the copies installed on it, lack.
+- **Why:** the tools I build, I also use, at home, at work and on the dev VM, and other people contribute to some of them. A fix made on one machine is invisible on the others until something pulls, so the same problem gets fixed twice, and an installed copy keeps a bug its source fixed months ago. On 2026-11-08 the cq checkout's main was 69 commits and ten weeks behind origin/main, which had moved from another machine and from an outside contributor, while the cq binary on the same Mac was built from a commit newer than the checkout. pickled-claude-plugins had twelve origin branches carrying work no local branch had, two of them 23 commits each. Installed plugin versions were ahead of the marketplace manifest for one plugin and behind it for two.
+- **Watches:** for maintained-tier repositories, after a read-only fetch:
+  - the checkout's default branch against origin's: commits behind, and the age of the last fetch
+  - origin branches with commits not on the default branch and no local branch of the same name, with their age. This is work in progress on another machine, or a contributor's branch
+  - commits and merged pull requests by other people since the checkout last moved
+  - installed copies against their source: plugin versions in `~/.claude/plugins/cache` against the marketplace manifest on origin's main, and `cargo install --list` commits against origin's main, for cq and anything else installed from a git source
+- **Reports:** one task per repository per week with the lag in each direction, and a line for task-resurfacer's SessionStart list: this checkout is N commits behind origin, these origin branches have work, your installed copy is at version X and main is at Y. A burst in a repository then starts by pulling, not by rediscovering.
+- **Duplication:** a local branch or dirty tree that touches the same files as an origin branch from elsewhere is the clearest sign of the same fix being made twice. The first version reports the overlap by file path and leaves the judgement to me.
+- **Memory is per machine.** Claude Code memory files under `~/.claude/projects/` don't sync between machines, so a lesson recorded at work is not on this Mac. lesson-spread reads this Mac's memory only. Rules in dotfiles do sync, which is one more reason a lesson that applies everywhere should become a rule.
+- **Model:** none.
+- **Needs:** fetch access to origin for maintained-tier repositories, read-only. The container can fetch public repositories without credentials; private ones in that tier wait for the GitHub App. Plus the `~/github.com` mount and read access to `~/.claude/plugins/cache` and `~/.cargo/.crates.toml`.
 
 ### oss-maintained
 
@@ -142,6 +172,8 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 - **Status:** next.
 - **Watches:** my Claude Code transcripts under `~/.claude/projects/`, read through [cq](https://github.com/technicalpickles/pickled-claude-plugins/tree/main/plugins/cq). tool-failures does this for Brent's transcripts. This workflow does it for mine.
+- **cq is the tool**, decided 2026-11-08, and it has gaps to close before a daemon can lean on it. On 2026-11-08 two processes ran `cq sql` at once, the second got a conflicting lock on the DuckDB index, both retried in loops, and the retries plus an index sync hung the Mac. What this workflow needs from cq, sorted as integration point, feature gap, or ops: a way to read while another process indexes, or a single long-lived reader other callers query (feature); `--no-reindex` as the default for a secondary reader, with lock waits instead of retry loops (feature); a schedule for the index sync so the daemon never triggers one (ops); and a way to tell eval-harness sessions from mine, since they were 19% of assistant messages in 2026-09 to 2026-11 (integration point, see [open questions](open-questions.md)).
+- **Attribution:** since about 2026-10-16 nearly every session starts from `~/github.com` and works in worktrees, so the transcript's project field says `github.com` for 28k of 91k non-eval messages and cannot say which repository a session touched. Per-repository counts need the repository from the paths in tool calls, or from git. The same gap bites the budget rule and continue-work, and how to close it is an [open question](open-questions.md).
 - **Schedule:** weekly, at the end of the week, the same window as the review I did by hand for picklelab on 2026-10-18. Running it when a burst ends waits until the weekly version shows the counts are useful.
 - **Counts:** only what transcripts record exactly. That review found its regex counts overcounted when agents quoted error text, and it couldn't measure hand-backs at all. The first version counts:
   - auto-mode classifier denials and permission rule denials, grouped by reason
@@ -179,8 +211,8 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 ### merged-on-red
 
 - **Status:** later.
-- **Watches:** merges to main on active repositories and their CI status at merge time.
-- **Reports:** a pull request that merged before CI finished or with a failing check, and whether main went red after it.
+- **Watches:** merges to main on active repositories and their CI status at merge time, plus the CI queue itself.
+- **Reports:** a pull request that merged before CI finished or with a failing check, and whether main went red after it. Also CI queue time per pull request and the runner count, decided 2026-11-08, because the queue is why people merge early: in 2026-10 the median pull request waited 26 minutes on a single runner, the longest 68, and 8 of 20 merged before CI finished.
 - **Model:** none.
 
 ### deploy-drift
@@ -199,9 +231,10 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### credential-expiry
 
-- **Status:** later.
-- **Watches:** authentication errors in transcripts and service logs.
-- **Reports:** a credential that has started failing, such as an expired OAuth refresh token.
+- **Status:** next, in M1 with service-down. Moved from later on 2026-11-08.
+- **Watches:** first, a host check on the Mac that the credential broker answers and `gh auth status` succeeds. Later, authentication errors in transcripts and service logs.
+- **Why first:** on 2026-11-08 the broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A broker that is down is a service that is down, and the host check costs nothing. The vault also records a dead Gmail refresh token that was found only when a check needed it.
+- **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or a broker that stops answering.
 - **Model:** none.
 
 ### deployed-upkeep
@@ -213,6 +246,13 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
   2. Run upstream's `almanacs/renovate` unchanged to repair the Renovate pull requests that break. It shares the GitHub App that continue-work sets up.
   3. Its repairs are agent work, so they run only under the budget rule. Upstream caps each session by tokens, turns, and dollars, but not by the five-hour window.
 - **Model:** upstream's, for repair.
+
+### eval-queue
+
+- **Status:** later, after M4's budget rule. An idea from 2026-11-08, not yet a design.
+- **Does:** runs queued plugin evals as agent work in hours the budget rule says are free. Evals spend the same five-hour window as everything else, and on 2026-09 to 2026-11 they were 19% of assistant messages, run during bursts because that is when I am at the keyboard. Off-peak hours could run them instead.
+- **Model:** yes, under the budget rule.
+- **Needs:** a queue the `claude plugin eval` runner can read, and a decision on how burst detection treats eval sessions (see [open questions](open-questions.md)).
 
 ### container-logs
 
