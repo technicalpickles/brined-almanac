@@ -64,7 +64,7 @@ is not tied to a filing; any workflow.
 A workflow names a taskwarrior destination with a slug of the form
 `task:<project>`. Anything else stays a GitHub target, `owner/repo`, as today.
 
-`Project` is a newtype in `src/providers.rs`: one or more segments of
+`Project` is a newtype in `src/routing.rs`, next to the router: one or more segments of
 `[a-z0-9_-]+` joined by `.`, at most 200 characters in all so the slug fits.
 `Project::target()` returns the `task:<project>` slug. A workflow builds its
 target through `Project`, so an invalid project cannot become an
@@ -99,9 +99,11 @@ as given, so a dev run shows `target=task:picklehome`.
 
 ## The taskwarrior tracker
 
-`Taskwarrior` owns a `Replica<SqliteStorage>` behind an async mutex and a
-`Box<dyn Server>`. Both come from a `TaskwarriorConfig { replica_dir,
-server: ServerConfig }`, built from the environment in `providers::all`. One
+`Taskwarrior` (in `src/taskwarrior.rs`) owns a `Replica<SqliteStorage>` behind
+an async mutex and a `Box<dyn Server>`. Both come from a `TaskwarriorConfig {
+replica_dir, server: ServerConfig }`, built from the environment in
+`providers::all`, and open on the first filing, since providers are built
+before the async runtime starts. One
 filing is one critical section:
 
 1. **Sync** with the server. This brings in anything the Mac or an earlier
@@ -172,7 +174,7 @@ Four variables, read in `providers::all`:
 |---|---|
 | `TASKCHAMPION_SYNC_URL` | `https://taskchampion.<tailnet>.ts.net`. Unset means the tasks side is `LogTracker`. |
 | `TASKCHAMPION_CLIENT_ID` | The same uuid the Mac uses. A `client_id` names a task history, not a device. |
-| `TASKCHAMPION_ENCRYPTION_SECRET` | The same secret the Mac uses, base64 as stored in 1Password; decoded to bytes. |
+| `TASKCHAMPION_ENCRYPTION_SECRET` | The same secret the Mac uses, the string exactly as stored in 1Password. Its bytes are the key: taskwarrior 3.4.2 passes `encryption_secret.as_bytes()` straight through (`src/taskchampion-cpp/src/lib.rs`), so no base64 decoding, or the two replicas would not read each other's data. |
 | `TASKCHAMPION_REPLICA_DIR` | Where the replica's SQLite file lives. Default `/var/lib/brined-almanac/taskchampion`. |
 
 Missing `CLIENT_ID` or `SECRET` when `URL` is set is a startup error, not a
