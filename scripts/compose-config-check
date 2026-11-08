@@ -29,6 +29,8 @@ jq -e '
   and .services.almanac.ports[0].host_ip == "127.0.0.1"
   and .services.puller.environment.PULLER_KEY == "y"
   and ([.services.puller.tmpfs[]? | select(startswith("/run/puller:") and contains("uid=10002"))] | length == 1)
+  and ([.services.backup.volumes[] | select(.target == "/backups")] | length == 1)
+  and .services.backup.healthcheck.test != null
 ' >/dev/null <<<"$rendered" || {
   echo "compose-config-check: rendered config failed an assertion" >&2
   exit 1

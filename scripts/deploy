@@ -5,17 +5,19 @@ set -euo pipefail
 
 runbook=docs/runbooks/prod-on-the-mac.md
 db_only=0
+allow_pending=0
 tag=
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --db-only) db_only=1 ;;
+    --allow-pending) allow_pending=1 ;;
     --tag)
       tag=${2:?deploy: --tag needs a value}
       shift
       ;;
     -h | --help)
-      echo "Usage: scripts/deploy [--db-only] [--tag SHA]"
+      echo "Usage: scripts/deploy [--db-only] [--allow-pending] [--tag SHA]"
       exit 0
       ;;
     *)
@@ -58,6 +60,23 @@ if [[ $mode != 600 ]]; then
 fi
 echo "deploy: state dir ok ($STATE)"
 
+# ps and exec interpolate the whole file, so the :? guards need values; neither recreates containers.
+compose() {
+  BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+    docker compose -f compose.prod.yaml "$@"
+}
+
+# An event the running binary admitted but has not run yet fails under a binary with a different
+# payload shape, and its delivery id stays seen, so it never runs (ivy/almanac#10).
+if [[ -n $(compose ps -q --status running db 2>/dev/null) ]]; then
+  pending=$(compose exec -T db psql -U almanac -d almanac -tAc 'select count(*) from pending')
+  if [[ $pending != 0 && $allow_pending == 0 ]]; then
+    echo "deploy: $pending event(s) wait in prod's pending table; let them run on the current binary first, or pass --allow-pending to deploy anyway (ivy/almanac#10)" >&2
+    exit 1
+  fi
+  echo "deploy: $pending pending event(s) in prod"
+fi
+
 docker build -f Containerfile -t "brined-almanac:$tag" -t brined-almanac:prod .
 docker build -f puller/Containerfile -t "brined-almanac-puller:$tag" -t brined-almanac-puller:prod puller/
 echo "deploy: built brined-almanac:$tag and brined-almanac-puller:$tag (tagged prod)"
@@ -73,8 +92,6 @@ OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"
 
-# ps interpolates the whole file, so the :? guards need values; ps never recreates containers.
-BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
-  docker compose -f compose.prod.yaml ps
+compose ps
 curl -fsS http://127.0.0.1:8788/healthz
 echo

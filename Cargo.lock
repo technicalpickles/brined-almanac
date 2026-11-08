@@ -35,7 +35,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "almanac"
 version = "0.0.0"
-source = "git+https://github.com/ivy/almanac?rev=416e8e6#416e8e6d9c98ef9edd3f8ca50cad28d6c29f448b"
+source = "git+https://github.com/ivy/almanac?rev=b8bdefa#b8bdefa9df77f8a6b0c72de06e1420216da44c34"
 dependencies = [
  "almanac-macros",
  "axum",
@@ -58,7 +58,7 @@ dependencies = [
 [[package]]
 name = "almanac-macros"
 version = "0.0.0"
-source = "git+https://github.com/ivy/almanac?rev=416e8e6#416e8e6d9c98ef9edd3f8ca50cad28d6c29f448b"
+source = "git+https://github.com/ivy/almanac?rev=b8bdefa#b8bdefa9df77f8a6b0c72de06e1420216da44c34"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "deliveries"
 version = "0.0.0"
-source = "git+https://github.com/ivy/almanac?rev=416e8e6#416e8e6d9c98ef9edd3f8ca50cad28d6c29f448b"
+source = "git+https://github.com/ivy/almanac?rev=b8bdefa#b8bdefa9df77f8a6b0c72de06e1420216da44c34"
 dependencies = [
  "sqlx",
 ]
@@ -703,7 +703,7 @@ checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 [[package]]
 name = "github"
 version = "0.0.0"
-source = "git+https://github.com/ivy/almanac?rev=416e8e6#416e8e6d9c98ef9edd3f8ca50cad28d6c29f448b"
+source = "git+https://github.com/ivy/almanac?rev=b8bdefa#b8bdefa9df77f8a6b0c72de06e1420216da44c34"
 dependencies = [
  "almanac",
  "base64 0.22.1",

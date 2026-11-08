@@ -66,5 +66,39 @@ services:
       start_period: 20m
       start_interval: 10s
 
+  backup:
+    # One dump of the store a day, kept for 14 days. Losing pgdata refiles every issue.
+    # The dump lands under a temporary name, so a restore never sees a half-written file.
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: almanac
+      PGDATABASE: almanac
+    volumes:
+      - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/backups:/backups"
+    command:
+      - sh
+      - -ec
+      - |
+        while :; do
+          name=almanac-$$(date +%F).sql
+          pg_dump > "/backups/.$$name.tmp"
+          mv "/backups/.$$name.tmp" "/backups/$$name"
+          find /backups -name 'almanac-*.sql' -mtime +14 -delete
+          echo "backup: wrote $$name"
+          sleep 86400
+        done
+    healthcheck:
+      # Unhealthy when no dump is younger than 25 hours.
+      test: ["CMD-SHELL", "test -n \"$$(find /backups -name 'almanac-*.sql' -mmin -1500)\""]
+      interval: 5m
+      timeout: 5s
+      retries: 3
+      start_period: 2m
+
 volumes:
   pgdata:

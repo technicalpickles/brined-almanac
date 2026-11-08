@@ -5,11 +5,12 @@ The design and its reasons are in
 `docs/superpowers/specs/2026-11-06-prod-on-the-mac-design.md`.
 
 The stack is the compose project `brined-almanac-prod`, defined in
-`compose.prod.yaml`, with three services:
+`compose.prod.yaml`, with four services:
 
 - `db` is Postgres.
 - `almanac` is the daemon.
 - `puller` copies transcripts from picklelab.
+- `backup` dumps the store once a day.
 
 State lives in `~/.local/share/brined-almanac/`. Set `BRINED_ALMANAC_STATE` to
 move it. The commands below call that directory `$STATE`. They assume bash or zsh, run from the repo root:
@@ -61,7 +62,7 @@ Create the directory. Copy the token from step 4 in 1Password, then write it
 from the clipboard so it never appears on a command line:
 
 ```sh
-mkdir -p "$STATE/transcripts"
+mkdir -p "$STATE/transcripts" "$STATE/backups"
 (umask 077; pbpaste > "$STATE/op-token")
 chmod 600 "$STATE/op-token"
 ```
@@ -236,9 +237,11 @@ After this, the main checkout's database is an ordinary dev store.
 
 ### Preview a backfill on a copy
 
-Never dry-run against prod's database. Copy it into a throwaway Postgres and
-run the backfill there with no `GITHUB_TOKEN`. Without a token the almanac
-uses a tracker that only prints, so nothing can file, whatever the mode.
+Copy prod's database into a throwaway Postgres and run the backfill there with
+no `GITHUB_TOKEN`. Without a token the almanac uses a tracker that only prints,
+so nothing can file, whatever the mode. A dry run against prod's own database
+would be harmless to `seen`, since 416e8e6 keeps dry-run rows under their own
+almanac name, but it spends prod's run budget, so use the copy.
 
 ```sh
 docker network create ba-preview
@@ -275,9 +278,14 @@ docker rm -f ba-preview-db && docker network rm ba-preview && rm "$STATE/preview
    ```
 
 The task checks that `$STATE` has `prod.env`, `op-token` (mode 600),
-`known_hosts`, and `transcripts/`. It builds both images with the short commit
-SHA and the `prod` tag. It runs `docker compose up -d --wait` under one
-`op run`, then prints `ps` and the `/healthz` response.
+`known_hosts`, and `transcripts/`. It refuses while prod's `pending` table
+holds events: a binary with a different payload shape fails them, and their
+delivery ids stay seen, so they never run
+([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). Let them run on
+the current binary first, or pass `--allow-pending` when you know the payload
+shape did not change. It then builds both images with the short commit SHA and
+the `prod` tag, runs `docker compose up -d --wait` under one `op run`, and
+prints `ps` and the `/healthz` response.
 
 To run a verb against prod's store with prod's token:
 
@@ -285,10 +293,6 @@ To run a verb against prod's store with prod's token:
 mise run prod -- check
 mise run prod -- backfill
 ```
-
-Do not run `backfill --dry-run` against prod. A dry run still admits every
-delivery id into `seen`, so the filings a real run would make are suppressed
-for good.
 
 The `--` hands the verb and its arguments to `brined-almanac` in the running
 `almanac` container. Argument pass-through is not yet confirmed. If a flag does
@@ -405,6 +409,9 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 
 ### The almanac is unhealthy or files nothing
 
+- Look for `scheduled scan finished` in the almanac log. The daemon writes one
+  every 15 minutes, with `found`, `queued` and `unchanged` counts, so a quiet
+  log means the daemon is not scanning, not that nothing is new.
 - Run `mise run prod -- check`. A failure here points at the database or the
   GitHub token.
 - If nothing files, check that `prod.env` has `ALMANAC_MODE=live`.
@@ -431,16 +438,21 @@ Both print nothing.
 
 ## Backups
 
-None are scheduled. Losing the `pgdata` volume refiles every issue. To take a
-dump by hand:
+Losing the `pgdata` volume refiles every issue. The `backup` service writes
+`$STATE/backups/almanac-<date>.sql` when it starts and every 24 hours after,
+and deletes dumps older than 14 days. Its healthcheck fails when no dump is
+younger than 25 hours. The dumps hold event payloads, which carry transcript
+text, so they stay in the state directory, outside the repo, like the
+transcripts themselves.
+
+To take a dump by hand, before a deploy that adds a migration:
 
 ```sh
-mkdir -p "$STATE/backups"
 env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused docker compose -f compose.prod.yaml exec -T db pg_dump -U almanac almanac > "$STATE/backups/almanac-$(date +%F).sql"
 ```
 
-Take one before any deploy that adds a migration. The dump lives in the state
-directory, outside the repo.
+The backups live on the same disk as the volume. They cover a lost volume or a
+bad migration, not a lost Mac.
 
 ## First deploy, 2026-11
 
