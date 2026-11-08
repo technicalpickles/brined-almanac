@@ -47,9 +47,7 @@ struct Delivery {
     project: String,
     title: String,
     body_text: String,
-    #[expect(dead_code, reason = "Task 5 tags questions")]
     question: bool,
-    #[expect(dead_code, reason = "Task 5 records the pull")]
     pull: Option<u64>,
 }
 
@@ -248,6 +246,12 @@ async fn task_operations(
         .parse()
         .map_err(|e| step(e, "could not build the taskwarrior task"))?;
     task.add_tag(&tag, &mut ops).map_err(failed)?;
+    if delivery.question {
+        let question: Tag = QUESTION_TAG
+            .parse()
+            .map_err(|e| step(e, "could not build the taskwarrior task"))?;
+        task.add_tag(&question, &mut ops).map_err(failed)?;
+    }
     task.add_annotation(
         Annotation {
             entry: now,
@@ -260,6 +264,10 @@ async fn task_operations(
         .map_err(failed)?;
     task.set_user_defined_attribute(TARGET_ATTR, delivery.target.clone(), &mut ops)
         .map_err(failed)?;
+    if let Some(pull) = delivery.pull {
+        task.set_user_defined_attribute(PULL_ATTR, pull.to_string(), &mut ops)
+            .map_err(failed)?;
+    }
     task.set_modified(now, &mut ops).map_err(failed)?;
     Ok(ops)
 }

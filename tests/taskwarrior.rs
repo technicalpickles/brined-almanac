@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use almanac::prelude::*;
-use brined_almanac::taskwarrior::{KEY_ATTR, TARGET_ATTR, Taskwarrior, TaskwarriorConfig};
+use brined_almanac::taskwarrior::{
+    KEY_ATTR, PULL_ATTR, TARGET_ATTR, Taskwarrior, TaskwarriorConfig,
+};
 use taskchampion::{ServerConfig, TaskData};
 use tempfile::TempDir;
 
@@ -159,4 +161,35 @@ async fn an_unreachable_server_writes_nothing_and_names_no_secret() {
         .unwrap_err();
     assert!(!err.0.contains("synthetic body"));
     assert!(container.tasks().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_ask_is_a_question_task_with_its_pull() {
+    let dir = TempDir::new().unwrap();
+    let (container, mac) = (open(dir.path(), "container"), open(dir.path(), "mac"));
+    container
+        .ask("run-2:0", &target(), Some(42), "Merge this?", &body("why"))
+        .await
+        .unwrap();
+    mac.sync().await.unwrap();
+    let tasks = mac.tasks().await.unwrap();
+    let task = task_with(&tasks, "run-2:0").expect("the task synced");
+    assert_eq!(task.get("description"), Some("Merge this?"));
+    assert!(task.has("tag_almanac") && task.has("tag_question"));
+    assert_eq!(task.get(PULL_ATTR), Some("42"));
+}
+
+#[tokio::test]
+async fn an_ask_without_a_pull_has_no_pull_attribute() {
+    let dir = TempDir::new().unwrap();
+    let (container, mac) = (open(dir.path(), "container"), open(dir.path(), "mac"));
+    container
+        .ask("run-3:0", &target(), None, "Anything else?", &body("why"))
+        .await
+        .unwrap();
+    mac.sync().await.unwrap();
+    let tasks = mac.tasks().await.unwrap();
+    let task = task_with(&tasks, "run-3:0").expect("the task synced");
+    assert!(task.has("tag_almanac") && task.has("tag_question"));
+    assert_eq!(task.get(PULL_ATTR), None);
 }
