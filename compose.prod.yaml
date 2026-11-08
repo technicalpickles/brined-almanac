@@ -48,7 +48,9 @@ services:
     environment:
       PULLER_KEY: "${BRINED_ALMANAC_PULLER_KEY:?run `mise run deploy`, which resolves it through op run}"
     tmpfs:
-      - /run/puller
+      # Owner and mode are explicit: the default mount is 1777 on create but root 755 after a
+      # restart, which locks the puller out of its key file.
+      - /run/puller:mode=0700,uid=10002,gid=10002
     volumes:
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/transcripts:/transcripts"
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/known_hosts:/etc/ssh/ssh_known_hosts:ro"
