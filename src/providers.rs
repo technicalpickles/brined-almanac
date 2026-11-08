@@ -223,6 +223,16 @@ pub fn choose(lookup: impl Fn(&str) -> Option<String>) -> Result<Choice, String>
         None => IssuesSide::Log,
     };
     let tasks = match lookup("TASKCHAMPION_SYNC_URL") {
+        None => {
+            // Without this, a lost URL line would fall back to printing, and a live run would
+            // mark every task finding applied without filing it.
+            for key in ["TASKCHAMPION_CLIENT_ID", "TASKCHAMPION_ENCRYPTION_SECRET"] {
+                if lookup(key).is_some() {
+                    return Err(format!("{key} is set but TASKCHAMPION_SYNC_URL is not"));
+                }
+            }
+            TasksSide::Log
+        }
         Some(url) => {
             let required = |key: &str| {
                 lookup(key).ok_or_else(|| format!("TASKCHAMPION_SYNC_URL is set but {key} is not"))
@@ -244,7 +254,6 @@ pub fn choose(lookup: impl Fn(&str) -> Option<String>) -> Result<Choice, String>
                 },
             })
         }
-        None => TasksSide::Log,
     };
     let prints_only = matches!((&issues, &tasks), (IssuesSide::Log, TasksSide::Log));
     if lookup("DATABASE_URL").is_none() && !prints_only {

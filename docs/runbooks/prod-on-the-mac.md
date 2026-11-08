@@ -438,9 +438,13 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 - Run `mise run prod -- check`. A failure here points at the database or the
   GitHub token.
 - If nothing files, check that `prod.env` has `ALMANAC_MODE=live`.
-- If `check` reports a missing `TASKCHAMPION_*` variable, `prod.env` or the
-  `taskchampion` item in 1Password is incomplete. With `TASKCHAMPION_SYNC_URL`
-  set, the tasks side never falls back to printing.
+- If `up --wait` fails, read the almanac container's logs
+  (`docker compose -f compose.prod.yaml logs almanac` with the usual prefix).
+  A half `TASKCHAMPION_*` configuration panics at startup for every verb, so
+  the daemon crash-loops and `mise run prod -- check` cannot run. A missing
+  variable named there means `prod.env` or the `taskchampion` item in
+  1Password is incomplete. A missing `TASKCHAMPION_SYNC_URL` with the secrets
+  present fails the same way, and `scripts/deploy` refuses it before building.
 - If `mise run deploy` fails on a `:?` message, you ran `up` by hand. Use
   `mise run deploy`.
 

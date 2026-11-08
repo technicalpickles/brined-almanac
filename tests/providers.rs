@@ -124,3 +124,31 @@ fn the_replica_dir_defaults() {
         Path::new("/var/lib/brined-almanac/taskchampion")
     );
 }
+
+#[test]
+fn a_client_id_without_a_url_is_an_error_naming_both() {
+    let err = with(&without(taskchampion(), "TASKCHAMPION_SYNC_URL")).unwrap_err();
+    assert_eq!(
+        err,
+        "TASKCHAMPION_CLIENT_ID is set but TASKCHAMPION_SYNC_URL is not"
+    );
+}
+
+#[test]
+fn a_token_without_a_database_or_tasks_means_store_required() {
+    assert!(matches!(
+        with(&[("GITHUB_TOKEN", "a-token")]).unwrap(),
+        Choice::StoreRequired
+    ));
+}
+
+#[test]
+fn nothing_set_prints_both_sides() {
+    assert!(matches!(
+        with(&[]).unwrap(),
+        Choice::Route {
+            issues: IssuesSide::Log,
+            tasks: TasksSide::Log
+        }
+    ));
+}

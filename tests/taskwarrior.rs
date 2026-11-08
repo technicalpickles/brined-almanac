@@ -87,6 +87,7 @@ async fn the_same_key_twice_files_once() {
         .count();
     assert_eq!(keyed, 1);
     assert_eq!(tasks.len(), 1);
+    assert_eq!(container.tasks().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -149,7 +150,7 @@ async fn a_long_body_lands_verbatim() {
 }
 
 #[tokio::test]
-async fn an_unreachable_server_writes_nothing_and_names_no_secret() {
+async fn an_unreachable_server_writes_nothing() {
     // server_dir is a regular file, so the local server fails to open or sync.
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("server"), "not a directory").unwrap();
