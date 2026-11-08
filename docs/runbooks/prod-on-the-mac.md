@@ -467,4 +467,14 @@ Deployed 2026-11-08 from branch `prod-on-the-mac` at `6125d77`, after main
   ones file (8 brineworks, 2 pickleclaw, dated 2026-10-30 to 2026-11-07);
   the rest file nothing.
 - Hygiene: no private key and no GitHub token under `$STATE`.
-- Step 5, live backfill, and step 6, `check`: pending.
+- Going live, 19:53Z: the daemon's first scan ran 60 new clusters, 10 with a
+  file effect, no warnings. It filed exactly the previewed 10: brineworks
+  #135 to #142 and pickleclaw #79 and #80, for 20 and 19 open.
+- `mise run prod -- backfill`: found 162, queued 0, unchanged 162.
+  `mise run prod -- check`: ok.
+- Restart: db and almanac came back healthy, but the puller crash-looped on
+  `mktemp: : Permission denied`. A default tmpfs is 1777 on create and root
+  755 after a restart, so uid 10002 lost its key directory. Fixed in
+  `5bbecd8` with an explicit `mode=0700,uid=10002,gid=10002`; redeployed, and
+  a second restart came back with all three healthy, the puller at 0
+  restarts and a fresh `.last-pull`, `check` ok, and nothing new filed.
