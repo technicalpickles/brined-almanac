@@ -56,6 +56,13 @@ Do this once, before the first deploy. The four steps in 1Password come first.
 `prod.secrets.env` in the repo holds the `op://` references to these items.
 The item and field names above must match it.
 
+The vault also holds one document that is not a secret: `tiers.toml`, the
+tier declarations for private repositories that nothing public names
+(created 2026-11-08). Its working copy is the gitignored `local/tiers.toml`.
+The header of that file has the `op document` commands to save it after an
+edit and to restore it on a fresh checkout; the service account's read access
+is what lets prod read it once M1 wires tiers into code.
+
 ### State directory
 
 Create the directory. Copy the token from step 4 in 1Password, then write it
