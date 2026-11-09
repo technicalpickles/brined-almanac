@@ -80,7 +80,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### security-alerts
 
-- **Status:** next.
+- **Status:** built, deploys with PR 2.
 - **Watches:** Dependabot and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API, with a read-only token. Code scanning is out of scope: nothing runs it on a watched repository.
 - **Reports:** a task on `task:<repository name>` for each repository with an overdue alert, listing every overdue alert by severity. An alert is overdue when it is still open after its window: secret 0 days, critical 2, high 14, medium 30, unknown 30, low 90. Renovate and Dependabot get that long to fix it, and an alert fixed inside its window never files. The delivery ID carries a digest of the overdue set, so a rescan files nothing new, and a change to the set files a fresh task. A second task on `task:brined-almanac` lists the coverage gaps: scanned repositories with Dependabot alerts off, and public ones with secret scanning off. Nothing here files an issue. See the [design](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md).
 - **Model:** none.

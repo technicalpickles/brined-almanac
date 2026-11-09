@@ -294,8 +294,10 @@ After this, the main checkout's database is an ordinary dev store.
 ### Preview a backfill on a copy
 
 Copy prod's database into a throwaway Postgres and run the backfill there with
-no `GITHUB_TOKEN`. Without a token the almanac uses a tracker that only prints,
-so nothing can file, whatever the mode. A dry run against prod's own database
+no `GITHUB_TOKEN` and no TaskChampion settings. Without them the almanac uses a
+tracker that only prints, so nothing can file, whatever the mode. The run does
+get the read-only `GITHUB_ALERTS_TOKEN` and the private tiers file, so
+security-alerts scans the same repositories prod does. A dry run against prod's own database
 would be harmless to `seen`, since 416e8e6 keeps dry-run rows under their own
 almanac name, but it spends prod's run budget, so use the copy.
 
@@ -304,8 +306,15 @@ docker network create ba-preview
 docker run -d --name ba-preview-db --network ba-preview -e POSTGRES_USER=almanac -e POSTGRES_DB=almanac -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17-alpine
 until docker exec ba-preview-db pg_isready -U almanac -q; do sleep 1; done
 (set -o pipefail; docker exec brined-almanac-prod-db-1 pg_dump -U almanac almanac | docker exec -i ba-preview-db psql -q -v ON_ERROR_STOP=1 -U almanac almanac)
-docker run --rm --network ba-preview -e DATABASE_URL=postgres://almanac@ba-preview-db:5432/almanac -e BRENT_TRANSCRIPTS=/transcripts -v "$STATE/transcripts:/transcripts:ro" brined-almanac:prod backfill > "$STATE/preview.out"
+OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op run --env-file prod.secrets.env -- sh -c 'GITHUB_ALERTS_TOKEN=$BRINED_ALMANAC_GITHUB_ALERTS_TOKEN exec "$@"' sh docker run --rm --network ba-preview -e DATABASE_URL=postgres://almanac@ba-preview-db:5432/almanac -e BRENT_TRANSCRIPTS=/transcripts -v "$STATE/transcripts:/transcripts:ro" -e GITHUB_ALERTS_TOKEN -e LOCAL_TIERS=/etc/brined-almanac/tiers.toml -v "$STATE/tiers.toml:/etc/brined-almanac/tiers.toml:ro" brined-almanac:prod backfill > "$STATE/preview.out"
 ```
+
+`op run` resolves every secret in `prod.secrets.env`, but the container gets
+only the alerts token. `-e GITHUB_ALERTS_TOKEN` with no value passes it from the
+environment, so it never appears on a command line. The
+first deploy with security-alerts files its whole backlog: one task per
+repository with overdue alerts, plus one coverage task. This preview is where
+to look at that backlog before it files.
 
 A dry run records ids under the almanac name `brined-almanac.dry-run`, apart
 from the live rows, so its own summary reports every cluster as queued. The

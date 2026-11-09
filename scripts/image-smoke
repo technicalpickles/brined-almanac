@@ -20,6 +20,9 @@ docker build -f Containerfile -t "$image" .
 docker run --rm "$image" synth --format json |
   jq -e '.[0].workflow == "tool-failures" and .[0].scans == true' >/dev/null ||
   fail "synth manifest lacks the tool-failures workflow with scans"
+docker run --rm "$image" synth --format json |
+  jq -e '.[1].workflow == "security-alerts"' >/dev/null ||
+  fail "synth manifest lacks the security-alerts workflow"
 
 uid=$(docker run --rm --entrypoint id "$image" -u)
 [[ $uid == 10001 ]] || fail "runs as uid '$uid', want 10001"
@@ -28,7 +31,7 @@ docker run --rm --entrypoint curl "$image" --version >/dev/null ||
   fail "curl is missing"
 
 out=$(docker run --rm "$image" check)
-[[ $out == *"1 workflow(s)"* ]] || fail "check output lacks '1 workflow(s)': $out"
+[[ $out == *"2 workflow(s)"* ]] || fail "check output lacks '2 workflow(s)': $out"
 
 docker run --rm -v "$empty:/transcripts:ro" -e BRENT_TRANSCRIPTS=/transcripts \
   "$image" backfill --dry-run >/dev/null ||

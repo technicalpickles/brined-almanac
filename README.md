@@ -21,7 +21,7 @@ Run `mise install && hk install` to arm the hooks, and `mise run check` to run t
 
 ## Running it
 
-There's one workflow so far, `tool-failures`: it reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. The design doc in `docs/superpowers/specs/` has the full story.
+There are two workflows. `tool-failures` reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
 
 The binary has almanac's verbs: `synth` prints the manifest, `check` validates the providers, `backfill [--dry-run]` runs the scan once, and `run` stays up. It reads its settings from the environment:
 
