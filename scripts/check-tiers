@@ -6,14 +6,23 @@ cd "$(dirname "$0")/.."
 files=(tiers.toml)
 [[ -f local/tiers.toml ]] && files+=(local/tiers.toml)
 
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+
 status=0
 for file in "${files[@]}"; do
   while IFS= read -r name; do
-    if ! full=$(gh api "repos/$name" --jq .full_name 2>/dev/null); then
+    if full=$(gh api "repos/$name" --jq .full_name 2>"$err"); then
+      if [[ "$full" != "$name" ]]; then
+        echo "renamed $name -> $full"
+        status=1
+      fi
+    elif grep -q 'HTTP 404' "$err"; then
       echo "missing $name"
       status=1
-    elif [[ "$full" != "$name" ]]; then
-      echo "renamed $name -> $full"
+    else
+      # Auth, rate limit, or network: say so rather than call the repository missing.
+      echo "error $name: $(tr '\n' ' ' <"$err")"
       status=1
     fi
   done < <(sed -n 's/^name = "\(.*\)"$/\1/p' "$file")
