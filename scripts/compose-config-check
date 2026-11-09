@@ -31,6 +31,8 @@ jq -e '
   and .services.almanac.environment.TASKCHAMPION_SYNC_URL == "https://example.invalid"
   and ([.services.almanac.volumes[] | select(.target == "/var/lib/brined-almanac/taskchampion")] | length == 1)
   and ([.services.almanac.volumes[] | select(.target == "/transcripts")] | length == 1 and .[0].read_only == true)
+  and .services.almanac.environment.LOCAL_TIERS == "/etc/brined-almanac/tiers.toml"
+  and ([.services.almanac.volumes[] | select(.target == "/etc/brined-almanac/tiers.toml")] | length == 1 and .[0].read_only == true)
   and .services.almanac.ports[0].published == "8788"
   and .services.almanac.ports[0].host_ip == "127.0.0.1"
   and .services.puller.environment.PULLER_KEY == "y"

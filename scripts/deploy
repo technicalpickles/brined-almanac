@@ -64,6 +64,14 @@ if [[ $mode != 600 ]]; then
 fi
 echo "deploy: state dir ok ($STATE)"
 
+# The private tier declarations live in the vault, not the repo; compose mounts this copy.
+if ! OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op document get tiers.toml --vault brined-almanac --out-file "$STATE/tiers.toml" --force; then
+  echo "deploy: could not fetch tiers.toml from the brined-almanac vault; see $runbook" >&2
+  exit 1
+fi
+chmod 600 "$STATE/tiers.toml"
+echo "deploy: fetched tiers.toml"
+
 # ps and exec interpolate the whole file, so the :? guards need values; neither recreates containers.
 compose() {
   BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \

@@ -27,6 +27,7 @@ services:
     environment:
       DATABASE_URL: postgres://almanac@db:5432/almanac
       BRENT_TRANSCRIPTS: /transcripts
+      LOCAL_TIERS: /etc/brined-almanac/tiers.toml
       ALMANAC_LISTEN: 0.0.0.0:8788
       GITHUB_TOKEN: "${BRINED_ALMANAC_GITHUB_TOKEN:?run `mise run deploy`, which resolves it through op run}"
       TASKCHAMPION_CLIENT_ID: "${BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID:?run `mise run deploy`, which resolves it through op run}"
@@ -35,6 +36,7 @@ services:
       - "127.0.0.1:8788:8788"
     volumes:
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/transcripts:/transcripts:ro"
+      - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/tiers.toml:/etc/brined-almanac/tiers.toml:ro"
       - taskchampion:/var/lib/brined-almanac/taskchampion
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8788/healthz"]

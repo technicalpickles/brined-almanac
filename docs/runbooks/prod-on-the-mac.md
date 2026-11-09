@@ -72,9 +72,22 @@ The item and field names above must match it.
 The vault also holds one document that is not a secret: `tiers.toml`, the
 tier declarations for private repositories that nothing public names
 (created 2026-11-08). Its working copy is the gitignored `local/tiers.toml`.
-The header of that file has the `op document` commands to save it after an
-edit and to restore it on a fresh checkout; the service account's read access
-is what lets prod read it once M1 wires tiers into code.
+Every `mise run deploy` fetches it with `op document get` into
+`$STATE/tiers.toml` (mode 600), and compose mounts that file read-only into the
+almanac container, where `LOCAL_TIERS` points at it. The daemon refuses to start
+if the file is missing or does not parse. To change it, edit `local/tiers.toml`,
+then from the repository root save it and redeploy:
+
+```sh
+op document edit tiers.toml local/tiers.toml --vault brined-almanac
+mise run deploy
+```
+
+On a fresh checkout, restore the working copy first:
+
+```sh
+op document get tiers.toml --vault brined-almanac --output local/tiers.toml
+```
 
 ### State directory
 
@@ -303,7 +316,7 @@ docker rm -f ba-preview-db && docker network rm ba-preview && rm "$STATE/preview
    ```
 
 The task checks that `$STATE` has `prod.env`, `op-token` (mode 600),
-`known_hosts`, and `transcripts/`. It refuses while prod's `pending` table
+`known_hosts`, and `transcripts/`, then fetches `tiers.toml` from the vault. It refuses while prod's `pending` table
 holds events: a binary with a different payload shape fails them, and their
 delivery ids stay seen, so they never run
 ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). Let them run on

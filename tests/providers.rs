@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use brined_almanac::providers::{Choice, IssuesSide, TasksSide, choose};
+use brined_almanac::providers::{Choice, IssuesSide, TasksSide, choose, tiers_from};
+use brined_almanac::tiers::Tier;
 use taskchampion::{ServerConfig, Uuid};
 
 const CLIENT_ID: &str = "6f1d2c3b-4a5e-4f60-8172-839a4b5c6d7e";
@@ -176,4 +177,41 @@ fn an_empty_secret_is_not_set() {
     env.push(("TASKCHAMPION_ENCRYPTION_SECRET", ""));
     let err = with(&env).unwrap_err();
     assert!(err.contains("TASKCHAMPION_ENCRYPTION_SECRET"), "{err}");
+}
+
+fn tiers_with(local: Option<&'static str>) -> Result<brined_almanac::tiers::Tiers, String> {
+    tiers_from(|k| {
+        (k == "LOCAL_TIERS")
+            .then(|| local.map(str::to_string))
+            .flatten()
+    })
+}
+
+fn watches_dotfiles(tiers: &brined_almanac::tiers::Tiers) -> bool {
+    tiers
+        .watched(&[
+            Tier::Active,
+            Tier::Deployed,
+            Tier::Maintained,
+            Tier::Dormant,
+        ])
+        .iter()
+        .any(|slug| slug.to_string() == "technicalpickles/dotfiles")
+}
+
+#[test]
+fn tiers_from_unset_loads_public_only() {
+    assert!(watches_dotfiles(&tiers_with(None).unwrap()));
+}
+
+#[test]
+fn tiers_from_an_empty_value_loads_public_only() {
+    assert!(watches_dotfiles(&tiers_with(Some("")).unwrap()));
+}
+
+#[test]
+fn tiers_from_a_missing_path_is_an_error() {
+    let err = tiers_with(Some("/no/such/tiers.toml")).err().unwrap();
+    assert!(err.contains("LOCAL_TIERS"), "{err}");
+    assert!(err.contains("/no/such/tiers.toml"), "{err}");
 }
