@@ -1,10 +1,17 @@
+use std::collections::BTreeSet;
+use std::fmt;
+
 use almanac::diag::Error;
-use almanac::prelude::{Slug, StepError};
+use almanac::prelude::*;
 use github::client::GithubClient;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime, UtcOffset};
+
+use crate::routing::Project;
+use crate::tiers::{Tiers, WATCHED_BY_SECURITY_ALERTS};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Severity {
@@ -216,7 +223,8 @@ pub struct RepoRead {
     pub secrets: Coverage<Alert>,
 }
 
-pub struct AlertsClient(pub GithubClient);
+/// Always provided, because almanac checks a scan's providers at startup. `None` means no token.
+pub struct AlertsClient(pub Option<GithubClient>);
 
 fn failed(repo: &Slug, err: &Error) -> StepError {
     StepError(format!("{repo}: {err}"))
@@ -305,4 +313,329 @@ pub async fn read_repo(client: &GithubClient, repo: &Slug) -> Result<RepoRead, S
         dependabot,
         secrets,
     })
+}
+
+const COVERAGE_PROJECT: &str = "brined-almanac";
+
+/// Highest severity first, with secrets last.
+fn rank(alert: &Alert) -> u8 {
+    match alert {
+        Alert::Dependency { severity, .. } => match severity {
+            Severity::Critical => 0,
+            Severity::High => 1,
+            Severity::Medium => 2,
+            Severity::Unknown => 3,
+            Severity::Low => 4,
+        },
+        Alert::Secret { .. } => 5,
+    }
+}
+
+fn alert_number(alert: &Alert) -> u64 {
+    match alert {
+        Alert::Dependency { number, .. } | Alert::Secret { number, .. } => *number,
+    }
+}
+
+/// A repository name GitHub allows but a project name does not (uppercase, say) files under almanac
+/// itself, since the subject still names the repository.
+fn project_of(repo: &Slug) -> Slug {
+    let name = repo.to_string();
+    let name = name.rsplit('/').next().unwrap_or(&name).to_lowercase();
+    name.parse::<Project>()
+        .unwrap_or_else(|_| COVERAGE_PROJECT.parse().expect("a valid project"))
+        .as_str()
+        .parse()
+        .expect("a project name is a slug")
+}
+
+fn overdue_finding(repo: &Slug, alerts: &[Alert], today: Date) -> Option<(String, Value)> {
+    let mut late = overdue(alerts, today);
+    if late.is_empty() {
+        return None;
+    }
+    late.sort_by_key(|a| (rank(a), alert_number(a)));
+    let keys: Vec<String> = late.iter().map(|a| a.key()).collect();
+    let count = |wanted: Severity| {
+        late.iter()
+            .filter(|a| matches!(a, Alert::Dependency { severity, .. } if *severity == wanted))
+            .count()
+    };
+    let secrets = late
+        .iter()
+        .filter(|a| matches!(a, Alert::Secret { .. }))
+        .count();
+    let lines: Vec<String> = late.iter().map(|a| a.line(today)).collect();
+    let payload = json!({
+        "kind": "overdue".parse::<Slug>().expect("slug"),
+        "project": project_of(repo),
+        "subject": repo,
+        "critical": count(Severity::Critical),
+        "high": count(Severity::High),
+        "medium": count(Severity::Medium),
+        "low": count(Severity::Low),
+        "unknown": count(Severity::Unknown),
+        "secrets": secrets,
+        "dependabot_off": 0,
+        "secret_scanning_off": 0,
+        "repositories": 0,
+        "lines": lines.join("\n"),
+    });
+    Some((
+        format!("scan:security-alerts/{repo}@{}", digest(&keys)),
+        payload,
+    ))
+}
+
+fn coverage_finding(reads: &[(Slug, RepoRead)]) -> Option<(String, Value)> {
+    let mut keys = vec![];
+    let mut lines = vec![];
+    let mut repositories = BTreeSet::new();
+    let (mut dependabot_off, mut secret_scanning_off) = (0, 0);
+    for (repo, read) in reads {
+        if matches!(read.dependabot, Coverage::Off) {
+            dependabot_off += 1;
+            keys.push(format!("dependabot-off:{repo}"));
+            lines.push(format!("Dependabot alerts are off: {repo}"));
+            repositories.insert(repo.to_string());
+        }
+        // Secret scanning on a private repository needs a paid plan, so off there is not a gap.
+        if matches!(read.secrets, Coverage::Off) && !read.private {
+            secret_scanning_off += 1;
+            keys.push(format!("secret-scanning-off:{repo}"));
+            lines.push(format!("Secret scanning is off: {repo}"));
+            repositories.insert(repo.to_string());
+        }
+    }
+    if keys.is_empty() {
+        return None;
+    }
+    let payload = json!({
+        "kind": "coverage".parse::<Slug>().expect("slug"),
+        "project": COVERAGE_PROJECT.parse::<Slug>().expect("slug"),
+        "subject": "coverage".parse::<Slug>().expect("slug"),
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "unknown": 0,
+        "secrets": 0,
+        "dependabot_off": dependabot_off,
+        "secret_scanning_off": secret_scanning_off,
+        "repositories": repositories.len(),
+        "lines": lines.join("\n"),
+    });
+    Some((
+        format!("scan:security-alerts/coverage@{}", digest(&keys)),
+        payload,
+    ))
+}
+
+/// One `overdue` entry per repository with something overdue, then one `coverage` entry when
+/// anything is off.
+pub fn findings(reads: &[(Slug, RepoRead)], today: Date) -> Vec<(String, Value)> {
+    let mut out: Vec<(String, Value)> = reads
+        .iter()
+        .filter_map(|(repo, read)| {
+            let mut alerts = vec![];
+            for side in [&read.dependabot, &read.secrets] {
+                if let Coverage::On(found) = side {
+                    alerts.extend(found.iter().cloned());
+                }
+            }
+            overdue_finding(repo, &alerts, today)
+        })
+        .collect();
+    out.extend(coverage_finding(reads));
+    out
+}
+
+observed! {
+    /// One security finding. `lines` carries package names and manifest paths from lockfiles, so
+    /// it is tainted. `repositories` is how many distinct repositories a coverage finding names.
+    pub struct SecurityFinding {
+        pub kind: Slug,
+        pub project: Slug,
+        pub subject: Slug,
+        pub critical: u64,
+        pub high: u64,
+        pub medium: u64,
+        pub low: u64,
+        pub unknown: u64,
+        pub secrets: u64,
+        pub dependabot_off: u64,
+        pub secret_scanning_off: u64,
+        pub repositories: u64,
+        pub lines: Untrusted<String>,
+    }
+}
+
+impl Event for SecurityFinding {
+    const KIND: &'static str = "security.alert.finding";
+    fn parse(p: &Payload<'_>) -> Result<Self, Malformed> {
+        Ok(Self {
+            kind: p.field("/kind")?,
+            project: p.field("/project")?,
+            subject: p.field("/subject")?,
+            critical: p.field("/critical")?,
+            high: p.field("/high")?,
+            medium: p.field("/medium")?,
+            low: p.field("/low")?,
+            unknown: p.field("/unknown")?,
+            secrets: p.field("/secrets")?,
+            dependabot_off: p.field("/dependabot_off")?,
+            secret_scanning_off: p.field("/secret_scanning_off")?,
+            repositories: p.field("/repositories")?,
+            lines: p.text("/lines")?,
+        })
+    }
+}
+
+#[scan]
+pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<SecurityFinding>>, StepError> {
+    let client = scanner.get::<AlertsClient>()?;
+    let Some(github) = &client.0 else {
+        return Err(StepError(
+            "GITHUB_ALERTS_TOKEN is not set; security-alerts needs a read-only alerts token"
+                .to_string(),
+        ));
+    };
+    let tiers = scanner.get::<Tiers>()?;
+    let mut reads = vec![];
+    for repo in tiers.watched(WATCHED_BY_SECURITY_ALERTS) {
+        reads.push((repo.clone(), read_repo(github, repo).await?));
+    }
+    Ok(findings(&reads, OffsetDateTime::now_utc().date())
+        .into_iter()
+        .map(|(delivery_id, payload)| Scanned::new(delivery_id, payload))
+        .collect())
+}
+
+clean! {
+    pub struct Counts {
+        pub critical: u64,
+        pub high: u64,
+        pub medium: u64,
+        pub low: u64,
+        pub unknown: u64,
+        pub secrets: u64,
+    }
+}
+
+impl Counts {
+    pub fn total(&self) -> u64 {
+        self.critical + self.high + self.medium + self.low + self.unknown + self.secrets
+    }
+}
+
+impl fmt::Display for Counts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts = [
+            (self.critical, "critical"),
+            (self.high, "high"),
+            (self.medium, "medium"),
+            (self.unknown, "unknown"),
+            (self.low, "low"),
+            (self.secrets, "secret"),
+        ];
+        let shown: Vec<String> = parts
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, label)| format!("{n} {label}"))
+            .collect();
+        f.write_str(&shown.join(", "))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum Facts {
+    Overdue {
+        target: Slug,
+        subject: Slug,
+        counts: Counts,
+        body: Untrusted<String>,
+    },
+    Coverage {
+        target: Slug,
+        repositories: u64,
+        body: Untrusted<String>,
+    },
+}
+
+/// `task:<project>`, or almanac's own project when the event's project is not a valid name.
+fn target_of(project: &Slug) -> Slug {
+    project
+        .to_string()
+        .parse::<Project>()
+        .unwrap_or_else(|_| COVERAGE_PROJECT.parse().expect("a valid project"))
+        .target()
+}
+
+pub fn facts(event: &SecurityFinding) -> Facts {
+    let target = target_of(&event.project);
+    if event.kind.to_string() == "coverage" {
+        return Facts::Coverage {
+            target,
+            repositories: event.repositories,
+            body: event.lines.clone(),
+        };
+    }
+    Facts::Overdue {
+        target,
+        subject: event.subject.clone(),
+        counts: Counts {
+            critical: event.critical,
+            high: event.high,
+            medium: event.medium,
+            low: event.low,
+            unknown: event.unknown,
+            secrets: event.secrets,
+        },
+        body: event.lines.clone(),
+    }
+}
+
+#[workflow(
+    on = SecurityFinding,
+    key = "{subject}",
+    intent = "File one task per repository with overdue security alerts, and one for repositories where alerts are off.",
+    may = [File],
+    runs_per_hour = 1000,
+    scan = scan,
+    decide = policy,
+)]
+pub async fn security_alerts(_cx: &Cx, event: &SecurityFinding) -> Result<Facts, Halt> {
+    Ok(facts(event))
+}
+
+pub fn policy(facts: &Facts) -> Vec<Effect> {
+    match facts {
+        Facts::Overdue {
+            target,
+            subject,
+            counts,
+            body,
+        } => vec![Effect::File {
+            title: title!(
+                "security-alerts: {} overdue on {} ({})",
+                counts.total(),
+                subject,
+                counts
+            ),
+            target: target.clone(),
+            body: body.clone(),
+        }],
+        Facts::Coverage {
+            target,
+            repositories,
+            body,
+        } => vec![Effect::File {
+            title: title!(
+                "security-alerts: alerts are off on {} repositories",
+                repositories
+            ),
+            target: target.clone(),
+            body: body.clone(),
+        }],
+    }
 }

@@ -1,8 +1,17 @@
+use std::sync::Arc;
+
 use almanac::diag::Error;
-use almanac::prelude::Slug;
+use almanac::prelude::Mode;
+use almanac::prelude::*;
+use almanac::runtime::{Envelope, Ingest, Origin, Runtime};
+use almanac::testing::FakeTracker;
+use brined_almanac::routing::Project;
+use brined_almanac::tiers::Tiers;
+use brined_almanac::workflows;
 use brined_almanac::workflows::security_alerts::{
-    Alert, Coverage, Severity, alerts_switch, digest, overdue, parse_dependabot, parse_secret,
-    repo_missing, secret_alerts,
+    Alert, AlertsClient, Coverage, Facts, RepoRead, SecurityFinding, Severity, alerts_switch,
+    digest, facts, findings, overdue, parse_dependabot, parse_secret, policy, repo_missing,
+    secret_alerts,
 };
 use serde_json::{Value, json};
 use time::Date;
@@ -211,4 +220,250 @@ fn another_repository_failure_keeps_the_status() {
     let msg = repo_missing(refused(500), &repo()).0;
     assert!(msg.contains("technicalpickles/example"), "{msg}");
     assert!(msg.contains("500"), "{msg}");
+}
+
+const OVERDUE_EVENT: &str = include_str!("fixtures/security_alerts/overdue_event.json");
+const COVERAGE_EVENT: &str = include_str!("fixtures/security_alerts/coverage_event.json");
+
+fn slug(raw: &str) -> Slug {
+    raw.parse().expect("slug")
+}
+
+fn numbered(alert: Alert, number: u64) -> Alert {
+    match alert {
+        Alert::Dependency {
+            severity,
+            package,
+            manifest,
+            ghsa,
+            patched,
+            created,
+            url,
+            ..
+        } => Alert::Dependency {
+            number,
+            severity,
+            package,
+            manifest,
+            ghsa,
+            patched,
+            created,
+            url,
+        },
+        other => other,
+    }
+}
+
+fn read(private: bool, dependabot: Coverage<Alert>, secrets: Coverage<Alert>) -> RepoRead {
+    RepoRead {
+        private,
+        dependabot,
+        secrets,
+    }
+}
+
+fn clean_read() -> RepoRead {
+    read(false, Coverage::On(vec![]), Coverage::On(vec![]))
+}
+
+const TODAY: Date = date!(2026 - 11 - 08);
+
+#[test]
+fn findings_files_one_task_per_repository_with_overdue_alerts() {
+    let overdue_high = numbered(dependency(Severity::High, date!(2026 - 10 - 01)), 7);
+    let fresh_high = numbered(dependency(Severity::High, date!(2026 - 11 - 07)), 8);
+    let reads = vec![
+        (
+            slug("technicalpickles/dotfiles"),
+            read(
+                false,
+                Coverage::On(vec![overdue_high.clone(), fresh_high]),
+                Coverage::On(vec![]),
+            ),
+        ),
+        (slug("technicalpickles/quiet"), clean_read()),
+    ];
+    let found = findings(&reads, TODAY);
+    assert_eq!(found.len(), 1);
+    let expected = format!(
+        "scan:security-alerts/technicalpickles/dotfiles@{}",
+        digest(&[overdue_high.key()])
+    );
+    assert_eq!(found[0].0, expected);
+    let event = SecurityFinding::from_json(&found[0].1).expect("payload parses");
+    assert_eq!(event.project.to_string(), "dotfiles");
+    assert_eq!(event.subject.to_string(), "technicalpickles/dotfiles");
+    assert_eq!(event.high, 1);
+}
+
+#[test]
+fn a_repository_whose_overdue_alerts_were_all_fixed_files_nothing() {
+    let fresh = numbered(dependency(Severity::High, date!(2026 - 11 - 07)), 8);
+    let reads = vec![(
+        slug("technicalpickles/dotfiles"),
+        read(false, Coverage::On(vec![fresh]), Coverage::On(vec![])),
+    )];
+    assert!(findings(&reads, TODAY).is_empty());
+}
+
+#[test]
+fn findings_lists_coverage_gaps_once() {
+    let reads = vec![
+        (
+            slug("technicalpickles/example-private"),
+            read(true, Coverage::Off, Coverage::Off),
+        ),
+        (
+            slug("technicalpickles/example-public"),
+            read(false, Coverage::On(vec![]), Coverage::Off),
+        ),
+    ];
+    let found = findings(&reads, TODAY);
+    assert_eq!(found.len(), 1);
+    let keys = [
+        "dependabot-off:technicalpickles/example-private".to_string(),
+        "secret-scanning-off:technicalpickles/example-public".to_string(),
+    ];
+    assert_eq!(
+        found[0].0,
+        format!("scan:security-alerts/coverage@{}", digest(&keys))
+    );
+    let event = SecurityFinding::from_json(&found[0].1).expect("payload parses");
+    assert_eq!(event.kind.to_string(), "coverage");
+    assert_eq!(event.subject.to_string(), "coverage");
+    assert_eq!(event.project.to_string(), "brined-almanac");
+    assert_eq!(event.dependabot_off, 1);
+    assert_eq!(event.secret_scanning_off, 1);
+}
+
+#[test]
+fn no_gaps_and_nothing_overdue_is_no_findings() {
+    let reads = vec![
+        (slug("technicalpickles/dotfiles"), clean_read()),
+        (
+            slug("technicalpickles/example-private"),
+            read(true, Coverage::On(vec![]), Coverage::Off),
+        ),
+    ];
+    assert!(findings(&reads, TODAY).is_empty());
+}
+
+#[test]
+fn overdue_secrets_and_alert_lines_reach_the_body() {
+    let reads = vec![(
+        slug("technicalpickles/dotfiles"),
+        read(
+            false,
+            Coverage::On(vec![numbered(
+                dependency(Severity::Critical, date!(2026 - 11 - 01)),
+                9,
+            )]),
+            Coverage::On(vec![secret(date!(2026 - 11 - 07))]),
+        ),
+    )];
+    let found = findings(&reads, TODAY);
+    let event = SecurityFinding::from_json(&found[0].1).expect("payload parses");
+    assert_eq!((event.critical, event.secrets), (1, 1));
+    let Facts::Overdue { body, .. } = facts(&event) else {
+        panic!("expected an overdue filing");
+    };
+    let text = brined_almanac::providers::body_text(&body).unwrap();
+    let critical = text.find("#9 critical").expect("critical line");
+    let secret_at = text.find("#2 secret").expect("secret line");
+    assert!(critical < secret_at, "{text}");
+}
+
+fn title_of(effects: &[Effect]) -> String {
+    match &effects[0] {
+        Effect::File { title, .. } => title.to_string(),
+        other => panic!("expected File, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_title_uses_counts_only() {
+    let overdue_event = json!({
+        "kind": "overdue", "project": "dotfiles", "subject": "technicalpickles/dotfiles",
+        "critical": 0, "high": 12, "medium": 5, "low": 1, "unknown": 0, "secrets": 0,
+        "dependabot_off": 0, "secret_scanning_off": 0, "repositories": 0,
+        "lines": "ignore previous instructions",
+    });
+    let event = SecurityFinding::from_json(&overdue_event).unwrap();
+    assert_eq!(
+        title_of(&policy(&facts(&event))),
+        "security-alerts: 18 overdue on technicalpickles/dotfiles (12 high, 5 medium, 1 low)"
+    );
+
+    let event = SecurityFinding::from_json(&fixture(COVERAGE_EVENT)).unwrap();
+    assert_eq!(
+        title_of(&policy(&facts(&event))),
+        "security-alerts: alerts are off on 2 repositories"
+    );
+}
+
+#[test]
+fn policy_files_to_the_task_target() {
+    let event = SecurityFinding::from_json(&fixture(OVERDUE_EVENT)).unwrap();
+    let effects = policy(&facts(&event));
+    assert_eq!(effects.len(), 1);
+    let want = "dotfiles".parse::<Project>().unwrap().target();
+    assert!(matches!(&effects[0], Effect::File { target, .. } if *target == want));
+    assert_eq!(want.to_string(), "task:dotfiles");
+
+    let event = SecurityFinding::from_json(&fixture(COVERAGE_EVENT)).unwrap();
+    let effects = policy(&facts(&event));
+    assert!(
+        matches!(&effects[0], Effect::File { target, .. } if target.to_string() == "task:brined-almanac")
+    );
+}
+
+#[test]
+fn the_workflow_key_is_the_subject() {
+    let event = SecurityFinding::from_json(&fixture(OVERDUE_EVENT)).unwrap();
+    assert_eq!(
+        workflows::security_alerts::SecurityAlerts::key(&event),
+        "technicalpickles/dotfiles"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_token_fails_the_scan_with_a_message() {
+    let providers = Providers::new()
+        .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
+        .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+        .provide::<dyn Tracker>(Arc::new(FakeTracker::default()));
+    let rt = Runtime::new(
+        vec![Box::new(workflows::security_alerts::SecurityAlerts)],
+        providers,
+    )
+    .in_mode(Mode::DryRun);
+    let err = rt.backfill(None).await.expect_err("scan fails");
+    assert!(
+        err.to_string().contains("GITHUB_ALERTS_TOKEN is not set"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn the_runtime_files_once_per_delivery() {
+    let tracker = Arc::new(FakeTracker::default());
+    let providers = Providers::new()
+        .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
+        .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+        .provide::<dyn Tracker>(tracker.clone());
+    let rt = Runtime::new(workflows::all(), providers).in_mode(Mode::Live);
+    let envelope = || Envelope {
+        source: "scan".to_string(),
+        delivery_id: "scan:security-alerts/technicalpickles/dotfiles@0123456789ab".to_string(),
+        kind: "security.alert.finding".to_string(),
+        depth: 0,
+        origin: Origin::Scan,
+        payload: fixture(OVERDUE_EVENT),
+    };
+    assert_eq!(rt.ingest(envelope()).await.unwrap(), Ingest::Queued);
+    assert_eq!(rt.ingest(envelope()).await.unwrap(), Ingest::Duplicate);
+    rt.settle().await.unwrap();
+    let filed = tracker.filed.lock().unwrap();
+    assert_eq!(filed.len(), 1);
+    assert_eq!(filed[0].1, "task:dotfiles");
 }
