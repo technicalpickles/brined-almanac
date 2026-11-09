@@ -404,6 +404,13 @@ and moves `prod` back.
   directory" works too.
 
   The next `mise run deploy` uses it.
+- **Taskchampion `client_id` or `encryption_secret`.** The same two values live
+  in the `taskchampion` item here and in picklehome's `TaskChampion Sync`
+  item, and the Mac's `taskrc` reads the picklehome one. Change both items to
+  the same new value, then run `mise run deploy`. Its `sync-check` step proves
+  the container can read the history. Rotating the `encryption_secret`
+  re-initialises every replica, including the Mac's, because the history on
+  the server is encrypted with the old secret.
 
 The containers hold the secrets in their environment as created. A rotated
 value reaches them only when `mise run deploy` recreates them.

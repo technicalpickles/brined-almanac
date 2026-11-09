@@ -4,11 +4,16 @@
 //! One worker thread owns the replica and the server and runs every request on its own
 //! current-thread runtime; callers talk to it over a channel.
 
+use std::any::Any;
 use std::fmt::Display;
 use std::fs;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use almanac::prelude::*;
+use futures_util::FutureExt;
 use taskchampion::chrono::Utc;
 use taskchampion::storage::AccessMode;
 use taskchampion::{
@@ -38,6 +43,8 @@ pub struct TaskwarriorConfig {
 
 pub struct Taskwarrior {
     requests: mpsc::UnboundedSender<Request>,
+    /// Why the worker stopped, set before its inbox closes so later requests can say.
+    death: Arc<OnceLock<String>>,
 }
 
 /// One finding to file, already parsed and read on the caller side.
@@ -55,6 +62,8 @@ enum Request {
     Deliver(Delivery, oneshot::Sender<Result<(), StepError>>),
     Sync(oneshot::Sender<Result<(), StepError>>),
     Tasks(oneshot::Sender<Result<Vec<TaskData>, StepError>>),
+    #[cfg(test)]
+    Crash(oneshot::Sender<Result<(), StepError>>),
 }
 
 /// Pulls the server's whole history into the replica at `config.replica_dir`, which must be new
@@ -78,12 +87,22 @@ impl Taskwarrior {
     /// Spawns the worker thread eagerly. Nothing is opened until the first request.
     pub fn new(config: TaskwarriorConfig) -> Taskwarrior {
         let (requests, inbox) = mpsc::unbounded_channel();
-        // If the thread cannot spawn, the closure and the receiver it owns are dropped, so
-        // every request reports the worker stopped instead of panicking here.
-        let _ = std::thread::Builder::new()
+        let death = Arc::new(OnceLock::new());
+        let note = Arc::clone(&death);
+        // The thread owns the inbox and drops it only after recording why it stopped, so a
+        // request that finds the worker gone can always read the cause.
+        let spawned = std::thread::Builder::new()
             .name("taskwarrior".to_string())
-            .spawn(move || run(config, inbox));
-        Taskwarrior { requests }
+            .spawn(move || {
+                let mut inbox = inbox;
+                if let Err(cause) = run(config, &mut inbox) {
+                    let _ = note.set(cause);
+                }
+            });
+        if let Err(err) = spawned {
+            let _ = death.set(format!("could not spawn the worker thread: {err}"));
+        }
+        Taskwarrior { requests, death }
     }
 
     /// Syncs the replica with the server.
@@ -103,10 +122,15 @@ impl Taskwarrior {
         let (reply, answer) = oneshot::channel();
         self.requests
             .send(make(reply))
-            .map_err(|_| StepError(WORKER_STOPPED.to_string()))?;
-        answer
-            .await
-            .map_err(|_| StepError(WORKER_STOPPED.to_string()))?
+            .map_err(|_| self.stopped())?;
+        answer.await.map_err(|_| self.stopped())?
+    }
+
+    fn stopped(&self) -> StepError {
+        StepError(match self.death.get() {
+            Some(cause) => format!("{WORKER_STOPPED}: {cause}"),
+            None => WORKER_STOPPED.to_string(),
+        })
     }
 
     async fn deliver(
@@ -159,14 +183,17 @@ impl Tracker for Taskwarrior {
     }
 }
 
-/// The worker thread's body: serve requests until every sender is gone.
-fn run(config: TaskwarriorConfig, mut inbox: mpsc::UnboundedReceiver<Request>) {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+/// The worker thread's body: serve requests until every sender is gone. An `Err` is why it
+/// stopped early. A panic while serving is answered to its caller, then ends the worker, since
+/// the half-used replica and server cannot be trusted or reopened.
+fn run(
+    config: TaskwarriorConfig,
+    inbox: &mut mpsc::UnboundedReceiver<Request>,
+) -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-    else {
-        return;
-    };
+        .map_err(|err| format!("could not start the worker runtime: {err}"))?;
     runtime.block_on(async move {
         let mut worker = Worker {
             replica_dir: config.replica_dir,
@@ -175,20 +202,53 @@ fn run(config: TaskwarriorConfig, mut inbox: mpsc::UnboundedReceiver<Request>) {
             server: None,
         };
         while let Some(request) = inbox.recv().await {
-            // A dropped answer means the caller went away; there is no one to tell.
-            match request {
-                Request::Deliver(delivery, reply) => {
-                    let _ = reply.send(worker.deliver(delivery).await);
-                }
-                Request::Sync(reply) => {
-                    let _ = reply.send(worker.sync().await);
-                }
-                Request::Tasks(reply) => {
-                    let _ = reply.send(worker.tasks().await);
-                }
+            let panicked = match request {
+                Request::Deliver(delivery, reply) => answer(worker.deliver(delivery), reply).await,
+                Request::Sync(reply) => answer(worker.sync(), reply).await,
+                Request::Tasks(reply) => answer(worker.tasks(), reply).await,
+                #[cfg(test)]
+                Request::Crash(reply) => answer(crash(), reply).await,
+            };
+            if let Some(cause) = panicked {
+                return Err(cause);
             }
         }
-    });
+        Ok(())
+    })
+}
+
+/// Sends `work`'s result to `reply`. A panic becomes the caller's error and is returned as the
+/// cause. A dropped reply means the caller went away; there is no one to tell.
+async fn answer<T>(
+    work: impl Future<Output = Result<T, StepError>>,
+    reply: oneshot::Sender<Result<T, StepError>>,
+) -> Option<String> {
+    match AssertUnwindSafe(work).catch_unwind().await {
+        Ok(result) => {
+            let _ = reply.send(result);
+            None
+        }
+        Err(payload) => {
+            let cause = panic_message(payload);
+            let _ = reply.send(Err(StepError(format!("{WORKER_STOPPED}: {cause}"))));
+            Some(cause)
+        }
+    }
+}
+
+fn panic_message(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "the worker panicked".to_string(),
+        },
+    }
+}
+
+#[cfg(test)]
+async fn crash() -> Result<(), StepError> {
+    panic!("boom")
 }
 
 /// Owns the replica and the server, each opened on first need. A failed open leaves the slot
@@ -381,4 +441,29 @@ async fn sync(
 /// nothing here interpolates a body or a configuration value.
 fn step(e: impl Display, what: &str) -> StepError {
     StepError(format!("{what}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn a_panicking_worker_says_why_to_the_caller_and_to_every_later_request() {
+        let dir = TempDir::new().unwrap();
+        let worker = Taskwarrior::new(TaskwarriorConfig {
+            replica_dir: dir.path().join("replica"),
+            server: ServerConfig::Local {
+                server_dir: dir.path().join("server"),
+            },
+        });
+        let (reply, answer) = oneshot::channel();
+        worker.requests.send(Request::Crash(reply)).unwrap();
+        let first = answer.await.unwrap().unwrap_err();
+        assert!(first.0.contains("boom"), "{}", first.0);
+        for _ in 0..2 {
+            let later = worker.tasks().await.unwrap_err();
+            assert!(later.0.contains("boom"), "{}", later.0);
+        }
+    }
 }

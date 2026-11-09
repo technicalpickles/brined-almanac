@@ -10,7 +10,7 @@ use tempfile::TempDir;
 #[tokio::test]
 #[ignore = "writes one task to the live taskchampion history"]
 async fn file_a_probe_task_into_the_live_history() {
-    let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+    let lookup = |key: &str| std::env::var(key).ok();
     let Ok(Choice::Route {
         tasks: TasksSide::Taskwarrior(mut config),
         ..

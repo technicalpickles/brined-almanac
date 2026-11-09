@@ -218,6 +218,8 @@ const DEFAULT_REPLICA_DIR: &str = "/var/lib/brined-almanac/taskchampion";
 /// Reads the tracker settings through `lookup`. An `Err` names the missing or malformed variable
 /// and never carries a value, since the values include secrets.
 pub fn choose(lookup: impl Fn(&str) -> Option<String>) -> Result<Choice, String> {
+    // `KEY=` in an env file sets the variable to nothing, which is not configuration.
+    let lookup = |key: &str| lookup(key).filter(|value| !value.is_empty());
     let issues = match lookup("GITHUB_TOKEN") {
         Some(token) => IssuesSide::Github { token },
         None => IssuesSide::Log,
