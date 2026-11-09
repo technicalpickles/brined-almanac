@@ -2,7 +2,7 @@ use std::path::Path;
 
 use almanac::prelude::*;
 use brined_almanac::taskwarrior::{
-    KEY_ATTR, PULL_ATTR, TARGET_ATTR, Taskwarrior, TaskwarriorConfig,
+    KEY_ATTR, PULL_ATTR, TARGET_ATTR, Taskwarrior, TaskwarriorConfig, sync_check,
 };
 use taskchampion::{ServerConfig, TaskData};
 use tempfile::TempDir;
@@ -193,4 +193,51 @@ async fn an_ask_without_a_pull_has_no_pull_attribute() {
     let task = task_with(&tasks, "run-3:0").expect("the task synced");
     assert!(task.has("tag_almanac") && task.has("tag_question"));
     assert_eq!(task.get(PULL_ATTR), None);
+}
+
+fn checker(dir: &Path) -> TaskwarriorConfig {
+    TaskwarriorConfig {
+        replica_dir: dir.join("check"),
+        server: local(dir),
+    }
+}
+
+#[tokio::test]
+async fn a_sync_check_pulls_the_existing_history_into_a_fresh_replica() {
+    let dir = TempDir::new().unwrap();
+    let mac = open(dir.path(), "mac");
+    mac.file("run-1:0", &target(), "Alerts open", &body("b"))
+        .await
+        .unwrap();
+    mac.file("run-1:1", &target(), "More alerts", &body("b"))
+        .await
+        .unwrap();
+    assert_eq!(sync_check(checker(dir.path())).await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn a_sync_check_writes_nothing_to_the_server() {
+    let dir = TempDir::new().unwrap();
+    let mac = open(dir.path(), "mac");
+    mac.file("run-1:0", &target(), "Alerts open", &body("b"))
+        .await
+        .unwrap();
+    sync_check(checker(dir.path())).await.unwrap();
+    let other = open(dir.path(), "other");
+    other.sync().await.unwrap();
+    assert_eq!(other.tasks().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_sync_check_against_an_empty_history_fails_because_nothing_was_decrypted() {
+    let dir = TempDir::new().unwrap();
+    let err = sync_check(checker(dir.path())).await.unwrap_err();
+    assert!(err.contains("empty"), "{err}");
+}
+
+#[tokio::test]
+async fn a_sync_check_against_an_unreachable_server_fails() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("server"), "not a directory").unwrap();
+    assert!(sync_check(checker(dir.path())).await.is_err());
 }

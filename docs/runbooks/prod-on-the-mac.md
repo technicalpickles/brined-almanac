@@ -310,7 +310,12 @@ delivery ids stay seen, so they never run
 the current binary first, or pass `--allow-pending` when you know the payload
 shape did not change. It then builds both images with the short commit SHA and
 the `prod` tag, runs `docker compose up -d --wait` under one `op run`, and
-prints `ps` and the `/healthz` response.
+then runs `brined-almanac sync-check` in the almanac container. That pulls
+the taskchampion server's whole history into a throwaway replica, so a wrong
+sync URL, client id or encryption secret fails the deploy instead of the
+first filing. It writes nothing to the server. An empty history also fails,
+because nothing was decrypted. The stack stays up when it fails. Last, the
+task prints `ps` and the `/healthz` response.
 
 To run a verb against prod's store with prod's token:
 
@@ -445,6 +450,11 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 - Run `mise run prod -- check`. A failure here points at the database or the
   GitHub token.
 - If nothing files, check that `prod.env` has `ALMANAC_MODE=live`.
+- Run `mise run prod -- sync-check` to test the taskchampion side alone. A
+  403 means the server's allowlist lacks the container's `client_id`. A
+  decrypt error means the `encryption_secret` differs from the one the history
+  was written with. A connection error means the container cannot reach the
+  tailnet host in `TASKCHAMPION_SYNC_URL`.
 - If `up --wait` fails, read the almanac container's logs
   (`docker compose -f compose.prod.yaml logs almanac` with the usual prefix).
   A half `TASKCHAMPION_*` configuration panics at startup for every verb, so

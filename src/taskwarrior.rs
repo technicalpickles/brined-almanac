@@ -57,6 +57,21 @@ enum Request {
     Tasks(oneshot::Sender<Result<Vec<TaskData>, StepError>>),
 }
 
+/// Pulls the server's whole history into the replica at `config.replica_dir`, which must be new
+/// or empty, and returns how many tasks arrived. A replica with no local changes has nothing to
+/// push, so this reads without writing. Pulling forces every version through decryption, which
+/// is what proves the client id and encryption secret match the history. An empty history proves
+/// nothing, so it is an error.
+pub async fn sync_check(config: TaskwarriorConfig) -> Result<usize, String> {
+    let replica = Taskwarrior::new(config);
+    replica.sync().await.map_err(|err| err.0)?;
+    let pulled = replica.tasks().await.map_err(|err| err.0)?.len();
+    if pulled == 0 {
+        return Err("the server's history is empty, so decryption was not exercised".to_string());
+    }
+    Ok(pulled)
+}
+
 const WORKER_STOPPED: &str = "the taskwarrior worker stopped";
 
 impl Taskwarrior {
