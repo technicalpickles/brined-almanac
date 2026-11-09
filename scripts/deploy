@@ -52,8 +52,8 @@ if ((${#missing[@]})); then
   echo "deploy: missing in $STATE: ${missing[*]}; see $runbook" >&2
   exit 1
 fi
-if ! grep -q '^TASKCHAMPION_SYNC_URL=' "$STATE/prod.env"; then
-  echo "deploy: $STATE/prod.env has no TASKCHAMPION_SYNC_URL= line; see $runbook" >&2
+if ! grep -q '^TASKCHAMPION_SYNC_URL=.' "$STATE/prod.env"; then
+  echo "deploy: $STATE/prod.env has no TASKCHAMPION_SYNC_URL= line with a value; see $runbook" >&2
   exit 1
 fi
 # GNU stat (mise puts it first on PATH) and BSD stat disagree on flags.
