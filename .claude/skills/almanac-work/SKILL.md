@@ -21,6 +21,7 @@ Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--d
   The `rc.uda` override is needed until dotfiles defines the attribute. Without it the filter matches every task.
 
 - A case is every open report with the same cause, not one issue. Start from the reports that share the tool, or the error class and day, and let the evidence widen or narrow the set. Work them together and close them together.
+- Find siblings from the `service`, `tool` and `day` lines in each body. Reports filed before 2026-11-08 all carry the title `Brent: failed tool calls`, so a scan of titles misses them.
 - Register the session on the status page with the `pickleclaw-status` skill when the repo is brineworks or pickleclaw.
 
 ## Find out what it is
@@ -69,4 +70,12 @@ One case per run, from the brined-almanac checkout, in a likely-free hour ([docs
 claude -p "/almanac-work brineworks" --permission-mode acceptEdits --max-turns 60
 ```
 
-Not yet verified from a scheduled run. Start with `--dry-run` and read what it would have posted.
+Nobody can approve anything under `--print`. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
+
+- **Other checkouts.** `git -C <path>` and `cd <path> && git ...` are denied, fetches included. Read the target repo's `main` with `gh api repos/technicalpickles/<repo>/contents/<path>` and `gh search code`.
+- **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
+- **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
+- **Posting.** `gh issue comment` and `gh issue close` have no allow rule. When one is denied, put the exact command in the report. `task add` and `gh issue create` are allowed.
+- **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
+
+Checked by hand on 2026-11-09: a `--dry-run` against pickleclaw loaded the skill, ran 44 turns in 5 minutes for about $1.60, and posted nothing. Still unverified: a run started by a schedule, and a run without `--dry-run`. Start with `--dry-run` and read what it would have posted.

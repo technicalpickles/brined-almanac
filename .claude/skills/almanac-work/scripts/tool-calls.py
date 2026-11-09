@@ -7,7 +7,7 @@
     python3 tool-calls.py --list
 
 Reads $BRINED_ALMANAC_STATE/transcripts, default ~/.local/share/brined-almanac/transcripts.
-Prints one row per call: time, surface, input, outcome, seconds, and for an error its first line.
+Prints one row per call: time, surface, input, outcome, seconds, and for an error the line that says why.
 Then a summary: calls, errors, longest call, and errors per class per day.
 Output may contain transcript text. Read it here, never paste it into a public repository.
 """
@@ -32,8 +32,10 @@ def surface(path):
 
 
 def error_line(details):
-    """First line of the error text. A nested-tool record keeps it under result.content, a plain
-    toolResult record under content."""
+    """The line of the error text that says why. A nested-tool record keeps the text under
+    result.content, a plain toolResult record under content. Two shapes bury the reason below the
+    first line: a JSON object with an `error` field, and a `Command failed: <argv>` line followed
+    by the command's own message."""
     holder = details.get("result") if isinstance(details.get("result"), dict) else details
     try:
         text = holder["content"][0]["text"]
@@ -42,7 +44,18 @@ def error_line(details):
     m = FENCE.search(text)
     if m:
         text = m.group(1)
-    return text.strip().splitlines()[0][:120] if text.strip() else ""
+    try:
+        wrapped = json.loads(text)
+    except ValueError:
+        wrapped = None
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("error"), str):
+        text = wrapped["error"]
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    if lines[0].startswith("Command failed:") and len(lines) > 1:
+        return lines[1].strip()[:120]
+    return lines[0].strip()[:120]
 
 
 def classify(line):
