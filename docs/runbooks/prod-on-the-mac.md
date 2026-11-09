@@ -450,11 +450,12 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 - Run `mise run prod -- check`. A failure here points at the database or the
   GitHub token.
 - If nothing files, check that `prod.env` has `ALMANAC_MODE=live`.
-- Run `mise run prod -- sync-check` to test the taskchampion side alone. A
-  403 means the server's allowlist lacks the container's `client_id`. A
-  decrypt error means the `encryption_secret` differs from the one the history
-  was written with. A connection error means the container cannot reach the
-  tailnet host in `TASKCHAMPION_SYNC_URL`.
+- Run `mise run prod -- sync-check` to test the taskchampion side alone. It
+  prints `sync ok, pulled N task(s)` or `Failed to synchronize with server`.
+  The failure does not say why. A wrong `client_id`, a wrong
+  `encryption_secret` and an unreachable host all read the same, so compare
+  the container's values against the Mac's (hash them, never print them) and
+  `curl` the `TASKCHAMPION_SYNC_URL` host from inside the container.
 - If `up --wait` fails, read the almanac container's logs
   (`docker compose -f compose.prod.yaml logs almanac` with the usual prefix).
   A half `TASKCHAMPION_*` configuration panics at startup for every verb, so
