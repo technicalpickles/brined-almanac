@@ -1,0 +1,175 @@
+# Repository tiers. Schema:
+#
+#   [[repo]]
+#   name = "owner/repo"
+#   tiers = ["active"]        # one or more, defined in src/tiers.rs
+#   signal = "..."            # optional: why this tier applies
+#   note = "..."              # optional
+#
+# local/tiers.toml uses the same schema for private repositories.
+# Code defines the tiers (src/tiers.rs); this file only assigns repositories to them.
+
+[[repo]]
+name = "technicalpickles/picklehome"
+tiers = ["active"]
+signal = "its timers and units run"
+note = "deploys picklelab"
+
+[[repo]]
+name = "technicalpickles/brineworks"
+tiers = ["active", "deployed"]
+signal = "Brent's transcripts show triage and email calls"
+note = "fair game for workers"
+
+[[repo]]
+name = "technicalpickles/pickleclaw"
+tiers = ["active", "deployed"]
+signal = "Brent's transcripts show messages received"
+
+[[repo]]
+name = "technicalpickles/pickled-claude-plugins"
+tiers = ["active", "maintained"]
+signal = "skill and hook invocations in my transcripts; home, work, VM; installed as plugins"
+note = "12 origin branches with no local branch on 2026-11-08"
+
+[[repo]]
+name = "technicalpickles/brined-almanac"
+tiers = ["active", "deployed"]
+signal = "daemon /healthz, issues filed"
+note = "deployed on the Mac"
+
+[[repo]]
+name = "technicalpickles/dotfiles"
+tiers = ["active", "maintained"]
+signal = "every shell on every machine; home, work, VM"
+note = "7 origin branches with unmerged work on 2026-11-08"
+
+[[repo]]
+name = "technicalpickles/openclaw-workspace"
+tiers = ["active"]
+signal = "in use whenever Brent runs"
+
+[[repo]]
+name = "technicalpickles/feeder-journal"
+tiers = ["active"]
+signal = "unclear"
+note = "deployed somewhere, or a CLI run by hand?"
+
+[[repo]]
+name = "technicalpickles/nikke-roster-scanner"
+tiers = ["deployed"]
+signal = "the sync job's last run"
+note = "picklelab nikke service"
+
+[[repo]]
+name = "technicalpickles/second-brain-agent"
+tiers = ["deployed"]
+signal = "its unit runs"
+note = "picklelab service"
+
+[[repo]]
+name = "technicalpickles/sb"
+tiers = ["deployed", "maintained"]
+signal = "sb invocations in transcripts; home, possibly work"
+note = "my shell and Claude sessions; no commits since 08-16, used daily by devlog"
+
+[[repo]]
+name = "technicalpickles/cq"
+tiers = ["maintained"]
+signal = "home, work; an outside contributor"
+note = "checkout 69 commits behind origin on 2026-11-08; binary shadowed"
+
+[[repo]]
+name = "technicalpickles/bktide"
+tiers = ["maintained"]
+signal = "public, outside bot pull request"
+note = "main unchanged since July"
+
+[[repo]]
+name = "technicalpickles/bb-plugin-taskwarrior"
+tiers = ["maintained"]
+signal = "plugin for get-bb/bb"
+note = "no commits since 09-19"
+
+[[repo]]
+name = "technicalpickles/chirpfinder"
+tiers = ["dormant"]
+note = "iOS app on hold, 56 pending tasks"
+
+[[repo]]
+name = "technicalpickles/pirpg"
+tiers = ["dormant"]
+note = "29 pending tasks, CI on a homelab runner"
+
+[[repo]]
+name = "technicalpickles/a2a-experiments"
+tiers = ["dormant"]
+note = "26 pending tasks, shared with a2a-cli"
+
+[[repo]]
+name = "technicalpickles/a2a-cli"
+tiers = ["dormant"]
+note = "26 pending tasks, shared with a2a-experiments"
+
+[[repo]]
+name = "technicalpickles/llamafit"
+tiers = ["dormant"]
+note = "10 pending tasks"
+
+[[repo]]
+name = "technicalpickles/bowerbird"
+tiers = ["dormant"]
+note = "22 pending tasks"
+
+[[repo]]
+name = "technicalpickles/cenv"
+tiers = ["dormant"]
+note = "Mac-only by design"
+
+[[repo]]
+name = "technicalpickles/herdr-keymap"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/petri-dish"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/fitout"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/town-charter"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/xmcp"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/homelab-dev"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/brineworks-workspace"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/rust-embedded-scripting-bench"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/dotfiles-devcontainer"
+tiers = ["dormant"]
+
+[[repo]]
+name = "technicalpickles/pickled-coi"
+tiers = ["dormant"]
+signal = "unclear"
+note = "active, or dormant until the next VM change?"
+
+[[repo]]
+name = "technicalpickles/welcome2u"
+tiers = ["dormant"]
+signal = "unclear"
+note = "still runs on shell open anywhere? Then it is deployed"

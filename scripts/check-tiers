@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+files=(tiers.toml)
+[[ -f local/tiers.toml ]] && files+=(local/tiers.toml)
+
+status=0
+for file in "${files[@]}"; do
+  while IFS= read -r name; do
+    if ! full=$(gh api "repos/$name" --jq .full_name 2>/dev/null); then
+      echo "missing $name"
+      status=1
+    elif [[ "$full" != "$name" ]]; then
+      echo "renamed $name -> $full"
+      status=1
+    fi
+  done < <(sed -n 's/^name = "\(.*\)"$/\1/p' "$file")
+done
+exit "$status"

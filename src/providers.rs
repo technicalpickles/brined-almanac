@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use almanac::prelude::*;
@@ -11,6 +11,7 @@ use taskchampion::{ServerConfig, Uuid};
 
 use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
+use crate::tiers::Tiers;
 use crate::transcript::Transcripts;
 
 const API: &str = "https://api.github.com";
@@ -303,10 +304,19 @@ pub fn tracker_from(choice: Choice) -> Arc<dyn Tracker> {
     Arc::new(Router::new(AnyTracker(issues), AnyTracker(tasks)))
 }
 
+/// Loads the tiers: the committed file plus the private one `LOCAL_TIERS` names. An empty value is
+/// unset, as in `choose`.
+pub fn tiers_from(lookup: impl Fn(&str) -> Option<String>) -> Result<Tiers, String> {
+    let local = lookup("LOCAL_TIERS").filter(|value| !value.is_empty());
+    Tiers::load(local.as_deref().map(Path::new)).map_err(|err| format!("LOCAL_TIERS: {err}"))
+}
+
 pub fn all(_config: &Config) -> Providers {
     let dir = env::var("BRENT_TRANSCRIPTS").unwrap_or_else(|_| "transcripts".to_string());
     let choice = choose(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
+    let tiers = tiers_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
+        .provide::<Tiers>(Arc::new(tiers))
         .provide::<Transcripts>(Arc::new(Transcripts(PathBuf::from(dir))))
         .provide::<dyn Tracker>(tracker_from(choice))
 }

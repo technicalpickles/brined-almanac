@@ -1,0 +1,145 @@
+use std::path::Path;
+
+use almanac::prelude::*;
+use brined_almanac::tiers::{Tier, Tiers, WATCHED_BY_SECURITY_ALERTS};
+
+fn slug(s: &str) -> Slug {
+    s.parse().unwrap()
+}
+
+const PUBLIC_A: &str = r#"
+[[repo]]
+name = "technicalpickles/a"
+tiers = ["active"]
+"#;
+
+#[test]
+fn parses_declarations_from_both_files() {
+    let local = r#"
+[[repo]]
+name = "technicalpickles/b"
+tiers = ["deployed"]
+signal = "runs somewhere"
+note = "a note"
+"#;
+    let tiers = Tiers::parse(PUBLIC_A, Some(local)).unwrap();
+    let watched = tiers.watched(&[Tier::Active, Tier::Deployed]);
+    assert_eq!(
+        watched,
+        vec![&slug("technicalpickles/a"), &slug("technicalpickles/b")]
+    );
+}
+
+#[test]
+fn a_repository_in_both_files_is_an_error() {
+    let err = Tiers::parse(PUBLIC_A, Some(PUBLIC_A)).unwrap_err();
+    assert!(err.contains("technicalpickles/a"), "{err}");
+    assert!(err.contains("both"), "{err}");
+}
+
+#[test]
+fn an_unknown_tier_is_an_error() {
+    let public = r#"
+[[repo]]
+name = "technicalpickles/a"
+tiers = ["sleepy"]
+"#;
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("sleepy"), "{err}");
+}
+
+#[test]
+fn an_unknown_key_is_an_error() {
+    let public = r#"
+[[repo]]
+name = "technicalpickles/a"
+teirs = ["active"]
+"#;
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("teirs"), "{err}");
+}
+
+#[test]
+fn an_empty_tier_list_is_an_error() {
+    let public = r#"
+[[repo]]
+name = "technicalpickles/a"
+tiers = []
+"#;
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("technicalpickles/a"), "{err}");
+}
+
+#[test]
+fn a_name_without_an_owner_is_an_error() {
+    let public = r#"
+[[repo]]
+name = "a"
+tiers = ["active"]
+"#;
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("owner/repo"), "{err}");
+}
+
+#[test]
+fn a_name_with_an_empty_half_is_an_error() {
+    for name in ["/a", "technicalpickles/"] {
+        let public = format!("[[repo]]\nname = \"{name}\"\ntiers = [\"active\"]\n");
+        let err = Tiers::parse(&public, None).unwrap_err();
+        assert!(err.contains(name), "{err}");
+        assert!(err.contains("owner/repo"), "{err}");
+    }
+}
+
+#[test]
+fn watched_keeps_a_repository_that_is_dormant_and_deployed() {
+    let public = r#"
+[[repo]]
+name = "technicalpickles/a"
+tiers = ["dormant", "deployed"]
+
+[[repo]]
+name = "technicalpickles/b"
+tiers = ["dormant"]
+"#;
+    let tiers = Tiers::parse(public, None).unwrap();
+    assert_eq!(
+        tiers.watched(WATCHED_BY_SECURITY_ALERTS),
+        vec![&slug("technicalpickles/a")]
+    );
+}
+
+#[test]
+fn load_with_a_missing_path_is_an_error() {
+    let err = Tiers::load(Some(Path::new("/nonexistent/tiers.toml"))).unwrap_err();
+    assert!(err.contains("/nonexistent/tiers.toml"), "{err}");
+}
+
+#[test]
+fn load_with_a_local_file_that_does_not_parse_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tiers.toml");
+    std::fs::write(&path, "this is [not toml").unwrap();
+    let err = Tiers::load(Some(&path)).unwrap_err();
+    assert!(err.contains("local"), "{err}");
+}
+
+#[test]
+fn load_without_a_local_file_uses_the_public_file() {
+    Tiers::load(None).unwrap();
+}
+
+#[test]
+fn the_committed_file_parses_and_watches_the_documented_repositories() {
+    let tiers = Tiers::load(None).unwrap();
+    let watched = tiers.watched(WATCHED_BY_SECURITY_ALERTS);
+    for name in [
+        "technicalpickles/dotfiles",
+        "technicalpickles/sb",
+        "technicalpickles/cq",
+        "technicalpickles/pickled-claude-plugins",
+    ] {
+        assert!(watched.contains(&&slug(name)), "{name} should be watched");
+    }
+    assert!(!watched.contains(&&slug("technicalpickles/chirpfinder")));
+}

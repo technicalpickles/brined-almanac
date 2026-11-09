@@ -264,6 +264,7 @@ dependencies = [
  "taskchampion",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]
