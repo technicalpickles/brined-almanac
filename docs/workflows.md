@@ -81,11 +81,10 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 ### security-alerts
 
 - **Status:** next.
-- **Watches:** Dependabot, code scanning, and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API.
-- **Reports:** one item per repository per day that lists its open alerts by severity, and says whether an open Renovate or Dependabot pull request already fixes each one. A fix that is a pull request in a private repository files there as an issue. Everything else is a task, including alerts on public repositories and a leaked secret to rotate.
+- **Watches:** Dependabot and secret scanning alerts on deployed, active, and maintained repositories, through the GitHub API, with a read-only token. Code scanning is out of scope: nothing runs it on a watched repository.
+- **Reports:** a task on `task:<repository name>` for each repository with an overdue alert, listing every overdue alert by severity. An alert is overdue when it is still open after its window: secret 0 days, critical 2, high 14, medium 30, unknown 30, low 90. Renovate and Dependabot get that long to fix it, and an alert fixed inside its window never files. The delivery ID carries a digest of the overdue set, so a rescan files nothing new, and a change to the set files a fresh task. A second task on `task:brined-almanac` lists the coverage gaps: scanned repositories with Dependabot alerts off, and public ones with secret scanning off. Nothing here files an issue. See the [design](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md).
 - **Model:** none.
 - **Later:** upstream's [roadmap](https://github.com/ivy/almanac/blob/main/docs/roadmap.md) M2, "Exposure", joins a CVE feed against an inventory of what each repository, image, and host contains. When it lands, use it for the images and hosts on picklelab and the WordPress droplet instead of writing that here. A Dependabot alert covers a lockfile. It says nothing about a host's base images, its CA package, or a release past end of life, which is what the eMudhra advisory turned on.
-- **Inactive repositories:** an alert there files the archive question instead of the alert.
 
 ### continue-work
 

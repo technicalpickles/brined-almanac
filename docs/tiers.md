@@ -4,7 +4,9 @@ The declared tier of each repository, per [workflows.md](workflows.md) "Reposito
 
 `tiers.toml` is compiled into the binary, so changing it needs a rebuild and deploy, while `local/tiers.toml` is read at startup.
 
-Only repositories that are public, or that a public repository already names, appear in `tiers.toml`. Ten more private repositories are declared in the gitignored `local/tiers.toml`, whose durable copy is a document in the `brined-almanac` 1Password vault, next to the prod secrets.
+Only repositories that are public, or that a public repository already names, appear in `tiers.toml`. Each repository's `name` is `owner/repo`, and the repo part must be a valid taskwarrior project name (lowercase `[a-z0-9_-]`, dotted segments), because security-alerts files to `task:<repo name>` and fails the scan loudly on a name that is not.
+
+Ten more private repositories are declared in the gitignored `local/tiers.toml`, whose durable copy is a document in the `brined-almanac` 1Password vault, next to the prod secrets.
 
 ## Snapshot, 2026-11-08
 

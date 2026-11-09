@@ -44,7 +44,7 @@ Every hand-typed `docker compose` command in this runbook carries that prefix.
 
 ## One-time setup
 
-Do this once, before the first deploy. The five steps in 1Password come first.
+Do this once, before the first deploy. The six steps in 1Password come first.
 
 ### 1Password
 
@@ -55,11 +55,26 @@ Do this once, before the first deploy. The five steps in 1Password come first.
      `technicalpickles/pickleclaw`.
    - Issues: write.
    - Metadata: read.
-3. Create an SSH key item named `puller`, with a new ed25519 key. 1Password
+3. Create an item `github-alerts-token` with a field `token`. The value is a
+   fine-grained personal access token for the security-alerts scan, which only
+   reads. Settings:
+   - Repositories: all repositories, so adding a repository to a tiers file
+     never needs a token edit.
+   - Dependabot alerts: read.
+   - Secret scanning alerts: read.
+   - Administration: read.
+   - Metadata: read.
+
+   Check the permissions before saving it: `GH_TOKEN=<new token> gh api -i
+   repos/technicalpickles/dotfiles/vulnerability-alerts` answers 204. If it
+   answers 403, the Administration permission is missing. Without this token in
+   `GITHUB_ALERTS_TOKEN` the scan prints a skip message and finds nothing, but
+   compose refuses to start prod without it.
+4. Create an SSH key item named `puller`, with a new ed25519 key. 1Password
    generates the key. Copy the public key for the `authorized_keys` step below.
-4. Create a service account with read access to the `brined-almanac` vault and
+5. Create a service account with read access to the `brined-almanac` vault and
    nothing else. Copy its token.
-5. Create an item `taskchampion` with fields `client_id` and
+6. Create an item `taskchampion` with fields `client_id` and
    `encryption_secret`. Copy both values from picklehome's item
    `op://picklehome/TaskChampion Sync`. A `client_id` names a task history, not
    a device, so the container shares the Mac's history. The two items hold the
@@ -93,7 +108,7 @@ op document get tiers.toml --vault brined-almanac --output local/tiers.toml
 
 ### State directory
 
-Create the directory. Copy the token from step 4 in 1Password, then write it
+Create the directory. Copy the token from step 5 in 1Password, then write it
 from the clipboard so it never appears on a command line:
 
 ```sh
@@ -404,6 +419,8 @@ and moves `prod` back.
 
 - **GitHub token.** Edit the `token` field of `github-token` in
   1Password. Run `mise run deploy`.
+- **GitHub alerts token.** Edit the `token` field of `github-alerts-token` in
+  1Password, then check it as in the setup step. Run `mise run deploy`.
 - **Puller key.** Regenerate the SSH key in the `puller` item. Replace the
   `authorized_keys` line on picklelab with the new public key. Run
   `mise run deploy`.

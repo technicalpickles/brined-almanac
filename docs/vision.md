@@ -106,5 +106,5 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 - A maintainer's question on one of my upstream issues gets an answer within days, and an upstream fix leads to deleting my workaround.
 - A service that stops is reported before I notice it.
 - Deployed repositories stay current without my attention.
-- An open security alert on a deployed, active, or maintained repository becomes tracked work within a day.
+- An open security alert on a deployed, active, or maintained repository has a fix merged, or a task, by the end of its severity's window.
 - Directed work never runs into the usage limit because of something almanac did.

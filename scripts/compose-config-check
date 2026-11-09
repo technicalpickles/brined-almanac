@@ -12,13 +12,13 @@ printf 'ALMANAC_MODE=live\nPULL_HOST=h\nPULL_USER=u\nTASKCHAMPION_SYNC_URL=https
 mkdir "$tmp/transcripts"
 
 render() {
-  env -u BRINED_ALMANAC_GITHUB_TOKEN -u BRINED_ALMANAC_PULLER_KEY -u BRINED_ALMANAC_TIERS_SHA256 \
+  env -u BRINED_ALMANAC_GITHUB_TOKEN -u BRINED_ALMANAC_GITHUB_ALERTS_TOKEN -u BRINED_ALMANAC_PULLER_KEY -u BRINED_ALMANAC_TIERS_SHA256 \
     -u BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID -u BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET \
     -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" "$@" \
     docker compose -f compose.prod.yaml config --format json
 }
 
-rendered=$(render BRINED_ALMANAC_GITHUB_TOKEN=x BRINED_ALMANAC_PULLER_KEY=y BRINED_ALMANAC_TIERS_SHA256=h \
+rendered=$(render BRINED_ALMANAC_GITHUB_TOKEN=x BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=a BRINED_ALMANAC_PULLER_KEY=y BRINED_ALMANAC_TIERS_SHA256=h \
   BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=c BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=s)
 
 jq -e '
@@ -31,6 +31,7 @@ jq -e '
   and .services.almanac.environment.TASKCHAMPION_SYNC_URL == "https://example.invalid"
   and ([.services.almanac.volumes[] | select(.target == "/var/lib/brined-almanac/taskchampion")] | length == 1)
   and ([.services.almanac.volumes[] | select(.target == "/transcripts")] | length == 1 and .[0].read_only == true)
+  and .services.almanac.environment.GITHUB_ALERTS_TOKEN == "a"
   and .services.almanac.environment.LOCAL_TIERS == "/etc/brined-almanac/tiers.toml"
   and ([.services.almanac.volumes[] | select(.target == "/etc/brined-almanac/tiers.toml")] | length == 1 and .[0].read_only == true)
   and .services.almanac.environment.LOCAL_TIERS_SHA256 == "h"
@@ -45,7 +46,7 @@ jq -e '
   exit 1
 }
 
-guarded=(GITHUB_TOKEN PULLER_KEY TIERS_SHA256 TASKCHAMPION_CLIENT_ID TASKCHAMPION_ENCRYPTION_SECRET)
+guarded=(GITHUB_TOKEN GITHUB_ALERTS_TOKEN PULLER_KEY TIERS_SHA256 TASKCHAMPION_CLIENT_ID TASKCHAMPION_ENCRYPTION_SECRET)
 
 # Renders with every guarded secret but one.
 expect_guard_failure() {
@@ -64,12 +65,12 @@ expect_guard_failure() {
 }
 
 # ps and exec interpolate the whole file too; dummy values must be enough for them.
-render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
+render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
   BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused >/dev/null || {
   echo "compose-config-check: dummy guard values do not render, so ps/exec would fail" >&2
   exit 1
 }
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
   BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
   docker compose -f compose.prod.yaml ps >/dev/null
 
