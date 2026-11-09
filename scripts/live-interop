@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Files one probe task into the live taskchampion history, to prove another client can read what
+# this code writes. It writes real data: delete the probe task afterwards.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+STATE=${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}
+TASKCHAMPION_SYNC_URL=$(sed -n 's/^TASKCHAMPION_SYNC_URL=//p' "$STATE/prod.env")
+[[ -n $TASKCHAMPION_SYNC_URL ]] || { echo "live-interop: $STATE/prod.env has no TASKCHAMPION_SYNC_URL" >&2; exit 1; }
+export TASKCHAMPION_SYNC_URL DATABASE_URL=postgres://unused
+OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op run --env-file prod.secrets.env -- sh -c '
+  export TASKCHAMPION_CLIENT_ID=$BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID
+  export TASKCHAMPION_ENCRYPTION_SECRET=$BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET
+  exec cargo test --test live_interop -- --ignored --nocapture
+'
