@@ -4,3 +4,4 @@ transcripts/
 target/
 .claude/worktrees/
 .env.portool
+__pycache__/
