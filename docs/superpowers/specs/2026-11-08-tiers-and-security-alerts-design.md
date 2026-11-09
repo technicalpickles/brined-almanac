@@ -154,22 +154,34 @@ repositories are not scanned.
 
 ### What a scan reads
 
-For each repository, two endpoints with a read-only client:
+Upstream's `GithubClient` reports any 4xx as `ForgeRefused { status }` and
+drops the body, so the scan tells "turned off" apart by status alone. A
+disabled Dependabot answers its alerts endpoint with 403, the same status as a
+token that lacks a permission, so the scan asks a different endpoint first.
+For each repository, with a read-only client, in this order:
 
-- `GET /repos/{repo}/dependabot/alerts?state=open`, paginated.
-- `GET /repos/{repo}/secret-scanning/alerts?state=open`, paginated. The
-  response includes the secret itself in `secret`. The parser never reads that
-  field, and a test pins it out of every body.
+1. `GET /repos/{repo}`. A 404 fails the scan with a message that names the
+   repository and says to check the tiers files. The `private` flag feeds the
+   coverage rule.
+2. `GET /repos/{repo}/vulnerability-alerts`, through `get_text`, since the
+   success answer is an empty 204. 204 means Dependabot alerts are on, and 404
+   means they are off. Checked 2026-11-08: dotfiles answers 204, brineworks
+   404.
+3. When step 2 said on: `GET /repos/{repo}/dependabot/alerts?state=open`
+   through `get_all`.
+4. `GET /repos/{repo}/secret-scanning/alerts?state=open` through `get_all`.
+   A 404 means secret scanning is off, since step 1 proved the repository
+   exists. The response includes the secret itself in `secret`. The parser
+   never reads that field, and a test pins it out of every body.
 
-Each endpoint answers in one of three ways, parsed at the boundary into:
+Each feature parses at the boundary into:
 
 ```rust
 enum Coverage<A> { On(Vec<A>), Off }
 ```
 
-A 403 or 404 whose message says the feature is disabled or not enabled is
-`Off`. Any other error fails the scan with the repository and status in the
-message, so a bad token or a rate limit is loud.
+Any other error fails the scan with the repository and status in the message,
+so a bad token or a rate limit is loud.
 
 ### The overdue rule
 
@@ -274,6 +286,8 @@ A new fine-grained personal access token, item `github-alerts-token` in the
 - Repositories: all repositories.
 - Dependabot alerts: read.
 - Secret scanning alerts: read.
+- Administration: read. GitHub's docs list it for the vulnerability-alerts
+  check in step 2. Confirm when creating the token, by running step 2 with it.
 - Metadata: read.
 
 It reaches the daemon as `GITHUB_ALERTS_TOKEN`, through
@@ -319,8 +333,9 @@ Unit tests, all on behavior a caller sees:
   is.
 - The digest does not change when the alerts arrive in a different order, and
   does change when one alert is added or removed.
-- Recorded API responses: a 403 with "Dependabot alerts are disabled" is `Off`,
-  a 404 with "Secret scanning is disabled" is `Off`, a 401 fails the scan.
+- Status mapping: vulnerability-alerts 404 is Dependabot `Off`, secret
+  scanning 404 after a found repository is `Off`, a repository 404 fails the
+  scan naming the tiers files, and a 401 or 403 anywhere fails the scan.
 - A recorded secret-scanning response with a `secret` value produces a body
   that does not contain that value.
 
@@ -359,7 +374,9 @@ taskwarrior task `f2ed310f-f842-44ff-997f-ed023bd6665e`:
 
 - Turn on Dependabot alerts on every watched repository. They are free on
   private repositories, and Renovate's `vulnerabilityAlerts` reads them, so
-  both bots need them.
+  both bots need them. Alerts alone open no pull requests: Dependabot security
+  updates are a separate setting, and it is off on dotfiles
+  (`security_and_analysis.dependabot_security_updates`, checked 2026-11-08).
 - Pick the bot per repository. Renovate already has a config on dotfiles, cq,
   and bktide, and upstream's `security_fixes` vets its pull requests. Dependabot
   security updates fix transitive lockfile dependencies, which make up most of
