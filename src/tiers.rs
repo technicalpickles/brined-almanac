@@ -82,7 +82,10 @@ fn read(
     let file: File = toml::from_str(text).map_err(|e| format!("{source}: {e}"))?;
     for declaration in file.repo {
         let name = declaration.name;
-        if name.matches('/').count() != 1 {
+        let halves_present = name.split_once('/').is_some_and(|(owner, repo)| {
+            !owner.is_empty() && !repo.is_empty() && !repo.contains('/')
+        });
+        if !halves_present {
             return Err(format!("{source}: {name:?} is not owner/repo"));
         }
         let slug: Slug = name

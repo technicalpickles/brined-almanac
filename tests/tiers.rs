@@ -77,7 +77,18 @@ fn a_name_without_an_owner_is_an_error() {
 name = "a"
 tiers = ["active"]
 "#;
-    assert!(Tiers::parse(public, None).is_err());
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("owner/repo"), "{err}");
+}
+
+#[test]
+fn a_name_with_an_empty_half_is_an_error() {
+    for name in ["/a", "technicalpickles/"] {
+        let public = format!("[[repo]]\nname = \"{name}\"\ntiers = [\"active\"]\n");
+        let err = Tiers::parse(&public, None).unwrap_err();
+        assert!(err.contains(name), "{err}");
+        assert!(err.contains("owner/repo"), "{err}");
+    }
 }
 
 #[test]
@@ -102,4 +113,18 @@ tiers = ["dormant"]
 fn load_with_a_missing_path_is_an_error() {
     let err = Tiers::load(Some(Path::new("/nonexistent/tiers.toml"))).unwrap_err();
     assert!(err.contains("/nonexistent/tiers.toml"), "{err}");
+}
+
+#[test]
+fn load_with_a_local_file_that_does_not_parse_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tiers.toml");
+    std::fs::write(&path, "this is [not toml").unwrap();
+    let err = Tiers::load(Some(&path)).unwrap_err();
+    assert!(err.contains("local"), "{err}");
+}
+
+#[test]
+fn load_without_a_local_file_uses_the_public_file() {
+    Tiers::load(None).unwrap();
 }
