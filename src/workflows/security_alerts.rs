@@ -337,22 +337,23 @@ fn alert_number(alert: &Alert) -> u64 {
     }
 }
 
-/// A repository name GitHub allows but a project name does not (uppercase, say) files under almanac
-/// itself, since the subject still names the repository.
-fn project_of(repo: &Slug) -> Slug {
-    let name = repo.to_string();
-    let name = name.rsplit('/').next().unwrap_or(&name).to_lowercase();
+/// A repository whose name is not a valid project name is a declaration bug, so it fails the scan.
+fn project_of(repo: &Slug) -> Result<Slug, StepError> {
+    let full = repo.to_string();
+    let name = full.rsplit('/').next().unwrap_or(&full);
     name.parse::<Project>()
-        .unwrap_or_else(|_| COVERAGE_PROJECT.parse().expect("a valid project"))
-        .as_str()
-        .parse()
-        .expect("a project name is a slug")
+        .map(|project| project.as_str().parse().expect("a project name is a slug"))
+        .map_err(|e| StepError(format!("{repo}: {e}")))
 }
 
-fn overdue_finding(repo: &Slug, alerts: &[Alert], today: Date) -> Option<(String, Value)> {
+fn overdue_finding(
+    repo: &Slug,
+    alerts: &[Alert],
+    today: Date,
+) -> Result<Option<(String, Value)>, StepError> {
     let mut late = overdue(alerts, today);
     if late.is_empty() {
-        return None;
+        return Ok(None);
     }
     late.sort_by_key(|a| (rank(a), alert_number(a)));
     let keys: Vec<String> = late.iter().map(|a| a.key()).collect();
@@ -368,7 +369,7 @@ fn overdue_finding(repo: &Slug, alerts: &[Alert], today: Date) -> Option<(String
     let lines: Vec<String> = late.iter().map(|a| a.line(today)).collect();
     let payload = json!({
         "kind": "overdue".parse::<Slug>().expect("slug"),
-        "project": project_of(repo),
+        "project": project_of(repo)?,
         "subject": repo,
         "critical": count(Severity::Critical),
         "high": count(Severity::High),
@@ -381,10 +382,10 @@ fn overdue_finding(repo: &Slug, alerts: &[Alert], today: Date) -> Option<(String
         "repositories": 0,
         "lines": lines.join("\n"),
     });
-    Some((
+    Ok(Some((
         format!("scan:security-alerts/{repo}@{}", digest(&keys)),
         payload,
-    ))
+    )))
 }
 
 fn coverage_finding(reads: &[(Slug, RepoRead)]) -> Option<(String, Value)> {
@@ -433,21 +434,22 @@ fn coverage_finding(reads: &[(Slug, RepoRead)]) -> Option<(String, Value)> {
 
 /// One `overdue` entry per repository with something overdue, then one `coverage` entry when
 /// anything is off.
-pub fn findings(reads: &[(Slug, RepoRead)], today: Date) -> Vec<(String, Value)> {
-    let mut out: Vec<(String, Value)> = reads
-        .iter()
-        .filter_map(|(repo, read)| {
-            let mut alerts = vec![];
-            for side in [&read.dependabot, &read.secrets] {
-                if let Coverage::On(found) = side {
-                    alerts.extend(found.iter().cloned());
-                }
+pub fn findings(
+    reads: &[(Slug, RepoRead)],
+    today: Date,
+) -> Result<Vec<(String, Value)>, StepError> {
+    let mut out = vec![];
+    for (repo, read) in reads {
+        let mut alerts = vec![];
+        for side in [&read.dependabot, &read.secrets] {
+            if let Coverage::On(found) = side {
+                alerts.extend(found.iter().cloned());
             }
-            overdue_finding(repo, &alerts, today)
-        })
-        .collect();
+        }
+        out.extend(overdue_finding(repo, &alerts, today)?);
+    }
     out.extend(coverage_finding(reads));
-    out
+    Ok(out)
 }
 
 observed! {
@@ -473,9 +475,21 @@ observed! {
 impl Event for SecurityFinding {
     const KIND: &'static str = "security.alert.finding";
     fn parse(p: &Payload<'_>) -> Result<Self, Malformed> {
+        let kind: Slug = p.field("/kind")?;
+        if !matches!(kind.to_string().as_str(), "overdue" | "coverage") {
+            return Err(Malformed {
+                pointer: "/kind".to_string(),
+            });
+        }
+        let project: Slug = p.field("/project")?;
+        if project.to_string().parse::<Project>().is_err() {
+            return Err(Malformed {
+                pointer: "/project".to_string(),
+            });
+        }
         Ok(Self {
-            kind: p.field("/kind")?,
-            project: p.field("/project")?,
+            kind,
+            project,
             subject: p.field("/subject")?,
             critical: p.field("/critical")?,
             high: p.field("/high")?,
@@ -495,17 +509,15 @@ impl Event for SecurityFinding {
 pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<SecurityFinding>>, StepError> {
     let client = scanner.get::<AlertsClient>()?;
     let Some(github) = &client.0 else {
-        return Err(StepError(
-            "GITHUB_ALERTS_TOKEN is not set; security-alerts needs a read-only alerts token"
-                .to_string(),
-        ));
+        eprintln!("security-alerts: GITHUB_ALERTS_TOKEN is not set, skipping");
+        return Ok(vec![]);
     };
     let tiers = scanner.get::<Tiers>()?;
     let mut reads = vec![];
     for repo in tiers.watched(WATCHED_BY_SECURITY_ALERTS) {
         reads.push((repo.clone(), read_repo(github, repo).await?));
     }
-    Ok(findings(&reads, OffsetDateTime::now_utc().date())
+    Ok(findings(&reads, OffsetDateTime::now_utc().date())?
         .into_iter()
         .map(|(delivery_id, payload)| Scanned::new(delivery_id, payload))
         .collect())
@@ -562,17 +574,13 @@ pub enum Facts {
     },
 }
 
-/// `task:<project>`, or almanac's own project when the event's project is not a valid name.
-fn target_of(project: &Slug) -> Slug {
-    project
+pub fn facts(event: &SecurityFinding) -> Facts {
+    let target = event
+        .project
         .to_string()
         .parse::<Project>()
-        .unwrap_or_else(|_| COVERAGE_PROJECT.parse().expect("a valid project"))
-        .target()
-}
-
-pub fn facts(event: &SecurityFinding) -> Facts {
-    let target = target_of(&event.project);
+        .expect("parse checked the project")
+        .target();
     if event.kind.to_string() == "coverage" {
         return Facts::Coverage {
             target,
@@ -630,10 +638,17 @@ pub fn policy(facts: &Facts) -> Vec<Effect> {
             repositories,
             body,
         } => vec![Effect::File {
-            title: title!(
-                "security-alerts: alerts are off on {} repositories",
-                repositories
-            ),
+            title: if *repositories == 1 {
+                title!(
+                    "security-alerts: alerts are off on {} repository",
+                    repositories
+                )
+            } else {
+                title!(
+                    "security-alerts: alerts are off on {} repositories",
+                    repositories
+                )
+            },
             target: target.clone(),
             body: body.clone(),
         }],

@@ -6,6 +6,7 @@ use almanac::prelude::*;
 use almanac::runtime::{Outcome, Runtime};
 use almanac::testing::FakeTracker;
 use brined_almanac::transcript::read;
+use brined_almanac::workflows;
 use brined_almanac::workflows::tool_failures::{
     CLASSES, Facts, ToolFailed, ToolFailures, class_named, classify, cluster, facts, owner_of,
     policy,
@@ -184,7 +185,7 @@ fn tool_failed(service: &str, tool: &str, class: &str, count: u64) -> ToolFailed
 }
 
 fn runtime(fx: &Fixture, tracker: Arc<dyn Tracker>, mode: Mode) -> Runtime {
-    Runtime::new(vec![Box::new(ToolFailures)], fx.providers(tracker)).in_mode(mode)
+    Runtime::new(workflows::all(), fx.providers(tracker)).in_mode(mode)
 }
 
 fn twelve_timeouts() -> Fixture {

@@ -29,6 +29,7 @@ The binary has almanac's verbs: `synth` prints the manifest, `check` validates t
 |---|---|
 | `BRENT_TRANSCRIPTS` | Directory of `*.jsonl` transcripts. Defaults to `transcripts/`, which is gitignored. |
 | `GITHUB_TOKEN` | Turns on the GitHub tracker. Without it, each would-be issue prints to stdout instead. |
+| `GITHUB_ALERTS_TOKEN` | A read-only token for the security-alerts scan. Unset, that scan prints a skip message and finds nothing. |
 | `DATABASE_URL` | The Postgres store that remembers what's been filed. Required for live runs; set by `mise run live`, never by hand (see below). |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
 

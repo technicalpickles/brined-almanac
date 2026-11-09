@@ -6,7 +6,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use almanac::prelude::*;
+use brined_almanac::tiers::Tiers;
 use brined_almanac::transcript::Transcripts;
+use brined_almanac::workflows::security_alerts::AlertsClient;
 use serde_json::{Map, Value};
 use tempfile::TempDir;
 
@@ -35,6 +37,8 @@ impl Fixture {
 
     pub fn providers(&self, tracker: Arc<dyn Tracker>) -> Providers {
         Providers::new()
+            .provide::<Tiers>(Arc::new(Tiers::parse("", None).expect("empty tiers")))
+            .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
             .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))
             .provide::<dyn Tracker>(tracker)
     }

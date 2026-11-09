@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use almanac::diag::Error;
-use almanac::prelude::Mode;
 use almanac::prelude::*;
 use almanac::runtime::{Envelope, Ingest, Origin, Runtime};
 use almanac::testing::FakeTracker;
@@ -283,7 +282,7 @@ fn findings_files_one_task_per_repository_with_overdue_alerts() {
         ),
         (slug("technicalpickles/quiet"), clean_read()),
     ];
-    let found = findings(&reads, TODAY);
+    let found = findings(&reads, TODAY).unwrap();
     assert_eq!(found.len(), 1);
     let expected = format!(
         "scan:security-alerts/technicalpickles/dotfiles@{}",
@@ -303,7 +302,7 @@ fn a_repository_whose_overdue_alerts_were_all_fixed_files_nothing() {
         slug("technicalpickles/dotfiles"),
         read(false, Coverage::On(vec![fresh]), Coverage::On(vec![])),
     )];
-    assert!(findings(&reads, TODAY).is_empty());
+    assert!(findings(&reads, TODAY).unwrap().is_empty());
 }
 
 #[test]
@@ -318,7 +317,7 @@ fn findings_lists_coverage_gaps_once() {
             read(false, Coverage::On(vec![]), Coverage::Off),
         ),
     ];
-    let found = findings(&reads, TODAY);
+    let found = findings(&reads, TODAY).unwrap();
     assert_eq!(found.len(), 1);
     let keys = [
         "dependabot-off:technicalpickles/example-private".to_string(),
@@ -345,7 +344,7 @@ fn no_gaps_and_nothing_overdue_is_no_findings() {
             read(true, Coverage::On(vec![]), Coverage::Off),
         ),
     ];
-    assert!(findings(&reads, TODAY).is_empty());
+    assert!(findings(&reads, TODAY).unwrap().is_empty());
 }
 
 #[test]
@@ -361,7 +360,7 @@ fn overdue_secrets_and_alert_lines_reach_the_body() {
             Coverage::On(vec![secret(date!(2026 - 11 - 07))]),
         ),
     )];
-    let found = findings(&reads, TODAY);
+    let found = findings(&reads, TODAY).unwrap();
     let event = SecurityFinding::from_json(&found[0].1).expect("payload parses");
     assert_eq!((event.critical, event.secrets), (1, 1));
     let Facts::Overdue { body, .. } = facts(&event) else {
@@ -427,7 +426,7 @@ fn the_workflow_key_is_the_subject() {
 }
 
 #[tokio::test]
-async fn a_missing_token_fails_the_scan_with_a_message() {
+async fn a_missing_token_skips_the_scan() {
     let providers = Providers::new()
         .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
         .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
@@ -437,10 +436,44 @@ async fn a_missing_token_fails_the_scan_with_a_message() {
         providers,
     )
     .in_mode(Mode::DryRun);
-    let err = rt.backfill(None).await.expect_err("scan fails");
-    assert!(
-        err.to_string().contains("GITHUB_ALERTS_TOKEN is not set"),
-        "{err}"
+    let found = rt.backfill(None).await;
+    assert_eq!(found.unwrap().found, 0);
+}
+
+#[test]
+fn an_invalid_project_name_fails_naming_the_repository() {
+    let reads = vec![(
+        slug("technicalpickles/Bad..Name"),
+        read(
+            false,
+            Coverage::On(vec![numbered(
+                dependency(Severity::High, date!(2026 - 10 - 01)),
+                7,
+            )]),
+            Coverage::On(vec![]),
+        ),
+    )];
+    let err = findings(&reads, TODAY).unwrap_err().0;
+    assert!(err.contains("technicalpickles/Bad..Name"), "{err}");
+}
+
+#[test]
+fn an_unknown_kind_or_project_is_malformed() {
+    for (field, value) in [("kind", "other"), ("project", "Not A Project")] {
+        let mut payload = fixture(OVERDUE_EVENT);
+        payload[field] = json!(value);
+        assert!(SecurityFinding::from_json(&payload).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn the_coverage_title_pluralizes() {
+    let mut payload = fixture(COVERAGE_EVENT);
+    payload["repositories"] = json!(1);
+    let event = SecurityFinding::from_json(&payload).unwrap();
+    assert_eq!(
+        title_of(&policy(&facts(&event))),
+        "security-alerts: alerts are off on 1 repository"
     );
 }
 
