@@ -68,7 +68,12 @@ Do this once, before the first deploy. The six steps in 1Password come first.
 
    Check the permissions before saving it: `GH_TOKEN=<new token> gh api -i
    repos/technicalpickles/dotfiles/vulnerability-alerts` answers 204. If it
-   answers 403, the Administration permission is missing. Without this token in
+   answers 403, the Administration permission is missing. Then check
+   `repos/technicalpickles/bb-plugin-taskwarrior/secret-scanning/alerts`
+   answers 200. Use a repository with secret scanning on: one with it off
+   answers 404 before GitHub checks the token, so it passes without the
+   permission. A 403 there means Secret scanning alerts is missing, which is
+   easy to do by picking Code scanning alerts, the entry next to it. Without this token in
    `GITHUB_ALERTS_TOKEN` the scan prints a skip message and finds nothing, but
    compose refuses to start prod without it.
 4. Create an SSH key item named `puller`, with a new ed25519 key. 1Password
