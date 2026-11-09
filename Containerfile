@@ -10,6 +10,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --locked
 
+COPY tiers.toml ./
 COPY src ./src
 RUN touch src/main.rs && cargo build --release --locked
 
