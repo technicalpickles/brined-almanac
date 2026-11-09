@@ -7,23 +7,29 @@ cd "$(git rev-parse --show-toplevel)"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-printf 'ALMANAC_MODE=live\nPULL_HOST=h\nPULL_USER=u\n' >"$tmp/prod.env"
+printf 'ALMANAC_MODE=live\nPULL_HOST=h\nPULL_USER=u\nTASKCHAMPION_SYNC_URL=https://example.invalid\n' >"$tmp/prod.env"
 : >"$tmp/known_hosts"
 mkdir "$tmp/transcripts"
 
 render() {
-  env -u BRINED_ALMANAC_GITHUB_TOKEN -u BRINED_ALMANAC_PULLER_KEY -u COMPOSE_PROJECT_NAME \
-    BRINED_ALMANAC_STATE="$tmp" "$@" \
+  env -u BRINED_ALMANAC_GITHUB_TOKEN -u BRINED_ALMANAC_PULLER_KEY \
+    -u BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID -u BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET \
+    -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" "$@" \
     docker compose -f compose.prod.yaml config --format json
 }
 
-rendered=$(render BRINED_ALMANAC_GITHUB_TOKEN=x BRINED_ALMANAC_PULLER_KEY=y)
+rendered=$(render BRINED_ALMANAC_GITHUB_TOKEN=x BRINED_ALMANAC_PULLER_KEY=y \
+  BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=c BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=s)
 
 jq -e '
   .name == "brined-almanac-prod"
   and .services.db.ports == null
   and .services.almanac.environment.DATABASE_URL == "postgres://almanac@db:5432/almanac"
   and .services.almanac.environment.BRENT_TRANSCRIPTS == "/transcripts"
+  and .services.almanac.environment.TASKCHAMPION_CLIENT_ID == "c"
+  and .services.almanac.environment.TASKCHAMPION_ENCRYPTION_SECRET == "s"
+  and .services.almanac.environment.TASKCHAMPION_SYNC_URL == "https://example.invalid"
+  and ([.services.almanac.volumes[] | select(.target == "/var/lib/brined-almanac/taskchampion")] | length == 1)
   and ([.services.almanac.volumes[] | select(.target == "/transcripts")] | length == 1 and .[0].read_only == true)
   and .services.almanac.ports[0].published == "8788"
   and .services.almanac.ports[0].host_ip == "127.0.0.1"
@@ -36,9 +42,15 @@ jq -e '
   exit 1
 }
 
+guarded=(GITHUB_TOKEN PULLER_KEY TASKCHAMPION_CLIENT_ID TASKCHAMPION_ENCRYPTION_SECRET)
+
+# Renders with every guarded secret but one.
 expect_guard_failure() {
-  local missing=$1 present=$2 err
-  if err=$(render "BRINED_ALMANAC_$present=x" 2>&1 >/dev/null); then
+  local missing=$1 name err present=()
+  for name in "${guarded[@]}"; do
+    [[ $name == "$missing" ]] || present+=("BRINED_ALMANAC_$name=x")
+  done
+  if err=$(render "${present[@]}" 2>&1 >/dev/null); then
     echo "compose-config-check: config succeeded without BRINED_ALMANAC_$missing" >&2
     exit 1
   fi
@@ -49,14 +61,17 @@ expect_guard_failure() {
 }
 
 # ps and exec interpolate the whole file too; dummy values must be enough for them.
-render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused >/dev/null || {
+render BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused >/dev/null || {
   echo "compose-config-check: dummy guard values do not render, so ps/exec would fail" >&2
   exit 1
 }
 env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_STATE="$tmp" BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
   docker compose -f compose.prod.yaml ps >/dev/null
 
-expect_guard_failure GITHUB_TOKEN PULLER_KEY
-expect_guard_failure PULLER_KEY GITHUB_TOKEN
+for name in "${guarded[@]}"; do
+  expect_guard_failure "$name"
+done
 
 echo "compose-config-check: ok"

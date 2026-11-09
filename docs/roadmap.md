@@ -18,10 +18,11 @@ tool-failures runs all the time instead of when I remember to run it. [The prod 
 
 A workflow can file a finding that no pull request closes. Every "next" workflow needs this, so it comes first. The first two workflows on it are the cheapest ones that catch the costliest problems: open security alerts, and services that stop. A service down for six days and a site returning 500 for seven weeks cost more than anything else in [vision.md](vision.md), and neither needs a model.
 
-- A taskwarrior `Tracker` in `src/providers.rs`, next to `LogTracker`, `StoreRequired` and `PrivateOnly`
-- A router that sends a finding to a GitHub issue or to taskwarrior, by the rule in [vision.md](vision.md) "Where output goes"
-- The container as a second client of the taskchampion sync server picklehome already runs on picklelab, which my Mac already syncs to. It keeps its own taskwarrior replica, so nothing shares the SQLite file. Adding it means allowlisting a client UUID and giving the container the encryption secret from 1Password
+- A taskwarrior `Tracker` in `src/taskwarrior.rs`. [Designed 2026-11-08](superpowers/specs/2026-11-08-taskwarrior-tracker-design.md)
+- A router in `src/routing.rs` that sends a finding to a GitHub issue or to taskwarrior, by the rule in [vision.md](vision.md) "Where output goes"
+- The container as a second replica of my task history on the taskchampion sync server picklehome already runs on picklelab, which my Mac already syncs to. It keeps its own taskwarrior replica, so nothing shares the SQLite file. A `client_id` names a task history, not a device, so the container uses the same `client_id` and encryption secret as the Mac, read from the same 1Password item, and the server's allowlist does not change. Corrected 2026-11-08: an earlier version of this bullet said to allowlist a new client UUID, which would have started an empty second history
 - An `almanac_key` user-defined attribute on each task, holding its delivery key. The tracker checks its replica for the key before filing, so a rerun or a lost store doesn't file the same finding twice. The close effect and the daily list of closes find tasks by the same key. My `.taskrc` defines the attribute through dotfiles
+- Tier declarations: the tiers code defines, and `local/tiers.toml` for private repositories nothing public names ([workflows.md](workflows.md) "Repository tiers"). Designed with security-alerts, the first workflow that reads them; the taskwarrior tracker does not need them
 - security-alerts, for deployed, active, and maintained repositories
 - Checks in the Nagios plugin convention for units that should be running and for site status, collected into each host's host-state report over pull
 - The WordPress droplet on the tailnet, with a fenced key for its report

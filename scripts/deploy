@@ -52,6 +52,10 @@ if ((${#missing[@]})); then
   echo "deploy: missing in $STATE: ${missing[*]}; see $runbook" >&2
   exit 1
 fi
+if ! grep -q '^TASKCHAMPION_SYNC_URL=' "$STATE/prod.env"; then
+  echo "deploy: $STATE/prod.env has no TASKCHAMPION_SYNC_URL= line; see $runbook" >&2
+  exit 1
+fi
 # GNU stat (mise puts it first on PATH) and BSD stat disagree on flags.
 mode=$(stat -c %a "$STATE/op-token" 2>/dev/null || stat -f %Lp "$STATE/op-token")
 if [[ $mode != 600 ]]; then
@@ -63,6 +67,7 @@ echo "deploy: state dir ok ($STATE)"
 # ps and exec interpolate the whole file, so the :? guards need values; neither recreates containers.
 compose() {
   BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
     docker compose -f compose.prod.yaml "$@"
 }
 
@@ -83,6 +88,7 @@ echo "deploy: built brined-almanac:$tag and brined-almanac-puller:$tag (tagged p
 
 if ((db_only)); then
   BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
     docker compose -f compose.prod.yaml up -d --wait db
   echo "deploy: db is up; run mise run deploy for the rest"
   exit 0
