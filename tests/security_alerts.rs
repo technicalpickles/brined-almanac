@@ -1,5 +1,8 @@
+use almanac::diag::Error;
+use almanac::prelude::Slug;
 use brined_almanac::workflows::security_alerts::{
-    Alert, Severity, digest, overdue, parse_dependabot, parse_secret,
+    Alert, Coverage, Severity, alerts_switch, digest, overdue, parse_dependabot, parse_secret,
+    repo_missing, secret_alerts,
 };
 use serde_json::{Value, json};
 use time::Date;
@@ -141,4 +144,71 @@ fn nothing_overdue_is_empty() {
         dependency(Severity::Low, date!(2026 - 08 - 20)),
     ];
     assert!(overdue(&alerts, today).is_empty());
+}
+
+fn repo() -> Slug {
+    "technicalpickles/example".parse().unwrap()
+}
+
+fn refused(status: u16) -> Error {
+    Error::ForgeRefused {
+        action: "GET /repos/technicalpickles/example/x".into(),
+        status,
+    }
+}
+
+#[test]
+fn vulnerability_alerts_404_is_off() {
+    assert!(!alerts_switch(Err(refused(404)), &repo()).unwrap());
+}
+
+#[test]
+fn vulnerability_alerts_empty_204_is_on() {
+    assert!(alerts_switch(Ok(String::new()), &repo()).unwrap());
+}
+
+#[test]
+fn vulnerability_alerts_403_is_an_error_naming_the_repo() {
+    let err = alerts_switch(Err(refused(403)), &repo()).unwrap_err();
+    assert!(err.0.contains("technicalpickles/example"), "{}", err.0);
+    assert!(err.0.contains("403"), "{}", err.0);
+}
+
+#[test]
+fn secret_scanning_404_is_off() {
+    let got = secret_alerts(Err(refused(404)), &repo()).unwrap();
+    assert!(matches!(got, Coverage::Off));
+}
+
+#[test]
+fn secret_scanning_401_is_an_error_naming_the_repo() {
+    let err = secret_alerts(Err(refused(401)), &repo()).unwrap_err();
+    assert!(err.0.contains("technicalpickles/example"), "{}", err.0);
+    assert!(err.0.contains("401"), "{}", err.0);
+}
+
+#[test]
+fn secret_scanning_alerts_parse_into_on() {
+    let got = secret_alerts(Ok(vec![fixture(SECRET)]), &repo()).unwrap();
+    match got {
+        Coverage::On(alerts) => assert_eq!(alerts.len(), 1),
+        Coverage::Off => panic!("expected On"),
+    }
+}
+
+#[test]
+fn a_missing_repository_names_both_tiers_files() {
+    let msg = repo_missing(refused(404), &repo()).0;
+    assert!(msg.contains("technicalpickles/example"), "{msg}");
+    assert!(
+        msg.contains("check tiers.toml and local/tiers.toml"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn another_repository_failure_keeps_the_status() {
+    let msg = repo_missing(refused(500), &repo()).0;
+    assert!(msg.contains("technicalpickles/example"), "{msg}");
+    assert!(msg.contains("500"), "{msg}");
 }

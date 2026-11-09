@@ -1,3 +1,6 @@
+use almanac::diag::Error;
+use almanac::prelude::{Slug, StepError};
+use github::client::GithubClient;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -197,5 +200,109 @@ pub fn parse_secret(v: &Value) -> Result<Alert, String> {
         kind: kind.to_string(),
         created: created(v)?,
         url: text(v, &["html_url"])?.to_string(),
+    })
+}
+
+#[derive(Debug)]
+pub enum Coverage<A> {
+    On(Vec<A>),
+    Off,
+}
+
+#[derive(Debug)]
+pub struct RepoRead {
+    pub private: bool,
+    pub dependabot: Coverage<Alert>,
+    pub secrets: Coverage<Alert>,
+}
+
+pub struct AlertsClient(pub GithubClient);
+
+fn failed(repo: &Slug, err: &Error) -> StepError {
+    StepError(format!("{repo}: {err}"))
+}
+
+fn is_404(err: &Error) -> bool {
+    matches!(err, Error::ForgeRefused { status: 404, .. })
+}
+
+/// Only a 404 means off: Dependabot answers 403 for a missing permission too.
+pub fn alerts_switch(result: Result<String, Error>, repo: &Slug) -> Result<bool, StepError> {
+    match result {
+        Ok(_) => Ok(true),
+        Err(e) if is_404(&e) => Ok(false),
+        Err(e) => Err(failed(repo, &e)),
+    }
+}
+
+/// A 404 here means off only because the caller already proved the repository exists.
+pub fn secret_alerts(
+    result: Result<Vec<Value>, Error>,
+    repo: &Slug,
+) -> Result<Coverage<Alert>, StepError> {
+    match result {
+        Ok(items) => parsed(&items, parse_secret, repo).map(Coverage::On),
+        Err(e) if is_404(&e) => Ok(Coverage::Off),
+        Err(e) => Err(failed(repo, &e)),
+    }
+}
+
+pub fn repo_missing(err: Error, repo: &Slug) -> StepError {
+    if is_404(&err) {
+        StepError(format!(
+            "{repo} was not found on GitHub: check tiers.toml and local/tiers.toml"
+        ))
+    } else {
+        failed(repo, &err)
+    }
+}
+
+fn parsed(
+    items: &[Value],
+    parse: fn(&Value) -> Result<Alert, String>,
+    repo: &Slug,
+) -> Result<Vec<Alert>, StepError> {
+    items
+        .iter()
+        .map(|item| parse(item).map_err(|e| StepError(format!("{repo}: {e}"))))
+        .collect()
+}
+
+pub async fn read_repo(client: &GithubClient, repo: &Slug) -> Result<RepoRead, StepError> {
+    let found = client
+        .get(&format!("/repos/{repo}"))
+        .await
+        .map_err(|e| repo_missing(e, repo))?;
+    let private = found
+        .get("private")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| StepError(format!("{repo} has no private flag in the response")))?;
+
+    let on = alerts_switch(
+        client
+            .get_text(&format!("/repos/{repo}/vulnerability-alerts"))
+            .await,
+        repo,
+    )?;
+    let dependabot = if on {
+        let items = client
+            .get_all(&format!("/repos/{repo}/dependabot/alerts?state=open"))
+            .await
+            .map_err(|e| failed(repo, &e))?;
+        Coverage::On(parsed(&items, parse_dependabot, repo)?)
+    } else {
+        Coverage::Off
+    };
+
+    let secrets = secret_alerts(
+        client
+            .get_all(&format!("/repos/{repo}/secret-scanning/alerts?state=open"))
+            .await,
+        repo,
+    )?;
+    Ok(RepoRead {
+        private,
+        dependabot,
+        secrets,
     })
 }
