@@ -128,3 +128,18 @@ fn load_with_a_local_file_that_does_not_parse_is_an_error() {
 fn load_without_a_local_file_uses_the_public_file() {
     Tiers::load(None).unwrap();
 }
+
+#[test]
+fn the_committed_file_parses_and_watches_the_documented_repositories() {
+    let tiers = Tiers::load(None).unwrap();
+    let watched = tiers.watched(WATCHED_BY_SECURITY_ALERTS);
+    for name in [
+        "technicalpickles/dotfiles",
+        "technicalpickles/sb",
+        "technicalpickles/cq",
+        "technicalpickles/pickled-claude-plugins",
+    ] {
+        assert!(watched.contains(&&slug(name)), "{name} should be watched");
+    }
+    assert!(!watched.contains(&&slug("technicalpickles/chirpfinder")));
+}
