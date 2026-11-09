@@ -22,15 +22,15 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 - A router in `src/routing.rs` that sends a finding to a GitHub issue or to taskwarrior, by the rule in [vision.md](vision.md) "Where output goes"
 - The container as a second replica of my task history on the taskchampion sync server picklehome already runs on picklelab, which my Mac already syncs to. It keeps its own taskwarrior replica, so nothing shares the SQLite file. A `client_id` names a task history, not a device, so the container uses the same `client_id` and encryption secret as the Mac, read from the same 1Password item, and the server's allowlist does not change. Corrected 2026-11-08: an earlier version of this bullet said to allowlist a new client UUID, which would have started an empty second history
 - An `almanac_key` user-defined attribute on each task, holding its delivery key. The tracker checks its replica for the key before filing, so a rerun or a lost store doesn't file the same finding twice. The close effect and the daily list of closes find tasks by the same key. My `.taskrc` defines the attribute through dotfiles
-- Tier declarations: move the declared tiers from [tiers.md](tiers.md) into code, with `local/tiers.toml` for private repositories nothing public names ([workflows.md](workflows.md) "Repository tiers"). security-alerts is the first workflow that reads them; the taskwarrior tracker does not need them
-- security-alerts, for deployed, active, and maintained repositories
+- Tier declarations, done in [`tiers.toml`](../tiers.toml) and [`src/tiers.rs`](../src/tiers.rs), with `local/tiers.toml` for private repositories nothing public names ([workflows.md](workflows.md) "Repository tiers"). security-alerts is the first workflow that reads them. [Designed 2026-11-08](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md)
+- security-alerts, for deployed, active, and maintained repositories: a task when an alert is still open past its severity's window. [Designed 2026-11-08](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md)
 - Checks in the Nagios plugin convention for units that should be running and for site status, collected into each host's host-state report over pull
 - The WordPress droplet on the tailnet, with a fenced key for its report
 - service-down, reading those reports
 - A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08
 - credential-expiry as a host check on the Mac: the credential broker answers and `gh auth status` succeeds. Moved here from M6 after the 2026-11-08 outage
 
-**Done when** every open security alert on those repositories is tracked as one task or issue per repository, a stopped unit, a site that stops returning 200, a scheduled job past its maximum age, or a broker that stops answering becomes a task within an hour, and running any scan again files nothing new.
+**Done when** every overdue security alert on those repositories is on a task for its repository, a stopped unit, a site that stops returning 200, a scheduled job past its maximum age, or a broker that stops answering becomes a task within an hour, and running any scan again files nothing new.
 
 ## M2: An honest backlog
 

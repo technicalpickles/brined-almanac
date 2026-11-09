@@ -297,8 +297,10 @@ repositories, rather than a selected list, means adding a repository to a
 tiers file never also needs a token edit. The cost is that the token can read
 alert lists on repositories nothing watches.
 
-With no `GITHUB_ALERTS_TOKEN`, the scan fails with a message naming the
-variable. The dry run does not need it (see "Testing").
+With no `GITHUB_ALERTS_TOKEN`, the scan prints a skip message to stderr and
+finds nothing, so other workflows' scans still run. Production cannot reach
+this, because the compose file requires the token, and a bad token still fails
+the scan with a 401. The dry run does not need it (see "Testing").
 
 ## Doc changes
 

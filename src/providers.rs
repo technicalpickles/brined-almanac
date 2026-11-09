@@ -13,6 +13,7 @@ use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
 use crate::tiers::Tiers;
 use crate::transcript::Transcripts;
+use crate::workflows::security_alerts::AlertsClient;
 
 const API: &str = "https://api.github.com";
 
@@ -311,12 +312,19 @@ pub fn tiers_from(lookup: impl Fn(&str) -> Option<String>) -> Result<Tiers, Stri
     Tiers::load(local.as_deref().map(Path::new)).map_err(|err| format!("LOCAL_TIERS: {err}"))
 }
 
+/// The read-only client for `GITHUB_ALERTS_TOKEN`. An empty value is unset, as in `choose`.
+pub fn alerts_client_from(lookup: impl Fn(&str) -> Option<String>) -> AlertsClient {
+    let token = lookup("GITHUB_ALERTS_TOKEN").filter(|value| !value.is_empty());
+    AlertsClient(token.map(|t| GithubClient::new(API, Auth::Token(t)).read_only()))
+}
+
 pub fn all(_config: &Config) -> Providers {
     let dir = env::var("BRENT_TRANSCRIPTS").unwrap_or_else(|_| "transcripts".to_string());
     let choice = choose(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     let tiers = tiers_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
         .provide::<Tiers>(Arc::new(tiers))
+        .provide::<AlertsClient>(Arc::new(alerts_client_from(|key| env::var(key).ok())))
         .provide::<Transcripts>(Arc::new(Transcripts(PathBuf::from(dir))))
         .provide::<dyn Tracker>(tracker_from(choice))
 }

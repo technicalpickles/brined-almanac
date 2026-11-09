@@ -1,0 +1,15 @@
+{
+  "kind": "coverage",
+  "project": "brined-almanac",
+  "subject": "coverage",
+  "critical": 0,
+  "high": 0,
+  "medium": 0,
+  "low": 0,
+  "unknown": 0,
+  "secrets": 0,
+  "dependabot_off": 1,
+  "secret_scanning_off": 1,
+  "repositories": 2,
+  "lines": "Dependabot alerts are off: technicalpickles/example-private\nSecret scanning is off: technicalpickles/example-public"
+}

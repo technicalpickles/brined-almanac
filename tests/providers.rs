@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use brined_almanac::providers::{Choice, IssuesSide, TasksSide, choose, tiers_from};
+use brined_almanac::providers::{
+    Choice, IssuesSide, TasksSide, alerts_client_from, choose, tiers_from,
+};
 use brined_almanac::tiers::Tier;
 use taskchampion::{ServerConfig, Uuid};
 
@@ -214,4 +216,16 @@ fn tiers_from_a_missing_path_is_an_error() {
     let err = tiers_with(Some("/no/such/tiers.toml")).err().unwrap();
     assert!(err.contains("LOCAL_TIERS"), "{err}");
     assert!(err.contains("/no/such/tiers.toml"), "{err}");
+}
+
+#[test]
+fn alerts_client_absent_without_a_token() {
+    assert!(alerts_client_from(|_| None).0.is_none());
+    assert!(alerts_client_from(|_| Some(String::new())).0.is_none());
+}
+
+#[test]
+fn alerts_client_present_with_a_token() {
+    let lookup = |key: &str| (key == "GITHUB_ALERTS_TOKEN").then(|| "t".to_string());
+    assert!(alerts_client_from(lookup).0.is_some());
 }
