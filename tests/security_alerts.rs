@@ -8,7 +8,7 @@ use brined_almanac::routing::Project;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::workflows;
 use brined_almanac::workflows::security_alerts::{
-    Alert, AlertsClient, Coverage, Facts, RepoRead, SecurityFinding, Severity, alerts_switch,
+    Alert, AlertsClient, Coverage, Facts, RepoRead, SecurityFinding, Severity, Tick, alerts_switch,
     digest, facts, findings, overdue, parse_dependabot, parse_secret, policy, repo_missing,
     secret_alerts,
 };
@@ -455,6 +455,65 @@ fn an_invalid_project_name_fails_naming_the_repository() {
     )];
     let err = findings(&reads, TODAY).unwrap_err().0;
     assert!(err.contains("technicalpickles/Bad..Name"), "{err}");
+}
+
+fn overdue_and_off() -> RepoRead {
+    read(
+        false,
+        Coverage::On(vec![numbered(
+            dependency(Severity::High, date!(2026 - 10 - 01)),
+            7,
+        )]),
+        Coverage::Off,
+    )
+}
+
+#[test]
+fn a_failing_repository_is_skipped_and_holds_the_coverage_task() {
+    let tick = Tick::new(vec![
+        (slug("technicalpickles/dotfiles"), Ok(overdue_and_off())),
+        (
+            slug("technicalpickles/broken"),
+            Err(StepError("technicalpickles/broken: HTTP 502".to_string())),
+        ),
+    ]);
+    assert_eq!(tick.failed.len(), 1);
+    assert!(tick.failed[0].0.contains("technicalpickles/broken"));
+    let found = tick.findings(TODAY).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .0
+            .starts_with("scan:security-alerts/technicalpickles/dotfiles@")
+    );
+}
+
+#[test]
+fn a_full_read_files_the_coverage_task() {
+    let tick = Tick::new(vec![(
+        slug("technicalpickles/dotfiles"),
+        Ok(overdue_and_off()),
+    )]);
+    let found = tick.findings(TODAY).unwrap();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[1].0.starts_with("scan:security-alerts/coverage@"));
+}
+
+#[test]
+fn every_repository_failing_fails_the_scan() {
+    let tick = Tick::new(vec![
+        (
+            slug("technicalpickles/a"),
+            Err(StepError("technicalpickles/a: HTTP 401".to_string())),
+        ),
+        (
+            slug("technicalpickles/b"),
+            Err(StepError("technicalpickles/b: HTTP 401".to_string())),
+        ),
+    ]);
+    let err = tick.findings(TODAY).unwrap_err().0;
+    assert!(err.contains("technicalpickles/a"), "{err}");
+    assert!(err.contains("technicalpickles/b"), "{err}");
 }
 
 #[test]
