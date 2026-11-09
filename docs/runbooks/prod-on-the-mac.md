@@ -456,6 +456,12 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
   `encryption_secret` and an unreachable host all read the same, so compare
   the container's values against the Mac's (hash them, never print them) and
   `curl` the `TASKCHAMPION_SYNC_URL` host from inside the container.
+- To prove the other direction, that the Mac can read what the almanac
+  writes, run `scripts/live-interop` from a checkout. It files one probe task
+  into the live history. Run `task sync` on the Mac, find it with
+  `task +almanac "description.has:interop" list`, then delete it. Used once on
+  2026-11-08: the Mac read the task with `almanac_key` and its annotation
+  intact.
 - If `up --wait` fails, read the almanac container's logs
   (`docker compose -f compose.prod.yaml logs almanac` with the usual prefix).
   A half `TASKCHAMPION_*` configuration panics at startup for every verb, so
