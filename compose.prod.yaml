@@ -1,5 +1,5 @@
 # The prod stack on this Mac. Deploy with `mise run deploy`, which resolves the
-# four secrets through `op run`. State lives in BRINED_ALMANAC_STATE.
+# secrets listed in prod.secrets.env through `op run`. State lives in BRINED_ALMANAC_STATE.
 name: brined-almanac-prod
 services:
   db:

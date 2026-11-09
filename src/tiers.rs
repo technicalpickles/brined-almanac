@@ -4,6 +4,8 @@ use std::path::Path;
 use almanac::prelude::*;
 use serde::Deserialize;
 
+use crate::routing::Project;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
@@ -88,6 +90,11 @@ fn read(
         if !halves_present {
             return Err(format!("{source}: {name:?} is not owner/repo"));
         }
+        // Findings file to the taskwarrior project named after the repository, so a bad name fails
+        // here at startup instead of failing every scan.
+        let (_, repo) = name.split_once('/').expect("checked above");
+        repo.parse::<Project>()
+            .map_err(|e| format!("{source}: {name}: {e}"))?;
         let slug: Slug = name
             .parse()
             .map_err(|e| format!("{source}: {name:?}: {e}"))?;

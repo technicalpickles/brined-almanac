@@ -51,15 +51,18 @@ pub enum Kind {
     Dependency(Severity),
 }
 
-/// Days an alert gets before it is overdue. A secret has none.
-pub const WINDOWS: &[(Kind, i64)] = &[
-    (Kind::Secret, 0),
-    (Kind::Dependency(Severity::Critical), 2),
-    (Kind::Dependency(Severity::High), 14),
-    (Kind::Dependency(Severity::Medium), 30),
-    (Kind::Dependency(Severity::Unknown), 30),
-    (Kind::Dependency(Severity::Low), 90),
-];
+impl Kind {
+    /// Days an alert gets before it is overdue. A secret has none.
+    pub fn window_days(self) -> i64 {
+        match self {
+            Kind::Secret => 0,
+            Kind::Dependency(Severity::Critical) => 2,
+            Kind::Dependency(Severity::High) => 14,
+            Kind::Dependency(Severity::Medium | Severity::Unknown) => 30,
+            Kind::Dependency(Severity::Low) => 90,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Alert {
@@ -103,12 +106,7 @@ impl Alert {
     }
 
     pub fn window_days(&self) -> i64 {
-        let kind = self.kind();
-        WINDOWS
-            .iter()
-            .find(|(k, _)| *k == kind)
-            .map(|(_, days)| *days)
-            .expect("every kind has a window")
+        self.kind().window_days()
     }
 
     pub fn line(&self, today: Date) -> String {
@@ -432,9 +430,7 @@ fn coverage_finding(reads: &[(Slug, RepoRead)]) -> Option<(String, Value)> {
     ))
 }
 
-/// One `overdue` entry per repository with something overdue, then one `coverage` entry when
-/// anything is off.
-pub fn findings(
+fn overdue_findings(
     reads: &[(Slug, RepoRead)],
     today: Date,
 ) -> Result<Vec<(String, Value)>, StepError> {
@@ -448,8 +444,55 @@ pub fn findings(
         }
         out.extend(overdue_finding(repo, &alerts, today)?);
     }
+    Ok(out)
+}
+
+/// One `overdue` entry per repository with something overdue, then one `coverage` entry when
+/// anything is off.
+pub fn findings(
+    reads: &[(Slug, RepoRead)],
+    today: Date,
+) -> Result<Vec<(String, Value)>, StepError> {
+    let mut out = overdue_findings(reads, today)?;
     out.extend(coverage_finding(reads));
     Ok(out)
+}
+
+/// One scan's reads. A repository that failed is left out of `reads` and its error kept in
+/// `failed`, so one bad repository doesn't hide every other repository's alerts.
+pub struct Tick {
+    pub reads: Vec<(Slug, RepoRead)>,
+    pub failed: Vec<StepError>,
+}
+
+impl Tick {
+    pub fn new(results: Vec<(Slug, Result<RepoRead, StepError>)>) -> Tick {
+        let mut tick = Tick {
+            reads: vec![],
+            failed: vec![],
+        };
+        for (repo, result) in results {
+            match result {
+                Ok(read) => tick.reads.push((repo, read)),
+                Err(err) => tick.failed.push(err),
+            }
+        }
+        tick
+    }
+
+    /// Every repository failing points at the token or GitHub, so that still fails the scan. The
+    /// coverage digest spans every repository, so a partial read holds it rather than file a
+    /// coverage task for a set that is missing a repository.
+    pub fn findings(&self, today: Date) -> Result<Vec<(String, Value)>, StepError> {
+        if self.reads.is_empty() && !self.failed.is_empty() {
+            let all: Vec<&str> = self.failed.iter().map(|e| e.0.as_str()).collect();
+            return Err(StepError(all.join("; ")));
+        }
+        if self.failed.is_empty() {
+            return findings(&self.reads, today);
+        }
+        overdue_findings(&self.reads, today)
+    }
 }
 
 observed! {
@@ -513,11 +556,16 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<SecurityFinding>>, St
         return Ok(vec![]);
     };
     let tiers = scanner.get::<Tiers>()?;
-    let mut reads = vec![];
+    let mut results = vec![];
     for repo in tiers.watched(WATCHED_BY_SECURITY_ALERTS) {
-        reads.push((repo.clone(), read_repo(github, repo).await?));
+        results.push((repo.clone(), read_repo(github, repo).await));
     }
-    Ok(findings(&reads, OffsetDateTime::now_utc().date())?
+    let tick = Tick::new(results);
+    for err in &tick.failed {
+        eprintln!("security-alerts: skipping {}", err.0);
+    }
+    Ok(tick
+        .findings(OffsetDateTime::now_utc().date())?
         .into_iter()
         .map(|(delivery_id, payload)| Scanned::new(delivery_id, payload))
         .collect())
