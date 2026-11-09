@@ -98,6 +98,13 @@ OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"
 
+# Pulls the real history into a throwaway replica, so a wrong URL, client id or secret fails the
+# deploy instead of the first filing. The stack is already up; the failure leaves it running.
+if ! compose exec -T almanac brined-almanac sync-check; then
+  echo "deploy: taskchampion sync-check failed; the stack is up but cannot file tasks, see $runbook" >&2
+  exit 1
+fi
+
 compose ps
 curl -fsS http://127.0.0.1:8788/healthz
 echo

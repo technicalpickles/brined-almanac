@@ -262,6 +262,25 @@ pub fn choose(lookup: impl Fn(&str) -> Option<String>) -> Result<Choice, String>
     Ok(Choice::Route { issues, tasks })
 }
 
+/// The taskwarrior settings `sync-check` uses, pointed at `replica_dir` instead of the daemon's own
+/// replica so the check starts empty and never touches the daemon's sqlite file.
+pub fn sync_check_config(
+    lookup: impl Fn(&str) -> Option<String>,
+    replica_dir: PathBuf,
+) -> Result<TaskwarriorConfig, String> {
+    match choose(lookup)? {
+        Choice::Route {
+            tasks: TasksSide::Taskwarrior(mut config),
+            ..
+        } => {
+            config.replica_dir = replica_dir;
+            Ok(config)
+        }
+        Choice::Route { .. } => Err("TASKCHAMPION_SYNC_URL is not set".to_string()),
+        Choice::StoreRequired => Err("DATABASE_URL is not set".to_string()),
+    }
+}
+
 /// Builds the tracker a `Choice` names. Sync: nothing here opens a connection.
 pub fn tracker_from(choice: Choice) -> Arc<dyn Tracker> {
     let (issues, tasks) = match choice {
@@ -293,6 +312,27 @@ pub fn all(_config: &Config) -> Providers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_check_config_needs_a_sync_url() {
+        let err = sync_check_config(|_| None, PathBuf::from("x"))
+            .err()
+            .unwrap();
+        assert_eq!(err, "TASKCHAMPION_SYNC_URL is not set");
+    }
+
+    #[test]
+    fn sync_check_config_uses_the_directory_it_is_given() {
+        let lookup = |key: &str| match key {
+            "TASKCHAMPION_SYNC_URL" => Some("https://sync.example".to_string()),
+            "TASKCHAMPION_CLIENT_ID" => Some("8b46d55e-0000-4000-8000-000000000000".to_string()),
+            "TASKCHAMPION_ENCRYPTION_SECRET" => Some("s".to_string()),
+            "DATABASE_URL" => Some("postgres://x".to_string()),
+            _ => None,
+        };
+        let config = sync_check_config(lookup, PathBuf::from("/tmp/check")).unwrap();
+        assert_eq!(config.replica_dir, PathBuf::from("/tmp/check"));
+    }
 
     #[test]
     fn body_text_reads_the_tainted_value_without_naming_its_key() {
