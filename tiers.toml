@@ -1,0 +1,9 @@
+# Repository tiers. Schema:
+#
+#   [[repo]]
+#   name = "owner/repo"
+#   tiers = ["active"]        # one or more, defined in src/tiers.rs
+#   signal = "..."            # optional: why this tier applies
+#   note = "..."              # optional
+#
+# local/tiers.toml uses the same schema for private repositories.
