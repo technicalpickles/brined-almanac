@@ -395,8 +395,9 @@ still off, so it doubles as this follow-up's checklist.
   branch, and a parser for Renovate's pull request body (`update_of`). Dependabot
   security updates fix transitive lockfile dependencies, which make up most of
   the alerts above. Teaching the workflow a second bot needs a login, a branch
-  prefix, and a body parser per bot. The checks stay as they are. File as an
-  issue on ivy/almanac, with the numbers in "What the data says" as evidence.
+  prefix, and a body parser per bot. The checks stay as they are. Filed as
+  [ivy/almanac#23](https://github.com/ivy/almanac/issues/23) on 2026-11-08,
+  tracked by task `1d43272f-51e4-4f09-9bdf-93df4d0acb72`.
 - **The overdue rule.** It is upstream M2's "filing work when no fix appears
   within a severity's window". When upstream builds M2, offer this workflow's
   rule and windows, and delete this copy once upstream's covers the same
