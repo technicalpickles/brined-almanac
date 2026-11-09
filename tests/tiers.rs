@@ -92,6 +92,18 @@ fn a_name_with_an_empty_half_is_an_error() {
 }
 
 #[test]
+fn a_repository_that_is_not_a_project_name_is_an_error() {
+    let public = r#"
+[[repo]]
+name = "technicalpickles/Bad..Name"
+tiers = ["active"]
+"#;
+    let err = Tiers::parse(public, None).unwrap_err();
+    assert!(err.contains("technicalpickles/Bad..Name"), "{err}");
+    assert!(err.contains("project"), "{err}");
+}
+
+#[test]
 fn watched_keeps_a_repository_that_is_dormant_and_deployed() {
     let public = r#"
 [[repo]]
