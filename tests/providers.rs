@@ -152,3 +152,28 @@ fn nothing_set_prints_both_sides() {
         }
     ));
 }
+
+#[test]
+fn an_empty_github_token_means_log_on_the_issues_side() {
+    let choice = with(&[("GITHUB_TOKEN", "")]).unwrap();
+    let Choice::Route { issues, .. } = choice else {
+        panic!("expected a route");
+    };
+    assert!(matches!(issues, IssuesSide::Log));
+}
+
+#[test]
+fn an_empty_sync_url_is_not_set() {
+    let mut env = without(taskchampion(), "TASKCHAMPION_SYNC_URL");
+    env.push(("TASKCHAMPION_SYNC_URL", ""));
+    let err = with(&env).unwrap_err();
+    assert!(err.contains("TASKCHAMPION_SYNC_URL"), "{err}");
+}
+
+#[test]
+fn an_empty_secret_is_not_set() {
+    let mut env = without(taskchampion(), "TASKCHAMPION_ENCRYPTION_SECRET");
+    env.push(("TASKCHAMPION_ENCRYPTION_SECRET", ""));
+    let err = with(&env).unwrap_err();
+    assert!(err.contains("TASKCHAMPION_ENCRYPTION_SECRET"), "{err}");
+}
