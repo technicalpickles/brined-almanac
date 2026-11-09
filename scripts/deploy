@@ -65,16 +65,22 @@ fi
 echo "deploy: state dir ok ($STATE)"
 
 # The private tier declarations live in the vault, not the repo; compose mounts this copy.
-if ! OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op document get tiers.toml --vault brined-almanac --out-file "$STATE/tiers.toml" --force; then
-  echo "deploy: could not fetch tiers.toml from the brined-almanac vault; see $runbook" >&2
-  exit 1
+# --db-only starts no almanac, so it skips the fetch.
+if ((!db_only)); then
+  if ! (umask 077; OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op document get tiers.toml --vault brined-almanac --out-file "$STATE/tiers.toml" --force); then
+    echo "deploy: could not fetch tiers.toml from the brined-almanac vault; see $runbook" >&2
+    exit 1
+  fi
+  echo "deploy: fetched tiers.toml"
+  # The daemon reads tiers once at startup and compose recreates a container only when its config
+  # changes, so the file's hash goes into the config: a vault edit then recreates the daemon.
+  BRINED_ALMANAC_TIERS_SHA256=$(shasum -a 256 "$STATE/tiers.toml")
+  export BRINED_ALMANAC_TIERS_SHA256=${BRINED_ALMANAC_TIERS_SHA256%% *}
 fi
-chmod 600 "$STATE/tiers.toml"
-echo "deploy: fetched tiers.toml"
 
 # ps and exec interpolate the whole file, so the :? guards need values; neither recreates containers.
 compose() {
-  BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
     BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
     docker compose -f compose.prod.yaml "$@"
 }
@@ -95,7 +101,7 @@ docker build -f puller/Containerfile -t "brined-almanac-puller:$tag" -t brined-a
 echo "deploy: built brined-almanac:$tag and brined-almanac-puller:$tag (tagged prod)"
 
 if ((db_only)); then
-  BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused \
+  BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
     BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
     docker compose -f compose.prod.yaml up -d --wait db
   echo "deploy: db is up; run mise run deploy for the rest"

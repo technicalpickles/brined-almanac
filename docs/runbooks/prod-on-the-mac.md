@@ -75,8 +75,10 @@ tier declarations for private repositories that nothing public names
 Every `mise run deploy` fetches it with `op document get` into
 `$STATE/tiers.toml` (mode 600), and compose mounts that file read-only into the
 almanac container, where `LOCAL_TIERS` points at it. The daemon refuses to start
-if the file is missing or does not parse. To change it, edit `local/tiers.toml`,
-then from the repository root save it and redeploy:
+if the file is missing or does not parse. Deploy also passes the file's SHA-256
+to compose as an environment value, which is what makes a redeploy pick up a
+vault edit. To change it, edit `local/tiers.toml`, then from the repository
+root save it and redeploy:
 
 ```sh
 op document edit tiers.toml local/tiers.toml --vault brined-almanac
@@ -316,8 +318,8 @@ docker rm -f ba-preview-db && docker network rm ba-preview && rm "$STATE/preview
    ```
 
 The task checks that `$STATE` has `prod.env`, `op-token` (mode 600),
-`known_hosts`, and `transcripts/`, then fetches `tiers.toml` from the vault. It refuses while prod's `pending` table
-holds events: a binary with a different payload shape fails them, and their
+`known_hosts`, and `transcripts/`, then fetches `tiers.toml` from the vault.
+It refuses while prod's `pending` table holds events: a binary with a different payload shape fails them, and their
 delivery ids stay seen, so they never run
 ([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). Let them run on
 the current binary first, or pass `--allow-pending` when you know the payload

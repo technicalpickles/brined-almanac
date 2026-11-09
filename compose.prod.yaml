@@ -28,6 +28,8 @@ services:
       DATABASE_URL: postgres://almanac@db:5432/almanac
       BRENT_TRANSCRIPTS: /transcripts
       LOCAL_TIERS: /etc/brined-almanac/tiers.toml
+      # Never read; its value changes with the file so compose recreates the container on an edit.
+      LOCAL_TIERS_SHA256: "${BRINED_ALMANAC_TIERS_SHA256:?run `mise run deploy`, which fetches tiers.toml}"
       ALMANAC_LISTEN: 0.0.0.0:8788
       GITHUB_TOKEN: "${BRINED_ALMANAC_GITHUB_TOKEN:?run `mise run deploy`, which resolves it through op run}"
       TASKCHAMPION_CLIENT_ID: "${BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID:?run `mise run deploy`, which resolves it through op run}"
