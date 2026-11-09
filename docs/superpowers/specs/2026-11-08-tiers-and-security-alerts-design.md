@@ -14,10 +14,17 @@ from `docs/tiers.md` into code first.
 
 security-alerts is a backstop, not the fixer. Renovate and Dependabot open fix
 pull requests, and upstream's `almanacs/renovate` vets and repairs Renovate's.
-This workflow files a task only when an alert has outlived its severity's
-window with no fix merged. That is the rule upstream's roadmap M2 "Exposure"
-names as "filing work when no fix appears within a severity's window", so the
-workflow can move upstream later and this copy can go.
+
+Each alert gets a window, a number of days that depends on its severity: 14
+days for a high, for example. GitHub closes an alert when the fix for it
+merges. So an alert that is still open when its window ends is one the bots
+did not fix in time, either because no fix pull request was opened or because
+one was opened and is stuck. Only then does this workflow file a task. An alert
+that gets fixed inside its window never reaches taskwarrior.
+
+That is the rule upstream's roadmap M2 "Exposure" names as "filing work when no
+fix appears within a severity's window", so the workflow can move upstream
+later and this copy can go.
 
 Non-goals:
 
@@ -28,12 +35,17 @@ Non-goals:
   covers it: a fix that merges in time closes the alert, and a fix still open
   past the window is stuck and worth a task anyway.
 - Code scanning. Nothing runs it on any watched repository.
-- Turning Dependabot alerts on. That is a settings change I make by hand. The
-  coverage task below says where.
+- Turning on alerts and fix pull requests. That is configuration, and it is
+  the follow-up that runs next to this work (see "Follow-up: get fix pull
+  requests flowing").
 - The archive question for inactive repositories. No watched repository is
   inactive today.
-- Filing issues. Every finding here goes to taskwarrior (see "Where findings
-  go").
+- Filing issues. GitHub already has a record for each part of this. The alert
+  is GitHub's record of the vulnerability, and a Renovate or Dependabot pull
+  request is the record of its fix. Renovate's Dependency Dashboard issue lists
+  pending updates too, on repositories that turn it on. An issue from almanac
+  would repeat all three. What none of them do is put the work on my plan when
+  no fix arrives, so that case is a task (see "Where findings go").
 
 ## What the data says
 
@@ -336,10 +348,28 @@ Two pull requests, in order:
 2. **security-alerts.** `src/workflows/security_alerts.rs`, the alerts client
    provider, the token docs, and the doc changes above.
 
-Steps I do by hand: create the `github-alerts-token` item, check that the
-`tiers.toml` document exists in the vault and matches `local/tiers.toml`, and
-decide which
-repositories get Dependabot alerts turned on once the coverage task lists them.
+Steps I do by hand: create the `github-alerts-token` item, and check that the
+`tiers.toml` document exists in the vault and matches `local/tiers.toml`.
+
+## Follow-up: get fix pull requests flowing
+
+security-alerts only catches what the bots miss, and today the bots open
+nothing. This follow-up runs next to the two pull requests above and is
+taskwarrior task `f2ed310f-f842-44ff-997f-ed023bd6665e`:
+
+- Turn on Dependabot alerts on every watched repository. They are free on
+  private repositories, and Renovate's `vulnerabilityAlerts` reads them, so
+  both bots need them.
+- Pick the bot per repository. Renovate already has a config on dotfiles, cq,
+  and bktide, and upstream's `security_fixes` vets its pull requests. Dependabot
+  security updates fix transitive lockfile dependencies, which make up most of
+  the open alerts. Check on dotfiles whether Renovate opens fixes for its 18
+  transitive alerts once `vulnerabilityAlerts` is set up, before choosing.
+- Check that the Renovate app is installed where a `renovate.json` exists. cq
+  and bktide have one and have never had a Renovate pull request.
+
+The coverage task from security-alerts lists the repositories where alerts are
+still off, so it doubles as this follow-up's checklist.
 
 ## Upstream
 
