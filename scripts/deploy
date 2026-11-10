@@ -7,6 +7,7 @@ runbook=docs/runbooks/prod-on-the-mac.md
 db_only=0
 allow_pending=0
 tag=
+args=("$@")
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -28,6 +29,15 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ -z ${BRINED_ALMANAC_OP_TOKEN:-} ]]; then
+  if [[ -n ${BRINED_ALMANAC_AV_REEXEC:-} ]]; then
+    echo "deploy: av inject ran but set no BRINED_ALMANAC_OP_TOKEN" >&2
+    exit 1
+  fi
+  export BRINED_ALMANAC_AV_REEXEC=1
+  exec av inject +BRINED_ALMANAC_OP_TOKEN -- "$0" ${args[@]+"${args[@]}"}
+fi
+
 cd "$(git rev-parse --show-toplevel)"
 
 # The project name comes from compose.prod.yaml; mise's dev COMPOSE_PROJECT_NAME would override it.
@@ -45,7 +55,7 @@ echo "deploy: tree clean on $branch, tag $tag"
 STATE=${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}
 export BRINED_ALMANAC_STATE=$STATE
 missing=()
-for f in prod.env op-token known_hosts transcripts; do
+for f in prod.env known_hosts transcripts; do
   [[ -e $STATE/$f ]] || missing+=("$f")
 done
 if ((${#missing[@]})); then
@@ -56,18 +66,12 @@ if ! grep -q '^TASKCHAMPION_SYNC_URL=.' "$STATE/prod.env"; then
   echo "deploy: $STATE/prod.env has no TASKCHAMPION_SYNC_URL= line with a value; see $runbook" >&2
   exit 1
 fi
-# GNU stat (mise puts it first on PATH) and BSD stat disagree on flags.
-mode=$(stat -c %a "$STATE/op-token" 2>/dev/null || stat -f %Lp "$STATE/op-token")
-if [[ $mode != 600 ]]; then
-  echo "deploy: $STATE/op-token must have mode 600; see $runbook" >&2
-  exit 1
-fi
 echo "deploy: state dir ok ($STATE)"
 
 # The private tier declarations live in the vault, not the repo; compose mounts this copy.
 # --db-only starts no almanac, so it skips the fetch.
 if ((!db_only)); then
-  if ! (umask 077; OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op document get tiers.toml --vault brined-almanac --out-file "$STATE/tiers.toml" --force); then
+  if ! (umask 077; OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN op document get tiers.toml --vault brined-almanac --out-file "$STATE/tiers.toml" --force); then
     echo "deploy: could not fetch tiers.toml from the brined-almanac vault; see $runbook" >&2
     exit 1
   fi
@@ -108,7 +112,7 @@ if ((db_only)); then
   exit 0
 fi
 
-OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" \
+OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"
 
