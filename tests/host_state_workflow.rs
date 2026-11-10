@@ -178,3 +178,8 @@ fn a_report_naming_another_host_scans_to_one_stale_pair() {
     assert_eq!(found[0].1["kind"], "stale");
     assert_eq!(found[0].1["host"], "mac");
 }
+
+#[test]
+fn host_state_is_registered_first() {
+    assert_eq!(brined_almanac::workflows::all()[0].name(), "host-state");
+}
