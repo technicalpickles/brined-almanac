@@ -15,7 +15,7 @@ use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
 use crate::tiers::Tiers;
 use crate::transcript::Transcripts;
-use crate::workflows::bugsink_issues::BugsinkReader;
+use crate::workflows::bugsink_issues::{BugsinkReader, Reading};
 use crate::workflows::security_alerts::AlertsClient;
 
 const API: &str = "https://api.github.com";
@@ -343,16 +343,22 @@ pub fn bugsink_client_from(
 }
 
 /// The reader for `BUGSINK_API_TOKEN` and `BUGSINK_DSN`, or none when either is unset. An empty
-/// value is unset, as in `choose`. The `Err` never carries a value.
+/// value is unset, as in `choose`. `GITHUB_TOKEN` adds the GitHub side, which closed almanac
+/// issues are read from. The `Err` never carries a value.
 pub fn bugsink_reader_from(
     lookup: impl Fn(&str) -> Option<String>,
+    live: bool,
 ) -> Result<BugsinkReader, String> {
     let lookup = |key: &str| lookup(key).filter(|value| !value.is_empty());
     let (Some(raw), Some(token)) = (lookup("BUGSINK_DSN"), lookup("BUGSINK_API_TOKEN")) else {
         return Ok(BugsinkReader(None));
     };
     let dsn = raw.parse::<Dsn>()?;
-    Ok(BugsinkReader(Some(cutover::Bugsink::new(&dsn, token))))
+    Ok(BugsinkReader(Some(Reading {
+        bugsink: cutover::Bugsink::new(&dsn, token),
+        github: lookup("GITHUB_TOKEN").map(cutover::Github::new),
+        live,
+    })))
 }
 
 /// Almanac's own rule for a live run, which it keeps to itself: `ALMANAC_MODE=live`, and no
@@ -369,7 +375,7 @@ pub fn all(_config: &Config) -> Providers {
     let bugsink =
         bugsink_client_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
     let reader =
-        bugsink_reader_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
+        bugsink_reader_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
         .provide::<Tiers>(Arc::new(tiers))
         .provide::<AlertsClient>(Arc::new(alerts_client_from(|key| env::var(key).ok())))
@@ -402,6 +408,23 @@ mod tests {
         };
         let config = sync_check_config(lookup, PathBuf::from("/tmp/check")).unwrap();
         assert_eq!(config.replica_dir, PathBuf::from("/tmp/check"));
+    }
+
+    #[test]
+    fn the_reader_reads_github_only_with_a_token_and_none_without_bugsink() {
+        let env = |github: Option<&'static str>, bugsink: bool| {
+            move |key: &str| match key {
+                "BUGSINK_DSN" if bugsink => Some("http://0123abcd@bugsink.example/7".to_string()),
+                "BUGSINK_API_TOKEN" if bugsink => Some("t".to_string()),
+                "GITHUB_TOKEN" => github.map(str::to_string),
+                _ => None,
+            }
+        };
+        let reading = |github, bugsink| bugsink_reader_from(env(github, bugsink), true).unwrap().0;
+        assert!(reading(Some("g"), true).unwrap().github.is_some());
+        assert!(reading(Some(""), true).unwrap().github.is_none());
+        assert!(reading(None, true).unwrap().github.is_none());
+        assert!(reading(Some("g"), false).is_none());
     }
 
     #[test]

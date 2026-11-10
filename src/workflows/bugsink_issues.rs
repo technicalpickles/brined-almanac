@@ -1,16 +1,29 @@
+use std::collections::BTreeSet;
+
 use almanac::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::bugsink::ship_from;
-use crate::bugsink_api::{Issue, Labels, generation, labels};
+use crate::bugsink_api::{Issue, Labels, generation, labels, last_unmuted};
 use crate::classes::{class_named, owner_of};
-use crate::cutover;
+use crate::cutover::{self, REPOS};
+use crate::resolve_on_close::{
+    MUTE_WAKE_EVENTS, Open, Verdict, decide, mute_comment, resolve_comment,
+};
 use crate::transcript::{Transcripts, read};
 
 /// Always provided, because almanac checks a scan's providers at startup. `None` means no API
 /// token or no DSN.
-pub struct BugsinkReader(pub Option<cutover::Bugsink>);
+pub struct BugsinkReader(pub Option<Reading>);
+
+pub struct Reading {
+    pub bugsink: cutover::Bugsink,
+    /// `None` without `GITHUB_TOKEN`, which turns off acting on closed almanac issues.
+    pub github: Option<cutover::Github>,
+    /// A dry run reads and says what it would do, and changes nothing in Bugsink.
+    pub live: bool,
+}
 
 clean! {
     pub struct Surface {
@@ -87,6 +100,81 @@ fn scanned(issue: &Issue, labels: &Labels, generation: u64, link: String) -> Sca
     Scanned::new(format!("bugsink:{}", issue.id), payload).at_state(generation)
 }
 
+/// Resolves or mutes each open Bugsink issue whose almanac issue was closed, so that the close
+/// never hides the failure's next event. Returns the issues it settled, which the scan must not
+/// report again. Every failure is printed and skipped: GitHub or Bugsink being down must not stop
+/// the filing that follows.
+async fn settle_closed(reading: &Reading, open: &[Issue]) -> BTreeSet<String> {
+    let mut settled = BTreeSet::new();
+    let Some(github) = &reading.github else {
+        eprintln!("bugsink-issues: GITHUB_TOKEN is not set, not resolving closed issues");
+        return settled;
+    };
+    let mut linked = vec![];
+    for repo in REPOS {
+        match github.linked(repo).await {
+            Ok(found) => linked.extend(found),
+            Err(why) => {
+                eprintln!("bugsink-issues: not resolving closed issues: {why}");
+                return settled;
+            }
+        }
+    }
+    let named: BTreeSet<&str> = linked.iter().map(|l| l.issue.as_str()).collect();
+    for issue in open.iter().filter(|i| named.contains(i.id.as_str())) {
+        let history = match reading.bugsink.history(issue).await {
+            Ok(history) => history,
+            Err(why) => {
+                eprintln!("bugsink-issues: {why}");
+                continue;
+            }
+        };
+        let unmuted_at = match last_unmuted(&history) {
+            Ok(at) => at,
+            Err(why) => {
+                eprintln!("bugsink-issues: {}: {why}", issue.friendly_id);
+                continue;
+            }
+        };
+        let state = Open {
+            id: issue.id.clone(),
+            generation: generation(&history),
+            unmuted_at,
+        };
+        let name = &issue.friendly_id;
+        let done = match decide(&state, &linked) {
+            Verdict::Leave => continue,
+            Verdict::Resolve { proof } if !reading.live => {
+                eprintln!("bugsink-issues: dry run, would resolve {name} for {proof}");
+                Ok(())
+            }
+            Verdict::Mute { proof } if !reading.live => {
+                eprintln!("bugsink-issues: dry run, would mute {name} for {proof}");
+                Ok(())
+            }
+            Verdict::Resolve { proof } => {
+                reading
+                    .bugsink
+                    .resolve_issue(issue, resolve_comment(&proof))
+                    .await
+            }
+            Verdict::Mute { proof } => {
+                reading
+                    .bugsink
+                    .mute_until(issue, mute_comment(&proof), MUTE_WAKE_EVENTS)
+                    .await
+            }
+        };
+        settled.insert(issue.id.clone());
+        match done {
+            Ok(()) if reading.live => eprintln!("bugsink-issues: settled {name}"),
+            Ok(()) => {}
+            Err(why) => eprintln!("bugsink-issues: {why}"),
+        }
+    }
+    settled
+}
+
 #[scan]
 pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<Unaddressed>>, StepError> {
     let dir = scanner.get::<Transcripts>()?;
@@ -106,14 +194,24 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<Unaddressed>>, StepEr
     }
     ship_from(scanner, &read.errors).await?;
 
-    let Some(bugsink) = &scanner.get::<BugsinkReader>()?.0 else {
+    let reader = scanner.get::<BugsinkReader>()?;
+    let Some(reading) = &reader.0 else {
         eprintln!("bugsink-issues: BUGSINK_API_TOKEN or BUGSINK_DSN is not set, skipping");
         return Ok(vec![]);
     };
+    let bugsink = &reading.bugsink;
     let failed = StepError;
+    let open: Vec<Issue> = bugsink
+        .open_issues()
+        .await
+        .map_err(failed)?
+        .into_iter()
+        .filter(|issue| !issue.resolved && !issue.muted)
+        .collect();
+    let settled = settle_closed(reading, &open).await;
     let mut found = vec![];
-    for issue in bugsink.open_issues().await.map_err(failed)? {
-        if issue.resolved || issue.muted {
+    for issue in open {
+        if settled.contains(&issue.id) {
             continue;
         }
         let tags = bugsink.tags(&issue).await.map_err(failed)?;

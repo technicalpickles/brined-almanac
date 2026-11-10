@@ -3,6 +3,7 @@ pub mod bugsink_api;
 pub mod classes;
 pub mod cutover;
 pub mod providers;
+pub mod resolve_on_close;
 pub mod routing;
 pub mod taskwarrior;
 pub mod tiers;
