@@ -74,7 +74,12 @@ check "still starting" "0 STACK OK - 4 services healthy" "$rc $out"
 run_check
 check "no health reported" "0 STACK OK - 4 services healthy" "$rc $out"
 
-check "the right project" "ps -a --filter label=com.docker.compose.project=brined-almanac-prod --format {{.Label \"com.docker.compose.service\"}}"$'\t'"{{.State}}"$'\t'"{{.Status}}" "$(cat "$TMP/docker.args")"
+args=$(cat "$TMP/docker.args")
+oneoff=no
+[[ " $args " == *" --filter label=com.docker.compose.oneoff=False "* ]] && oneoff=yes
+check "skips one-off containers" "yes" "$oneoff"
+
+check "the right project" "ps -a --filter label=com.docker.compose.project=brined-almanac-prod --filter label=com.docker.compose.oneoff=False --format {{.Label \"com.docker.compose.service\"}}"$'\t'"{{.State}}"$'\t'"{{.Status}}" "$(cat "$TMP/docker.args")"
 
 touch "$TMP/fail"
 run_check
