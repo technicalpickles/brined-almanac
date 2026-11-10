@@ -47,6 +47,10 @@ for name in $CHECKS; do
     echo "collect: bad check name: $name" >&2
     exit 1
   fi
+  if [ "$name" = stale ]; then
+    echo "collect: check name stale is reserved for the stale finding" >&2
+    exit 1
+  fi
   upper=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
   path="$check_dir/$name"
 

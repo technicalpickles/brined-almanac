@@ -68,6 +68,18 @@ if ! grep -q '^TASKCHAMPION_SYNC_URL=.' "$STATE/prod.env"; then
 fi
 echo "deploy: state dir ok ($STATE)"
 
+# --db-only starts no almanac, so it skips all of this.
+if ((!db_only)); then
+  for f in checks/collect checks/hosts/mac.conf; do
+    if [[ ! -e $f ]]; then
+      echo "deploy: $f is missing from this checkout; deploy from main once the host-state work is merged; see $runbook, section Host state" >&2
+      exit 1
+    fi
+  done
+  # Docker creates a missing bind source as a root-owned directory, which the collector could not write.
+  mkdir -p "$STATE/host-state"
+fi
+
 # The private tier declarations live in the vault, not the repo; compose mounts this copy.
 # --db-only starts no almanac, so it skips the fetch.
 if ((!db_only)); then
@@ -112,6 +124,14 @@ if ((db_only)); then
   exit 0
 fi
 
+# The almanac's first scan runs at startup. With no report yet it files "no report from mac" once,
+# under a key that never files again, so a report must exist before up. It runs after the builds,
+# so a long build cannot age a critical in it past the filing threshold before that scan.
+if ! checks/collect checks/hosts/mac.conf; then
+  echo "deploy: no host-state report could be written, and going on would file a false \"no report\" task; see $runbook, section Host state" >&2
+  exit 1
+fi
+
 OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"
@@ -123,6 +143,18 @@ if ! compose exec -T almanac brined-almanac sync-check; then
   exit 1
 fi
 
+# The stack is up and checked by now, so a failed install is reported last instead of cutting the deploy short.
+install_failed=0
+scripts/install-host-state || install_failed=1
+
 compose ps
-curl -fsS http://127.0.0.1:8788/healthz
+health_failed=0
+curl -fsS http://127.0.0.1:8788/healthz || health_failed=1
 echo
+
+if ((install_failed)); then
+  echo "deploy: the stack is running, but the host-state LaunchAgent did not install; see $runbook, section Host state" >&2
+fi
+if ((install_failed || health_failed)); then
+  exit 1
+fi

@@ -9,7 +9,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 3
 fi
 
-if ! ps_out=$(docker ps -a --filter "label=com.docker.compose.project=$project" \
+if ! ps_out=$(docker ps -a --filter "label=com.docker.compose.project=$project" --filter label=com.docker.compose.oneoff=False \
   --format '{{.Label "com.docker.compose.service"}}'$'\t''{{.State}}'$'\t''{{.Status}}' 2>/dev/null); then
   echo "STACK UNKNOWN - docker not reachable"
   exit 3

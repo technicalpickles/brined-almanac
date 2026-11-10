@@ -50,7 +50,7 @@ impl Fixture {
             .provide::<Tiers>(Arc::new(Tiers::parse("", None).expect("empty tiers")))
             .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
             .provide::<Hosts>(Arc::new(Hosts::load().expect("hosts.toml")))
-            .provide::<HostReports>(Arc::new(HostReports(None)))
+            .provide::<HostReports>(Arc::new(HostReports::new(None)))
             .provide::<BugsinkClient>(Arc::new(BugsinkClient(None)))
             .provide::<BugsinkReader>(Arc::new(reader))
             .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))

@@ -11,6 +11,10 @@ use crate::routing::Project;
 pub const CRITICAL_AFTER: Duration = Duration::minutes(10);
 pub const WARNING_AFTER: Duration = Duration::hours(24);
 pub const STALE_AFTER: Duration = Duration::minutes(30);
+/// A longer gap since the previous scan means the Mac likely slept, so an old report may only be
+/// waiting on launchd's next collector run. It must stay above the scan interval
+/// (`ALMANAC_SCAN_INTERVAL_MINUTES`, 15 by default), or an old report never files.
+pub const WAKE_GAP: Duration = Duration::minutes(20);
 
 const MAX_OUTPUT_BYTES: usize = 500;
 
@@ -99,6 +103,9 @@ impl Report {
             let name = check.name;
             if !name_is_valid(&name) {
                 return Err(format!("check {name:?} is outside [a-z0-9-]"));
+            }
+            if name == "stale" {
+                return Err("check \"stale\" is reserved for the stale finding's key".to_string());
             }
             if !seen.insert(name.clone()) {
                 return Err(format!("check {name} appears twice"));
@@ -318,9 +325,30 @@ impl Finding {
     }
 }
 
-pub fn findings(host: &Host, read: &Read, now: OffsetDateTime) -> Vec<Finding> {
-    // A timestamp ahead of `now` (clock skew) counts as age zero.
-    let age = |t: OffsetDateTime| (now - t).max(Duration::ZERO);
+/// Whether the previous scan in this process ran recently enough that an old report means the
+/// collector stopped. A previous scan later than `now` means the clock stepped back.
+pub fn scan_gap_is_trusted(previous: Option<OffsetDateTime>, now: OffsetDateTime) -> bool {
+    previous.is_some_and(|previous| previous <= now && now - previous <= WAKE_GAP)
+}
+
+/// A timestamp ahead of `now` (clock skew) counts as age zero.
+fn age(t: OffsetDateTime, now: OffsetDateTime) -> Duration {
+    (now - t).max(Duration::ZERO)
+}
+
+/// Whether `read` is a report that parsed but was generated more than `STALE_AFTER` ago.
+pub fn is_old_report(read: &Read, now: OffsetDateTime) -> bool {
+    matches!(read, Read::Report(report) if age(report.generated_at, now) > STALE_AFTER)
+}
+
+/// `old_report_may_file` is false when an old report should file nothing for now; missing and
+/// invalid reports file regardless.
+pub fn findings(
+    host: &Host,
+    read: &Read,
+    now: OffsetDateTime,
+    old_report_may_file: bool,
+) -> Vec<Finding> {
     let stale = |since, reason| {
         vec![Finding::Stale {
             host: host.name.clone(),
@@ -331,7 +359,8 @@ pub fn findings(host: &Host, read: &Read, now: OffsetDateTime) -> Vec<Finding> {
     match read {
         Read::Missing => stale(None, format!("no report file for {}", host.name)),
         Read::Invalid { modified, error } => stale(Some(*modified), error.clone()),
-        Read::Report(report) if age(report.generated_at) > STALE_AFTER => stale(
+        Read::Report(_) if is_old_report(read, now) && !old_report_may_file => vec![],
+        Read::Report(report) if is_old_report(read, now) => stale(
             Some(report.generated_at),
             format!(
                 "last report for {} was generated {}",
@@ -348,7 +377,7 @@ pub fn findings(host: &Host, read: &Read, now: OffsetDateTime) -> Vec<Finding> {
                     Status::Warning => WARNING_AFTER,
                     Status::Critical | Status::Unknown => CRITICAL_AFTER,
                 };
-                age(check.since) >= threshold
+                age(check.since, now) >= threshold
             })
             .map(|check| Finding::Check {
                 host: host.name.clone(),

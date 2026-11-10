@@ -27,6 +27,7 @@ services:
     environment:
       DATABASE_URL: postgres://almanac@db:5432/almanac
       BRENT_TRANSCRIPTS: /transcripts
+      HOST_STATE_REPORTS: /host-state
       LOCAL_TIERS: /etc/brined-almanac/tiers.toml
       # Never read; its value changes with the file so compose recreates the container on an edit.
       LOCAL_TIERS_SHA256: "${BRINED_ALMANAC_TIERS_SHA256:?run `mise run deploy`, which fetches tiers.toml}"
@@ -44,6 +45,7 @@ services:
     volumes:
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/transcripts:/transcripts:ro"
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/tiers.toml:/etc/brined-almanac/tiers.toml:ro"
+      - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/host-state:/host-state:ro"
       - taskchampion:/var/lib/brined-almanac/taskchampion
       - bugsink:/var/lib/brined-almanac/bugsink
     healthcheck:

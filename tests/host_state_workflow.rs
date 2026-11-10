@@ -1,11 +1,23 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use almanac::prelude::*;
+use almanac::runtime::Runtime;
+use almanac::testing::FakeTracker;
+use brined_almanac::bugsink::BugsinkClient;
 use brined_almanac::host_state::{Finding, Hosts, Status};
 use brined_almanac::providers::host_reports_from;
-use brined_almanac::workflows::host_state::{HostFinding, facts, policy, scan_findings};
+use brined_almanac::tiers::Tiers;
+use brined_almanac::transcript::Transcripts;
+use brined_almanac::workflows;
+use brined_almanac::workflows::bugsink_issues::BugsinkReader;
+use brined_almanac::workflows::host_state::{
+    HostFinding, HostReports, facts, policy, scan_findings,
+};
+use brined_almanac::workflows::security_alerts::AlertsClient;
 use serde_json::{Value, json};
 use time::macros::datetime;
+use time::{Duration, OffsetDateTime};
 
 const CRITICAL: &str = include_str!("fixtures/host_state/mac.json");
 
@@ -21,8 +33,21 @@ fn dir_with(files: &[(&str, &str)]) -> tempfile::TempDir {
     dir
 }
 
+const NOW: OffsetDateTime = datetime!(2026-11-10 15:00 UTC);
+
 fn scan(dir: &Path) -> Vec<(String, Value)> {
-    scan_findings(&hosts(), dir, datetime!(2026-11-10 15:00 UTC))
+    scan_after(dir, Some(NOW - Duration::minutes(15)))
+}
+
+fn scan_after(dir: &Path, previous: Option<OffsetDateTime>) -> Vec<(String, Value)> {
+    scan_findings(&hosts(), dir, NOW, previous)
+}
+
+fn stale_report() -> String {
+    CRITICAL.replace(
+        "\"generated_at\": \"2026-11-10T15:00:00Z\"",
+        "\"generated_at\": \"2026-11-10T14:29:00Z\"",
+    )
 }
 
 fn first_event() -> Value {
@@ -151,10 +176,10 @@ fn the_body_stays_untrusted() {
 
 #[test]
 fn the_reports_dir_is_none_when_unset_or_empty() {
-    assert_eq!(host_reports_from(|_| None).0, None);
-    assert_eq!(host_reports_from(|_| Some(String::new())).0, None);
+    assert_eq!(host_reports_from(|_| None).dir, None);
+    assert_eq!(host_reports_from(|_| Some(String::new())).dir, None);
     assert_eq!(
-        host_reports_from(|_| Some("/host-state".to_string())).0,
+        host_reports_from(|_| Some("/host-state".to_string())).dir,
         Some("/host-state".into())
     );
 }
@@ -177,4 +202,77 @@ fn a_report_naming_another_host_scans_to_one_stale_pair() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].1["kind"], "stale");
     assert_eq!(found[0].1["host"], "mac");
+}
+
+#[test]
+fn host_state_is_registered_first() {
+    assert_eq!(brined_almanac::workflows::all()[0].name(), "host-state");
+}
+
+#[test]
+fn a_stale_report_with_no_previous_scan_files_nothing() {
+    let dir = dir_with(&[("mac.json", &stale_report())]);
+    let found = scan_after(dir.path(), None);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_stale_report_after_a_scan_fifteen_minutes_ago_files_stale_only() {
+    let dir = dir_with(&[("mac.json", &stale_report())]);
+    let found = scan_after(dir.path(), Some(NOW - Duration::minutes(15)));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "mac/stale/2026-11-10");
+    assert_eq!(found[0].1["kind"], "stale");
+}
+
+#[test]
+fn a_stale_report_after_a_twenty_one_minute_gap_files_nothing() {
+    let dir = dir_with(&[("mac.json", &stale_report())]);
+    let found = scan_after(dir.path(), Some(NOW - Duration::minutes(21)));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_stale_report_after_a_scan_later_than_now_files_nothing() {
+    let dir = dir_with(&[("mac.json", &stale_report())]);
+    let found = scan_after(dir.path(), Some(NOW + Duration::minutes(5)));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_missing_report_files_with_no_previous_scan() {
+    let dir = dir_with(&[]);
+    let found = scan_after(dir.path(), None);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "mac/stale/missing");
+}
+
+#[test]
+fn an_invalid_report_files_with_no_previous_scan() {
+    let dir = dir_with(&[("mac.json", "{")]);
+    let found = scan_after(dir.path(), None);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].1["kind"], "stale");
+}
+
+#[tokio::test]
+async fn a_stale_report_files_on_the_second_scan_in_a_process() {
+    let reports = tempfile::tempdir().unwrap();
+    let old = CRITICAL.replace("2026-11-10T15:00:00Z", "2000-01-01T00:00:00Z");
+    std::fs::write(reports.path().join("mac.json"), old).unwrap();
+    let transcripts = tempfile::tempdir().unwrap();
+    let providers = Providers::new()
+        .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
+        .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+        .provide::<Hosts>(Arc::new(Hosts::load().unwrap()))
+        .provide::<HostReports>(Arc::new(HostReports::new(Some(
+            reports.path().to_path_buf(),
+        ))))
+        .provide::<BugsinkClient>(Arc::new(BugsinkClient(None)))
+        .provide::<BugsinkReader>(Arc::new(BugsinkReader(None)))
+        .provide::<Transcripts>(Arc::new(Transcripts(transcripts.path().to_path_buf())))
+        .provide::<dyn Tracker>(Arc::new(FakeTracker::default()));
+    let rt = Runtime::new(workflows::all(), providers);
+    assert_eq!(rt.backfill(None).await.unwrap().found, 0);
+    assert_eq!(rt.backfill(None).await.unwrap().found, 1);
 }

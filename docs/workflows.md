@@ -223,11 +223,11 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### host-state-reports
 
-- **Status:** next. The workflow is built. The collector and the prod wiring are not.
+- **Status:** built. The workflow, the checks, the collector and the prod wiring are built, and it goes live at the next deploy.
 - **Watches:** the JSON report each host's collector writes into `HOST_STATE_REPORTS`, one file per host declared in `hosts.toml`. Unset, the scan prints a skip message and finds nothing. The Mac is the first host. Its collector runs every 5 minutes with two checks, the age of the puller's last completed pull and the health of the prod stack's containers.
 - **Reports:** a task on the host's project for each check that has been failing long enough, and one when a host's report stops arriving or can't be read. The delivery ID is `<host>/<check>/<UTC date of since>` or `<host>/stale/<UTC date>`, so a rescan files nothing new, and a check that recovers and fails again on another day files a fresh task. A file in the directory that no declared host owns is logged and ignored. The thresholds are in the Host state section above.
 - **Model:** none.
-- **Preview:** `scripts/host-state-dry-run <reports-dir>` prints what a directory of reports would file, with no database and no token.
+- **Preview:** `scripts/host-state-dry-run <reports-dir>` prints what a directory of reports would file, with no database and no token. It is a first scan, so a report that is merely old shows no stale finding; see the runbook's Host state section.
 
 ### service-down
 

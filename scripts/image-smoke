@@ -17,12 +17,13 @@ trap 'rm -rf "$empty" "$errs"' EXIT
 
 docker build -f Containerfile -t "$image" .
 
-docker run --rm "$image" synth --format json |
-  jq -e '.[0].workflow == "bugsink-issues" and .[0].scans == true' >/dev/null ||
+manifest=$(docker run --rm "$image" synth --format json)
+jq -e 'any(.[]; .workflow == "bugsink-issues" and .scans == true)' <<<"$manifest" >/dev/null ||
   fail "synth manifest lacks the bugsink-issues workflow with scans"
-docker run --rm "$image" synth --format json |
-  jq -e '.[1].workflow == "security-alerts"' >/dev/null ||
+jq -e 'any(.[]; .workflow == "security-alerts")' <<<"$manifest" >/dev/null ||
   fail "synth manifest lacks the security-alerts workflow"
+jq -e 'any(.[]; .workflow == "host-state" and .scans == true)' <<<"$manifest" >/dev/null ||
+  fail "synth manifest lacks the host-state workflow with scans"
 
 uid=$(docker run --rm --entrypoint id "$image" -u)
 [[ $uid == 10001 ]] || fail "runs as uid '$uid', want 10001"
@@ -31,7 +32,7 @@ docker run --rm --entrypoint curl "$image" --version >/dev/null ||
   fail "curl is missing"
 
 out=$(docker run --rm "$image" check)
-[[ $out == *"2 workflow(s)"* ]] || fail "check output lacks '2 workflow(s)': $out"
+[[ $out == *"3 workflow(s)"* ]] || fail "check output lacks '3 workflow(s)': $out"
 
 docker run --rm -v "$empty:/transcripts:ro" -e BRENT_TRANSCRIPTS=/transcripts \
   "$image" backfill --dry-run >/dev/null ||
