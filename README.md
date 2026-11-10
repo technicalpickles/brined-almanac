@@ -33,6 +33,7 @@ The binary has almanac's verbs: `synth` prints the manifest, `check` validates t
 | `BUGSINK_DSN` | The Bugsink project that receives one event per failed tool call. Unset, the shipper prints a skip message and sends nothing. It sends only on a live run. |
 | `BUGSINK_API_TOKEN` | A Bugsink API token that reads the project's issues, tags and history, and can comment on, resolve and mute issues. Unset, or without the DSN, the issue scan prints a skip message and finds nothing. |
 | `BUGSINK_CURSOR` | Where the shipper keeps the time of the newest event Bugsink accepted. Defaults to `/var/lib/brined-almanac/bugsink/cursor`. |
+| `HOST_STATE_REPORTS` | Directory of host-state reports, one `<host>.json` per host in `hosts.toml`. Unset or empty, the host-state scan prints a skip message and finds nothing. `scripts/host-state-dry-run <dir>` previews what a directory would file. |
 | `DATABASE_URL` | The Postgres store that remembers what's been filed. Required for live runs; set by `mise run live`, never by hand (see below). |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
 

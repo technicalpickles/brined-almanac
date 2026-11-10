@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Previews what the host-state scan would file from a directory of reports, and files nothing.
+# Needs no database and no token: without a tracker configured, each would-be task prints.
+set -euo pipefail
+if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
+  echo "usage: $0 <reports-dir>" >&2
+  exit 2
+fi
+reports=$(cd "$1" && pwd)
+cd "$(dirname "$0")/.."
+empty=$(mktemp -d)
+trap 'rm -rf "$empty"' EXIT
+HOST_STATE_REPORTS=$reports
+export HOST_STATE_REPORTS
+# The transcript scan runs in every backfill, and an empty directory gives it nothing to find.
+export BRENT_TRANSCRIPTS="$empty"
+cargo build -q
+target/debug/brined-almanac backfill --dry-run

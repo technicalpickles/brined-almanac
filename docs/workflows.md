@@ -46,6 +46,17 @@ A workflow never knows how the report arrived. Two transports deliver it:
 - **Pull.** Almanac connects with a fenced SSH key whose forced command prints the report and does nothing else. This is the pattern the prod design uses for picklelab. It suits hosts on the tailnet.
 - **Push.** The host writes the report on a schedule to a place almanac reads. It suits hosts almanac can't or shouldn't reach, because the host needs no inbound key. A host whose report stops arriving is itself a finding.
 
+A report is one JSON file per host, named `<host>.json` in the directory `HOST_STATE_REPORTS` names. It has these fields, and no others:
+
+| Field | What it holds |
+|---|---|
+| `host` | The host's name. It must match the file name and a host in `hosts.toml`. |
+| `generated_at` | When the collector wrote the report, RFC 3339 in UTC. |
+| `interval_seconds` | How often the collector runs. The Mac's is 300. |
+| `checks[]` | One entry per check: `name` (`[a-z0-9-]+`, unique in the report), `status` (0 OK, 1 warning, 2 critical, 3 unknown), `since`, and `output`. `output` is one line of at most 500 bytes. |
+
+`since` is when the check entered its current status, so it does not move while the status holds. The workflow files a critical or unknown check once its `since` is 10 minutes old, and a warning once it is 24 hours old. A report whose `generated_at` is older than 30 minutes is stale, and files one task for the host in place of its checks. A time ahead of the scan's clock counts as age zero.
+
 Each host declares its transport. picklelab and the WordPress droplet use pull. The droplet joins the tailnet first, which also lets it close SSH to the internet.
 
 ## Rules every workflow follows
@@ -210,9 +221,17 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Prefer structure:** a lesson that applies to every repository files one task to promote it to a dotfiles rule or a lint. A lesson that applies to a few files one task per repository that lacks it.
 - **Model:** none for lessons with a check.
 
+### host-state-reports
+
+- **Status:** next. The workflow is built. The collector and the prod wiring are not.
+- **Watches:** the JSON report each host's collector writes into `HOST_STATE_REPORTS`, one file per host declared in `hosts.toml`. Unset, the scan prints a skip message and finds nothing. The Mac is the first host. Its collector runs every 5 minutes with two checks, the age of the puller's last completed pull and the health of the prod stack's containers.
+- **Reports:** a task on the host's project for each check that has been failing long enough, and one when a host's report stops arriving or can't be read. The delivery ID is `<host>/<check>/<UTC date of since>` or `<host>/stale/<UTC date>`, so a rescan files nothing new, and a check that recovers and fails again on another day files a fresh task. A file in the directory that no declared host owns is logged and ignored. The thresholds are in the Host state section above.
+- **Model:** none.
+- **Preview:** `scripts/host-state-dry-run <reports-dir>` prints what a directory of reports would file, with no database and no token.
+
 ### service-down
 
-- **Status:** next, in M1 with security-alerts.
+- **Status:** next, in M1 with security-alerts. Its checks report through [host-state](#host-state-reports).
 - **Watches:** host-state reports from picklelab and deployed-tier hosts, including the WordPress droplet. One of its sites returned HTTP 500 for weeks while it was compromised, and nothing reported it.
 - **Reports:** a check that turned critical or stayed at warning, such as a unit that should be running and isn't, or a site that doesn't return 200.
 - **Model:** none.
@@ -241,10 +260,10 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### credential-expiry
 
-- **Status:** next, in M1 with service-down. Moved from later on 2026-11-08.
-- **Watches:** first, a host check on the Mac that the credential broker answers and `gh auth status` succeeds. Later, authentication errors in transcripts and service logs.
-- **Why first:** on 2026-11-08 the broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A broker that is down is a service that is down, and the host check costs nothing. The vault also records a dead Gmail refresh token that was found only when a check needed it.
-- **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or a broker that stops answering.
+- **Status:** later, in M6. It was moved to M1 as a host check on 2026-11-08 and moved back on 2026-11-10.
+- **Watches:** authentication errors in agent transcripts and service logs.
+- **Why not a host check:** on 2026-11-08 the credential broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A check on the Mac that runs `gh auth status` looked like the cheap answer. It isn't one. The broker approves by launcher, the app that started the command. A request an agent session starts is approved by an automatic rule. The same command under launchd has no rule and waits for a person, so the check timed out on every run when it was tried. Even with an exemption it would test a path no agent session uses, and could stay green while every session hangs. The failure shows up in the transcripts, so that is where this reads.
+- **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or sessions whose credential calls hang or are refused.
 - **Model:** none.
 
 ### deployed-upkeep
