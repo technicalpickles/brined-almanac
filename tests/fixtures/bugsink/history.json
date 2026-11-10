@@ -1,0 +1,11 @@
+{
+  "next": null,
+  "previous": null,
+  "results": [
+    {"id": 905, "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01", "project": 7, "triggering_event": "d41d8cd9-8f00-4204-a980-0998ecf8427e", "user": null, "user_display_name": null, "timestamp": "2026-11-09T20:00:00Z", "kind": "regressed", "comment": "", "metadata": {}},
+    {"id": 904, "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01", "project": 7, "triggering_event": null, "user": 1, "user_display_name": "someone", "timestamp": "2026-11-08T12:00:00Z", "kind": "reopened", "comment": "", "metadata": {}},
+    {"id": 903, "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01", "project": 7, "triggering_event": null, "user": 1, "user_display_name": "someone", "timestamp": "2026-11-07T12:00:00Z", "kind": "resolved", "comment": "", "metadata": {"resolved_unconditionally": true}},
+    {"id": 902, "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01", "project": 7, "triggering_event": null, "user": 1, "user_display_name": "someone", "timestamp": "2026-11-06T12:00:00Z", "kind": "muted", "comment": "", "metadata": {"mute_unconditionally": true}},
+    {"id": 901, "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01", "project": 7, "triggering_event": "d41d8cd9-8f00-4204-a980-0998ecf8427e", "user": null, "user_display_name": null, "timestamp": "2026-11-04T10:00:00Z", "kind": "first_seen", "comment": "", "metadata": {}}
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01",
+      "friendly_id": "BRENT-12",
+      "project": 7,
+      "digest_order": 12,
+      "last_seen": "2026-11-09T21:14:03.482113Z",
+      "first_seen": "2026-11-04T10:00:00.250000Z",
+      "digested_event_count": 14,
+      "stored_event_count": 14,
+      "calculated_type": "Error",
+      "calculated_value": "MCP error -32001: Request timed out",
+      "transaction": "",
+      "is_resolved": false,
+      "is_resolved_unconditionally": false,
+      "is_resolved_by_next_release": false,
+      "fixed_at": [],
+      "events_at": [""],
+      "is_muted": false,
+      "unmute_on_volume_based_conditions": [],
+      "unmute_after": null
+    },
+    {
+      "id": "0b7c1e55-91d4-4c0e-8f3a-5a2f7d6c9b02",
+      "friendly_id": "BRENT-13",
+      "project": 7,
+      "digest_order": 13,
+      "last_seen": "2026-11-08T08:00:00Z",
+      "first_seen": "2026-11-08T08:00:00Z",
+      "digested_event_count": 1,
+      "stored_event_count": 1,
+      "calculated_type": "Error",
+      "calculated_value": "",
+      "transaction": "",
+      "is_resolved": true,
+      "is_resolved_unconditionally": true,
+      "is_resolved_by_next_release": false,
+      "fixed_at": [],
+      "events_at": [""],
+      "is_muted": true,
+      "unmute_on_volume_based_conditions": [],
+      "unmute_after": null
+    }
+  ]
+}
