@@ -220,7 +220,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 ### host-state-reports
 
 - **Status:** next. The workflow is built. The collector and the prod wiring are not.
-- **Watches:** the JSON report each host's collector writes into `HOST_STATE_REPORTS`, one file per host declared in `hosts.toml`. Unset, the scan prints a skip message and finds nothing. The Mac is the first host, and its collector runs every 5 minutes.
+- **Watches:** the JSON report each host's collector writes into `HOST_STATE_REPORTS`, one file per host declared in `hosts.toml`. Unset, the scan prints a skip message and finds nothing. The Mac is the first host. Its collector runs every 5 minutes with two checks, the age of the puller's last completed pull and the health of the prod stack's containers.
 - **Reports:** a task on the host's project for each check that has been failing long enough, and one when a host's report stops arriving or can't be read. The delivery ID is `<host>/<check>/<UTC date of since>` or `<host>/stale/<UTC date>`, so a rescan files nothing new, and a check that recovers and fails again on another day files a fresh task. A file in the directory that no declared host owns is logged and ignored. The thresholds are in the Host state section above.
 - **Model:** none.
 - **Preview:** `scripts/host-state-dry-run <reports-dir>` prints what a directory of reports would file, with no database and no token.
@@ -256,10 +256,10 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ### credential-expiry
 
-- **Status:** next, in M1 with service-down. Moved from later on 2026-11-08.
-- **Watches:** first, a host check on the Mac that the credential broker answers and `gh auth status` succeeds. It reports through [host-state](#host-state-reports). Later, authentication errors in transcripts and service logs.
-- **Why first:** on 2026-11-08 the broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A broker that is down is a service that is down, and the host check costs nothing. The vault also records a dead Gmail refresh token that was found only when a check needed it.
-- **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or a broker that stops answering.
+- **Status:** later, in M6. It was moved to M1 as a host check on 2026-11-08 and moved back on 2026-11-10.
+- **Watches:** authentication errors in agent transcripts and service logs.
+- **Why not a host check:** on 2026-11-08 the credential broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A check on the Mac that runs `gh auth status` looked like the cheap answer. It isn't one. The broker approves by launcher, the app that started the command. A request an agent session starts is approved by an automatic rule. The same command under launchd has no rule and waits for a person, so the check timed out on every run when it was tried. Even with an exemption it would test a path no agent session uses, and could stay green while every session hangs. The failure shows up in the transcripts, so that is where this reads.
+- **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or sessions whose credential calls hang or are refused.
 - **Model:** none.
 
 ### deployed-upkeep
