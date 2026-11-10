@@ -325,7 +325,7 @@ pub fn alerts_client_from(lookup: impl Fn(&str) -> Option<String>) -> AlertsClie
 
 /// The directory for `HOST_STATE_REPORTS`. An empty value is unset, as in `choose`.
 pub fn host_reports_from(lookup: impl Fn(&str) -> Option<String>) -> HostReports {
-    HostReports(
+    HostReports::new(
         lookup("HOST_STATE_REPORTS")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),

@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use brined_almanac::host_state::{
-    CRITICAL_AFTER, CheckResult, Finding, Host, Hosts, Read, Report, STALE_AFTER, Status,
-    WARNING_AFTER, findings, read,
+    CRITICAL_AFTER, CheckResult, Finding, Host, Hosts, Read, Report, STALE_AFTER, Status, WAKE_GAP,
+    WARNING_AFTER, findings, read, scan_gap_is_trusted,
 };
 use time::macros::datetime;
 use time::{Duration, OffsetDateTime};
@@ -157,6 +157,7 @@ fn fresh(status: Status, since: OffsetDateTime) -> Vec<Finding> {
         &mac(),
         &report(datetime!(2026-11-10 14:59 UTC), status, since),
         NOW,
+        true,
     )
 }
 
@@ -165,6 +166,7 @@ fn the_thresholds_are_the_documented_ones() {
     assert_eq!(CRITICAL_AFTER, Duration::minutes(10));
     assert_eq!(WARNING_AFTER, Duration::hours(24));
     assert_eq!(STALE_AFTER, Duration::minutes(30));
+    assert_eq!(WAKE_GAP, Duration::minutes(20));
 }
 
 #[test]
@@ -211,6 +213,7 @@ fn a_long_outage_keeps_one_key() {
         &mac(),
         &report(datetime!(2026-11-09 00:59 UTC), Status::Critical, since),
         datetime!(2026-11-09 01:00 UTC),
+        true,
     );
     let late = fresh(Status::Critical, since);
     assert_eq!(early[0].key(), "mac/gh-auth/2026-11-08");
@@ -224,6 +227,7 @@ fn a_stale_report_files_stale_and_no_checks() {
         &mac(),
         &report(generated, Status::Critical, datetime!(2026-11-10 14:00 UTC)),
         NOW,
+        true,
     );
     assert_eq!(found.len(), 1);
     assert!(matches!(
@@ -243,13 +247,38 @@ fn a_report_at_thirty_minutes_is_not_stale() {
             datetime!(2026-11-10 14:00 UTC),
         ),
         NOW,
+        true,
     );
     assert!(found.iter().all(|f| !matches!(f, Finding::Stale { .. })));
 }
 
 #[test]
+fn a_stale_report_that_may_not_file_files_nothing() {
+    let found = findings(
+        &mac(),
+        &report(
+            datetime!(2026-11-10 14:29 UTC),
+            Status::Critical,
+            datetime!(2026-11-10 14:00 UTC),
+        ),
+        NOW,
+        false,
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn only_a_recent_earlier_scan_is_trusted() {
+    assert!(!scan_gap_is_trusted(None, NOW));
+    assert!(scan_gap_is_trusted(Some(NOW - Duration::minutes(15)), NOW));
+    assert!(scan_gap_is_trusted(Some(NOW - WAKE_GAP), NOW));
+    assert!(!scan_gap_is_trusted(Some(NOW - Duration::minutes(21)), NOW));
+    assert!(!scan_gap_is_trusted(Some(NOW + Duration::seconds(1)), NOW));
+}
+
+#[test]
 fn a_missing_report_is_stale() {
-    let found = findings(&mac(), &Read::Missing, NOW);
+    let found = findings(&mac(), &Read::Missing, NOW, true);
     assert_eq!(found.len(), 1);
     assert!(matches!(found[0], Finding::Stale { since: None, .. }));
     assert_eq!(found[0].key(), "mac/stale/missing");
@@ -261,7 +290,7 @@ fn an_invalid_report_is_stale_with_the_error() {
         modified: datetime!(2026-11-10 14:00 UTC),
         error: "x".into(),
     };
-    let found = findings(&mac(), &read, NOW);
+    let found = findings(&mac(), &read, NOW, true);
     assert_eq!(found.len(), 1);
     assert!(matches!(found[0], Finding::Stale { .. }));
     assert_eq!(found[0].key(), "mac/stale/2026-11-10");
@@ -283,6 +312,7 @@ fn a_generated_at_in_the_future_is_fresh() {
             datetime!(2026-11-10 14:00 UTC),
         ),
         NOW,
+        true,
     );
     assert!(found.iter().all(|f| !matches!(f, Finding::Stale { .. })));
 }
@@ -306,6 +336,7 @@ fn the_stale_title_names_the_host_and_time() {
             datetime!(2026-11-10 14:00 UTC),
         ),
         NOW,
+        true,
     );
     assert_eq!(
         found[0].title(),

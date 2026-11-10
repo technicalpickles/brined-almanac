@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use almanac::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -6,12 +7,33 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::macros::format_description;
 
-use crate::host_state::{Finding, Hosts, findings, read};
+use crate::host_state::{Finding, Hosts, findings, is_old_report, read, scan_gap_is_trusted};
 use crate::routing::Project;
 
-/// The directory `HOST_STATE_REPORTS` names, or none when it is unset or empty. Always provided,
-/// because almanac checks a scan's providers at startup.
-pub struct HostReports(pub Option<PathBuf>);
+/// The directory `HOST_STATE_REPORTS` names, or none when it is unset or empty, and when this
+/// process last scanned. Always provided, because almanac checks a scan's providers at startup.
+pub struct HostReports {
+    pub dir: Option<PathBuf>,
+    previous_scan: Mutex<Option<OffsetDateTime>>,
+}
+
+impl HostReports {
+    pub fn new(dir: Option<PathBuf>) -> Self {
+        Self {
+            dir,
+            previous_scan: Mutex::new(None),
+        }
+    }
+
+    /// Records `now` as the latest scan and returns the one before it.
+    fn swap_previous_scan(&self, now: OffsetDateTime) -> Option<OffsetDateTime> {
+        let mut previous = self
+            .previous_scan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        previous.replace(now)
+    }
+}
 
 fn minute(t: OffsetDateTime) -> String {
     t.to_offset(time::UtcOffset::UTC)
@@ -24,15 +46,40 @@ fn status_name(status: crate::host_state::Status) -> String {
 }
 
 /// One pair per finding, the delivery id being the finding's key. A file in `dir` that no declared
-/// host owns is logged and files nothing.
-pub fn scan_findings(hosts: &Hosts, dir: &Path, now: OffsetDateTime) -> Vec<(String, Value)> {
+/// host owns is logged and files nothing. `previous` is when this process last scanned.
+pub fn scan_findings(
+    hosts: &Hosts,
+    dir: &Path,
+    now: OffsetDateTime,
+    previous: Option<OffsetDateTime>,
+) -> Vec<(String, Value)> {
+    let trusted = scan_gap_is_trusted(previous, now);
     let mut out = vec![];
     for host in hosts.iter() {
         let result = read(dir, host);
         if let crate::host_state::Read::Invalid { error, .. } = &result {
             eprintln!("host-state: {error}");
         }
-        for finding in findings(host, &result, now) {
+        if !trusted && is_old_report(&result, now) {
+            let why = match previous {
+                None => "this is the first scan since almanac started".to_string(),
+                Some(previous) if previous > now => {
+                    format!(
+                        "the previous scan at {} is later than now",
+                        minute(previous)
+                    )
+                }
+                Some(previous) => format!(
+                    "the previous scan was at {}, so the host likely slept",
+                    minute(previous)
+                ),
+            };
+            eprintln!(
+                "host-state: {}'s report is over 30 minutes old, but {why}; not filing it as stale until the next scan",
+                host.name
+            );
+        }
+        for finding in findings(host, &result, now, trusted) {
             let (kind, check, status, since) = match &finding {
                 Finding::Check {
                     check,
@@ -132,12 +179,15 @@ impl Event for HostFinding {
 
 #[scan]
 pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<HostFinding>>, StepError> {
-    let Some(dir) = &scanner.get::<HostReports>()?.0 else {
+    let now = OffsetDateTime::now_utc();
+    let reports = scanner.get::<HostReports>()?;
+    let previous = reports.swap_previous_scan(now);
+    let Some(dir) = &reports.dir else {
         eprintln!("host-state: HOST_STATE_REPORTS is not set, skipping");
         return Ok(vec![]);
     };
     let hosts = scanner.get::<Hosts>()?;
-    Ok(scan_findings(&hosts, dir, OffsetDateTime::now_utc())
+    Ok(scan_findings(&hosts, dir, now, previous)
         .into_iter()
         .map(|(delivery_id, payload)| Scanned::new(delivery_id, payload))
         .collect())

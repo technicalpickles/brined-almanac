@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Previews what the host-state scan would file from a directory of reports, and files nothing.
+# It never shows a stale finding for an old report: see the usage text.
 # Needs no database and no token: without a tracker configured, each would-be task prints.
 set -euo pipefail
 if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
   echo "usage: $0 <reports-dir>" >&2
+  echo "A one-shot backfill has no previous scan, so it never shows a stale finding for a report" >&2
+  echo "that is merely old (generated over 30 minutes ago). Missing and invalid reports still show." >&2
   exit 2
 fi
 reports=$(cd "$1" && pwd)

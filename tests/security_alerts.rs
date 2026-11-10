@@ -545,7 +545,7 @@ async fn the_runtime_files_once_per_delivery() {
         .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
         .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
         .provide::<Hosts>(Arc::new(Hosts::load().unwrap()))
-        .provide::<HostReports>(Arc::new(HostReports(None)))
+        .provide::<HostReports>(Arc::new(HostReports::new(None)))
         .provide::<dyn Tracker>(tracker.clone());
     let rt = Runtime::new(workflows::all(), providers).in_mode(Mode::Live);
     let envelope = || Envelope {

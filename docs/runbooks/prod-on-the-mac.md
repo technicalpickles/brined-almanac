@@ -643,6 +643,16 @@ into `brined-almanac` when a check has stayed critical or unknown for 10
 minutes, or warning for 24 hours, or when the report is older than 30 minutes.
 A rescan files nothing new.
 
+An old report files only when this almanac process also scanned within the
+last 20 minutes (`WAKE_GAP`). After the Mac sleeps, the first scan on waking
+can beat launchd's next collector run, so that scan, and the first scan after
+the almanac starts, file no old-report task; a report that is really old files
+on the next scan. Raising `ALMANAC_SCAN_INTERVAL_MINUTES` above 20 minutes
+stops old reports from ever filing. For the same reason a one-shot
+`backfill --dry-run`, including `scripts/host-state-dry-run`, has no previous
+scan and never shows a `no report from mac since ...` finding for an old
+report. A missing or unreadable report files at once either way.
+
 - Report: `$STATE/host-state/mac.json`.
 - Collector log: `$STATE/host-state.log`. It sits one level above
   `host-state/` because the scan logs every file in that directory that no
