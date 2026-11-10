@@ -23,7 +23,7 @@ Run `mise install && hk install` to arm the hooks, and `mise run check` to run t
 
 There are two workflows. `tool-failures` reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. The same scan also ships each failed tool call to [Bugsink](https://www.bugsink.com/) as one event, which is taking over grouping from the clusters (`docs/superpowers/plans/2026-11-09-transcript-shipper.md`). Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
 
-The binary has almanac's verbs: `synth` prints the manifest, `check` validates the providers, `backfill [--dry-run]` runs the scan once, and `run` stays up. It reads its settings from the environment:
+The binary has almanac's verbs: `synth` prints the manifest, `check` validates the providers, `backfill [--dry-run]` runs the scan once, and `run` stays up. `cutover [--apply]` resolves in Bugsink the fingerprints whose almanac issues are all closed, once, at the move to the tracker (`mise run cutover`, `docs/superpowers/plans/2026-11-09-cutover.md`). It reads its settings from the environment:
 
 | Variable | What it does |
 |---|---|
