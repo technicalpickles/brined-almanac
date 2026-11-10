@@ -2,6 +2,7 @@ pub mod bugsink;
 pub mod bugsink_api;
 pub mod classes;
 pub mod cutover;
+pub mod host_state;
 pub mod providers;
 pub mod resolve_on_close;
 pub mod routing;
