@@ -35,7 +35,7 @@ if [[ -z ${BRINED_ALMANAC_OP_TOKEN:-} ]]; then
     exit 1
   fi
   export BRINED_ALMANAC_AV_REEXEC=1
-  exec av inject +BRINED_ALMANAC_OP_TOKEN -- "$0" ${args[@]+"${args[@]}"}
+  exec av inject +BRINED_ALMANAC_OP_TOKEN -- "$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")" ${args[@]+"${args[@]}"}
 fi
 
 cd "$(git rev-parse --show-toplevel)"
