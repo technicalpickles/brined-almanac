@@ -663,8 +663,8 @@ report. A missing or unreadable report files at once either way.
 
 `mise run deploy` creates `$STATE/host-state` before `up` (Docker would create
 a missing bind source as a root-owned directory) and installs the agent once
-the stack is healthy. Before `up`, it also runs the collector once, so a
-report exists when the almanac's first scan runs; if that fails, the deploy
+the stack is healthy. Just before `up`, after the image builds, it also runs
+the collector once, so a fresh report exists when the almanac's first scan runs; if that fails, the deploy
 stops before `up`. If the install fails, the deploy says the stack is
 running and exits 1. Fix the cause and run `scripts/install-host-state` again;
 it unloads a loaded agent before loading, so it is safe to repeat.

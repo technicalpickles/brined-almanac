@@ -78,12 +78,6 @@ if ((!db_only)); then
   done
   # Docker creates a missing bind source as a root-owned directory, which the collector could not write.
   mkdir -p "$STATE/host-state"
-  # The almanac's first scan runs at startup. With no report yet it files "no report from mac" once,
-  # under a key that never files again, so a report must exist before up.
-  if ! checks/collect checks/hosts/mac.conf; then
-    echo "deploy: no host-state report could be written, and going on would file a false \"no report\" task; see $runbook, section Host state" >&2
-    exit 1
-  fi
 fi
 
 # The private tier declarations live in the vault, not the repo; compose mounts this copy.
@@ -128,6 +122,14 @@ if ((db_only)); then
     docker compose -f compose.prod.yaml up -d --wait db
   echo "deploy: db is up; run mise run deploy for the rest"
   exit 0
+fi
+
+# The almanac's first scan runs at startup. With no report yet it files "no report from mac" once,
+# under a key that never files again, so a report must exist before up. It runs after the builds,
+# so a long build cannot age a critical in it past the filing threshold before that scan.
+if ! checks/collect checks/hosts/mac.conf; then
+  echo "deploy: no host-state report could be written, and going on would file a false \"no report\" task; see $runbook, section Host state" >&2
+  exit 1
 fi
 
 OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN \
