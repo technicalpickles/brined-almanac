@@ -11,11 +11,13 @@ use taskchampion::{ServerConfig, Uuid};
 
 use crate::bugsink::{Bugsink, BugsinkClient, Cursor, Dsn};
 use crate::cutover;
+use crate::host_state::Hosts;
 use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
 use crate::tiers::Tiers;
 use crate::transcript::Transcripts;
 use crate::workflows::bugsink_issues::{BugsinkReader, Reading};
+use crate::workflows::host_state::HostReports;
 use crate::workflows::security_alerts::AlertsClient;
 
 const API: &str = "https://api.github.com";
@@ -321,6 +323,15 @@ pub fn alerts_client_from(lookup: impl Fn(&str) -> Option<String>) -> AlertsClie
     AlertsClient(token.map(|t| GithubClient::new(API, Auth::Token(t)).read_only()))
 }
 
+/// The directory for `HOST_STATE_REPORTS`. An empty value is unset, as in `choose`.
+pub fn host_reports_from(lookup: impl Fn(&str) -> Option<String>) -> HostReports {
+    HostReports(
+        lookup("HOST_STATE_REPORTS")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+    )
+}
+
 const DEFAULT_CURSOR: &str = "/var/lib/brined-almanac/bugsink/cursor";
 
 /// The shipper for `BUGSINK_DSN`, or none when it is unset. An empty value is unset, as in
@@ -371,6 +382,7 @@ pub fn all(_config: &Config) -> Providers {
     let dir = env::var("BRENT_TRANSCRIPTS").unwrap_or_else(|_| "transcripts".to_string());
     let choice = choose(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     let tiers = tiers_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
+    let hosts = Hosts::load().unwrap_or_else(|err| panic!("{err}"));
     let live = live(env::var("ALMANAC_MODE").ok(), env::args());
     let bugsink =
         bugsink_client_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
@@ -378,6 +390,8 @@ pub fn all(_config: &Config) -> Providers {
         bugsink_reader_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
         .provide::<Tiers>(Arc::new(tiers))
+        .provide::<Hosts>(Arc::new(hosts))
+        .provide::<HostReports>(Arc::new(host_reports_from(|key| env::var(key).ok())))
         .provide::<AlertsClient>(Arc::new(alerts_client_from(|key| env::var(key).ok())))
         .provide::<BugsinkClient>(Arc::new(bugsink))
         .provide::<BugsinkReader>(Arc::new(reader))

@@ -4,9 +4,11 @@ use almanac::diag::Error;
 use almanac::prelude::*;
 use almanac::runtime::{Envelope, Ingest, Origin, Runtime};
 use almanac::testing::FakeTracker;
+use brined_almanac::host_state::Hosts;
 use brined_almanac::routing::Project;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::workflows;
+use brined_almanac::workflows::host_state::HostReports;
 use brined_almanac::workflows::security_alerts::{
     Alert, AlertsClient, Coverage, Facts, RepoRead, SecurityFinding, Severity, Tick, alerts_switch,
     digest, facts, findings, overdue, parse_dependabot, parse_secret, policy, repo_missing,
@@ -542,6 +544,8 @@ async fn the_runtime_files_once_per_delivery() {
     let providers = Providers::new()
         .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
         .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+        .provide::<Hosts>(Arc::new(Hosts::load().unwrap()))
+        .provide::<HostReports>(Arc::new(HostReports(None)))
         .provide::<dyn Tracker>(tracker.clone());
     let rt = Runtime::new(workflows::all(), providers).in_mode(Mode::Live);
     let envelope = || Envelope {

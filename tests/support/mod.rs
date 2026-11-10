@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use almanac::prelude::*;
 use brined_almanac::bugsink::BugsinkClient;
+use brined_almanac::host_state::Hosts;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::transcript::Transcripts;
 use brined_almanac::workflows::bugsink_issues::BugsinkReader;
+use brined_almanac::workflows::host_state::HostReports;
 use brined_almanac::workflows::security_alerts::AlertsClient;
 use serde_json::{Map, Value};
 use tempfile::TempDir;
@@ -47,6 +49,8 @@ impl Fixture {
         Providers::new()
             .provide::<Tiers>(Arc::new(Tiers::parse("", None).expect("empty tiers")))
             .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+            .provide::<Hosts>(Arc::new(Hosts::load().expect("hosts.toml")))
+            .provide::<HostReports>(Arc::new(HostReports(None)))
             .provide::<BugsinkClient>(Arc::new(BugsinkClient(None)))
             .provide::<BugsinkReader>(Arc::new(reader))
             .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))
