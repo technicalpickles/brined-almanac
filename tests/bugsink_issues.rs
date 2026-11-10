@@ -24,6 +24,8 @@ fn issue(count: u64, resolved: bool, muted: bool) -> Issue {
     serde_json::from_value(json!({
         "id": ID,
         "friendly_id": "BRENT-12",
+        "first_seen": INGESTED,
+        "last_seen": INGESTED,
         "digested_event_count": count,
         "calculated_value": "boom",
         "is_resolved": resolved,
@@ -71,6 +73,7 @@ fn unaddressed_event(service: &str, generation: u64) -> Unaddressed {
         "count": 14,
         "first_seen": "2026-11-04T10:00:00.250000Z",
         "last_seen": "2026-11-09T21:14:03.482113Z",
+        "ingest_dated": false,
         "surfaces": [{"name": "telegram", "count": 11}, {"name": "main", "count": 3}],
         "sessions": 2,
         "link": format!("http://bugsink.example/issues/issue/{ID}/event/last/"),
@@ -317,6 +320,93 @@ async fn the_filed_body_dates_the_failures_by_their_events_and_not_by_ingest() {
         "{body}"
     );
     assert!(!body.contains(INGESTED), "{body}");
+}
+
+/// Two issues over the threshold: `LOUD`, whose events are fine, and `SECOND`, whose events are
+/// whatever the test says.
+async fn two_loud(second_events: Value) -> Api {
+    const SECOND: &str = "11111111-aaaa-4aaa-8aaa-000000000006";
+    let api = Api::serve(vec![(
+        LIST,
+        json!({"next": null, "results": [
+            listed(SECOND, 5, false, false),
+            listed(LOUD, 5, false, false),
+        ]}),
+    )])
+    .await;
+    for id in [SECOND, LOUD] {
+        api.route(
+            &format!("/api/canonical/0/issues/{id}/tags/"),
+            tagged("approval-timeout"),
+        );
+        api.route(
+            &format!("/api/canonical/0/issue-history/?issue={id}"),
+            history(&["first_seen"]),
+        );
+    }
+    api.route(
+        &format!("/api/canonical/0/events/?issue={SECOND}"),
+        second_events,
+    );
+    api.route(
+        &format!("/api/canonical/0/events/?issue={LOUD}"),
+        events(&["2026-09-03T01:48:25.567000Z", "2026-10-30T15:54:40.045000Z"]),
+    );
+    api
+}
+
+/// Files both issues of `two_loud` and returns the posted bodies, the `SECOND` issue's and the
+/// `LOUD` one's.
+async fn filed_bodies(second_events: Value) -> (String, String) {
+    let (fx, api, github) = (
+        Fixture::new(),
+        two_loud(second_events).await,
+        Api::serve(vec![]).await,
+    );
+    github.route(
+        "/repos/technicalpickles/brineworks/issues?state=all&labels=almanac&per_page=100",
+        json!([]),
+    );
+    github.route("/repos/technicalpickles/brineworks/issues", json!({}));
+    let tracker = Arc::new(GithubIssues::new(github.origin.clone(), "gh-token"));
+    let rt = runtime(&fx, &api, tracker, Mode::Live);
+    rt.backfill(None).await.unwrap();
+    rt.settle().await.unwrap();
+
+    let bodies: Vec<String> = github
+        .posts()
+        .iter()
+        .map(|p| {
+            let posted: Value = serde_json::from_str(&p.body).unwrap();
+            posted["body"].as_str().unwrap().to_string()
+        })
+        .collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    let pick = |id: &str| bodies.iter().find(|b| b.contains(id)).unwrap().clone();
+    (pick("000000000006"), pick(LOUD))
+}
+
+const BY_INGEST: &str = "\nfirst seen: 2026-11-10T03:12:13.710632Z (Bugsink ingest time)\nlast seen: 2026-11-10T03:12:13.710632Z (Bugsink ingest time)\n";
+
+#[tokio::test]
+async fn an_issue_whose_events_were_evicted_is_filed_by_ingest_time_and_does_not_stop_the_scan() {
+    let (evicted, normal) = filed_bodies(events(&[])).await;
+    assert!(evicted.contains(BY_INGEST), "{evicted}");
+    assert!(
+        normal.contains(
+            "\nfirst seen: 2026-09-03T01:48:25.567000Z\nlast seen: 2026-10-30T15:54:40.045000Z\n"
+        ),
+        "{normal}"
+    );
+    assert!(!normal.contains("ingest time"), "{normal}");
+}
+
+#[tokio::test]
+async fn an_issue_with_an_unreadable_event_time_is_filed_by_ingest_time_and_does_not_stop_the_scan()
+{
+    let (garbled, normal) = filed_bodies(events(&["2026-10-01T00:00:00Z", "yesterday"])).await;
+    assert!(garbled.contains(BY_INGEST), "{garbled}");
+    assert!(!normal.contains("ingest time"), "{normal}");
 }
 
 #[tokio::test]

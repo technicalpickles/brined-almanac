@@ -44,6 +44,7 @@ observed! {
         pub count: u64,
         pub first_seen: Slug,
         pub last_seen: Slug,
+        pub ingest_dated: bool,
         pub surfaces: Vec<Surface>,
         pub sessions: u64,
         pub link: Slug,
@@ -63,6 +64,7 @@ impl Event for Unaddressed {
             count: p.field("/count")?,
             first_seen: p.field("/first_seen")?,
             last_seen: p.field("/last_seen")?,
+            ingest_dated: p.field("/ingest_dated")?,
             surfaces: p.field("/surfaces")?,
             sessions: p.field("/sessions")?,
             link: p.field("/link")?,
@@ -81,7 +83,7 @@ fn scanned(
     issue: &Issue,
     labels: &Labels,
     generation: u64,
-    (first_seen, last_seen): (String, String),
+    (first_seen, last_seen, ingest_dated): (String, String, bool),
     link: String,
 ) -> Scanned<Unaddressed> {
     let surfaces: Vec<_> = labels
@@ -98,6 +100,7 @@ fn scanned(
         "count": issue.count,
         "first_seen": first_seen,
         "last_seen": last_seen,
+        "ingest_dated": ingest_dated,
         "surfaces": surfaces,
         "sessions": labels.sessions,
         "link": link,
@@ -233,7 +236,16 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<Unaddressed>>, StepEr
         }
         let history = bugsink.history(&issue).await.map_err(failed)?;
         let events = bugsink.events(&issue).await.map_err(failed)?;
-        let when = seen(&events).map_err(failed)?;
+        let when = match seen(&events) {
+            Ok((first, last)) => (first, last, false),
+            Err(why) => {
+                eprintln!(
+                    "bugsink-issues: {} has no event times ({why}), dating it by Bugsink ingest time",
+                    issue.friendly_id
+                );
+                (issue.first_seen.clone(), issue.last_seen.clone(), true)
+            }
+        };
         let link = bugsink.issue_url(&issue);
         found.push(scanned(&issue, &labels, generation(&history), when, link));
     }
@@ -257,8 +269,13 @@ pub fn facts(event: &Unaddressed) -> Facts {
         .iter()
         .map(|s| format!("{} ({})", s.name, s.count))
         .collect();
+    let basis = if event.ingest_dated {
+        " (Bugsink ingest time)"
+    } else {
+        ""
+    };
     let mut header = format!(
-        "service: {}\ntool: {}\nclass: {}\nevents: {}\nfirst seen: {}\nlast seen: {}\nsurfaces: {}\nsessions: {}\n",
+        "service: {}\ntool: {}\nclass: {}\nevents: {}\nfirst seen: {}{basis}\nlast seen: {}{basis}\nsurfaces: {}\nsessions: {}\n",
         event.service,
         event.tool,
         event.class,

@@ -144,8 +144,8 @@ fn one_event_is_both_the_first_and_the_last() {
 }
 
 #[test]
-fn an_issue_with_no_events_or_an_unreadable_time_has_no_seen_times() {
-    assert!(seen(&[]).is_err());
+fn no_events_or_an_unreadable_time_leave_the_caller_to_choose_another_date() {
+    assert_eq!(seen(&[]), Err("no events".to_string()));
     let err = seen(&[event_at("2026-11-04T10:00:00Z"), event_at("yesterday")]).unwrap_err();
     assert!(err.contains("yesterday"), "{err}");
 }

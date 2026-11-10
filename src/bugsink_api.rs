@@ -12,6 +12,11 @@ use time::format_description::well_known::Rfc3339;
 pub struct Issue {
     pub id: String,
     pub friendly_id: String,
+    /// When Bugsink ingested the first event. Only a fallback for dating an issue with no usable
+    /// event times.
+    pub first_seen: String,
+    /// When Bugsink ingested the last event. Only a fallback, like `first_seen`.
+    pub last_seen: String,
     #[serde(rename = "digested_event_count")]
     pub count: u64,
     /// The first event's message, which is transcript text.

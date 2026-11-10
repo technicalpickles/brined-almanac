@@ -35,6 +35,7 @@ fn filed_body(service: &str, tool: &str, class: &str, reason: &str) -> String {
         "count": 9,
         "first_seen": "2026-11-04T10:00:00Z",
         "last_seen": "2026-11-04T10:00:02Z",
+        "ingest_dated": false,
         "surfaces": [{"name": "main", "count": 9}],
         "sessions": 2,
         "link": "http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/",
