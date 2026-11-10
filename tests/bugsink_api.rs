@@ -2,7 +2,7 @@ mod support;
 
 use brined_almanac::bugsink::Dsn;
 use brined_almanac::bugsink_api::{
-    Issue, Labels, Tag, TurningPoint, generation, labels, last_unmuted,
+    Event, Issue, Labels, Tag, TurningPoint, generation, labels, last_unmuted, seen,
 };
 use brined_almanac::cutover::Bugsink;
 use serde_json::{Value, json};
@@ -12,6 +12,7 @@ use time::macros::datetime;
 const ISSUES: &str = include_str!("fixtures/bugsink/issues.json");
 const TAGS: &str = include_str!("fixtures/bugsink/tags.json");
 const HISTORY: &str = include_str!("fixtures/bugsink/history.json");
+const EVENTS: &str = include_str!("fixtures/bugsink/events.json");
 
 fn page<T: serde::de::DeserializeOwned>(raw: &str) -> Vec<T> {
     let page: Value = serde_json::from_str(raw).expect("fixture json");
@@ -42,8 +43,6 @@ fn an_issue_reads_the_fields_the_consumer_needs() {
     assert_eq!(first.friendly_id, "BRENT-12");
     assert_eq!(first.count, 14);
     assert_eq!(first.reason, "MCP error -32001: Request timed out");
-    assert_eq!(first.first_seen, "2026-11-04T10:00:00.250000Z");
-    assert_eq!(first.last_seen, "2026-11-09T21:14:03.482113Z");
     assert!(!first.resolved && !first.muted);
     assert!(issues[1].resolved && issues[1].muted);
 }
@@ -120,6 +119,37 @@ fn the_last_unmute_is_the_latest_one_whoever_did_it() {
     assert!(last_unmuted(&[at("unmuted", "yesterday")]).is_err());
 }
 
+fn event_at(timestamp: &str) -> Event {
+    Event {
+        timestamp: timestamp.into(),
+    }
+}
+
+#[test]
+fn first_and_last_seen_are_the_earliest_and_latest_event_whatever_order_bugsink_lists_them() {
+    let events: Vec<Event> = page(EVENTS);
+    assert_eq!(
+        seen(&events),
+        Ok((
+            "2026-11-04T10:00:00.250000Z".to_string(),
+            "2026-11-09T21:14:03.482113Z".to_string()
+        ))
+    );
+}
+
+#[test]
+fn one_event_is_both_the_first_and_the_last() {
+    let at = "2026-10-30T15:54:40.045000Z";
+    assert_eq!(seen(&[event_at(at)]), Ok((at.to_string(), at.to_string())));
+}
+
+#[test]
+fn no_events_or_an_unreadable_time_leave_the_caller_to_choose_another_date() {
+    assert_eq!(seen(&[]), Err("no events".to_string()));
+    let err = seen(&[event_at("2026-11-04T10:00:00Z"), event_at("yesterday")]).unwrap_err();
+    assert!(err.contains("yesterday"), "{err}");
+}
+
 fn client(origin: &str) -> Bugsink {
     let dsn: Dsn = format!("http://0123abcd@{}/7", origin.trim_start_matches("http://"))
         .parse()
@@ -186,6 +216,18 @@ async fn tags_and_history_are_read_by_the_issue_id() {
     assert_eq!(bugsink.tags(&issue).await.unwrap().len(), 7);
     assert_eq!(generation(&bugsink.history(&issue).await.unwrap()), 2);
     assert_eq!(api.targets().len(), 2);
+}
+
+#[tokio::test]
+async fn events_are_read_by_the_issue_id() {
+    let issue: Issue = page::<Issue>(ISSUES).remove(0);
+    let api = Api::serve(vec![(
+        "/api/canonical/0/events/?issue=6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01",
+        body(EVENTS),
+    )])
+    .await;
+    let events = client(&api.origin).events(&issue).await.unwrap();
+    assert_eq!(events.len(), 3);
 }
 
 #[tokio::test]
