@@ -28,9 +28,23 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 - The WordPress droplet on the tailnet, with a fenced key for its report
 - service-down, reading those reports
 - A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08
-- credential-expiry as a host check on the Mac: the credential broker answers and `gh auth status` succeeds. Moved here from M6 after the 2026-11-08 outage
+- credential-expiry as a host check on the Mac: the credential broker answers and `gh auth status` succeeds. Moved here from M6 after the 2026-11-08 outage. [Designed 2026-11-10](superpowers/specs/2026-11-10-host-state-design.md), with the report and workflow shape service-down reuses
 
 **Done when** every overdue security alert on those repositories is on a task for its repository, a stopped unit, a site that stops returning 200, a scheduled job past its maximum age, or a broker that stops answering becomes a task within an hour, and running any scan again files nothing new.
+
+## Side track: errors go to an error tracker
+
+**Done 2026-11-10.** Deployed at `cddfe0a`. The first scan after the deploy found 26 Bugsink issues, left all 26 unchanged, and had no errors.
+
+This came out of M1 and isn't one of its bullets. tool-failures kept filing a duplicate issue per day, and fixing that inside the filer meant building fingerprints, first and last seen, and resolve and regress, with GitHub issue markers as the database. That is an error tracker, so [the program plan](superpowers/plans/2026-11-09-error-tracker.md) adopted Bugsink instead. Bugsink owns grouping and issue state, and almanac files and closes the loop.
+
+- Brent's failed tool calls ship to Bugsink as one event each ([#16](https://github.com/technicalpickles/brined-almanac/pull/16)), and a `cutover` verb resolved in Bugsink what GitHub had already closed ([#17](https://github.com/technicalpickles/brined-almanac/pull/17))
+- bugsink-issues, which files a GitHub issue for each unaddressed Bugsink issue ([#18](https://github.com/technicalpickles/brined-almanac/pull/18)) and dates it by event time, falling back to ingest time when retention has evicted the events ([#24](https://github.com/technicalpickles/brined-almanac/pull/24)). It replaced tool-failures
+- Closing an almanac issue resolves or mutes its Bugsink issue ([#19](https://github.com/technicalpickles/brined-almanac/pull/19), [#20](https://github.com/technicalpickles/brined-almanac/pull/20)). Muted counts as addressed
+- The almanac-work worker ranks reports by the last real tool error ([#22](https://github.com/technicalpickles/brined-almanac/pull/22)) and may comment with proof but not close ([#21](https://github.com/technicalpickles/brined-almanac/pull/21))
+- Deploy and cutover take the 1Password token from Automic Vault, so a deploy works with the Mac locked ([#23](https://github.com/technicalpickles/brined-almanac/pull/23), [#25](https://github.com/technicalpickles/brined-almanac/pull/25))
+
+Still open: the worker closes an issue as completed only after a few reviewed comment-only runs, and brineworks-server's own exceptions are in Bugsink but don't file issues yet.
 
 ## M2: An honest backlog
 
