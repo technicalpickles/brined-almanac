@@ -4,23 +4,6 @@ Questions about [vision.md](vision.md) and [workflows.md](workflows.md) that nee
 
 Open as of 2026-11-08, from the [work pattern review](reviews/2026-11-08-work-pattern-review.md). Two questions from that review, how to treat eval sessions and where repository attribution comes from, were answered the same evening from the transcripts and are recorded in [workflows.md](workflows.md) under session-friction and eval-queue.
 
-## Who owns the dead-man's switch list?
-
-A check that reports the age of a scheduled job's last successful run needs to know which jobs exist and how old is too old.
-
-What exists today, read from the repositories on 2026-11-08:
-
-- picklehome's watchdogs on picklelab are systemd oneshot services on timers (`OnUnitActiveSec=5min`, `OnBootSec`). They record nothing themselves beyond an alerted-marker file. systemd already records each unit's last start time and result, readable with `systemctl show`, so a host check can report every timer's last-success age with no change to the jobs.
-- The almanac stack on the Mac has compose healthchecks on Postgres, the daemon's `/healthz`, and the backup container (a dump file younger than 25 hours). The puller logs each pull to stderr and writes no last-success marker, so its health is only "the container is up".
-
-The options:
-
-1. **Each host ships its own check.** A `check-job-age` executable reads systemd's own records on picklelab and a small list on the Mac (compose health plus a puller marker file), and reports in the Nagios shape. Almanac only reads the host-state report.
-2. **Almanac keeps the list.** One file here names every job on every host and its max age. The host check is generic and almanac compares.
-3. **Both.** Hosts check their own jobs from systemd records. Almanac's list covers only its own puller and daemon, which it already knows about.
-
-Leaning: option 3, because systemd already holds the picklelab answer and the Mac's jobs are almanac's own. The one change the jobs need is a puller marker file. The decision is mine because it fixes where new jobs get registered.
-
 ## What signals say a repository is in use, not just in development?
 
 Dormant stays declared (see [workflows.md](workflows.md) "Repository tiers"). Computing it later needs usage signals per repository. What is observable from the Mac today, checked 2026-11-08:
