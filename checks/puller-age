@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+marker=${PULLER_MARKER:-${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}/transcripts/.last-pull}
+# Three missed passes at the 10 minute pull interval; the puller's compose healthcheck uses the same limit.
+max_age=${PULLER_MAX_AGE:-1800}
+now=${CHECK_NOW:-$(date +%s)}
+
+if [ ! -f "$marker" ]; then
+  echo "PULLER CRITICAL - no completed pull recorded"
+  exit 2
+fi
+
+stamp=$(tr -d '\n' <"$marker")
+if [[ ! $stamp =~ ^[0-9]+$ ]]; then
+  echo "PULLER UNKNOWN - marker is not a timestamp"
+  exit 3
+fi
+
+age=$((now - 10#$stamp))
+[ "$age" -ge 0 ] || age=0
+
+if [ "$age" -ge "$max_age" ]; then
+  echo "PULLER CRITICAL - last pull ${age}s ago, limit ${max_age}s | age=${age}s;;${max_age}"
+  exit 2
+fi
+echo "PULLER OK - last pull ${age}s ago | age=${age}s;;${max_age}"
