@@ -47,11 +47,28 @@ Run on 2026-11-10 on the Mac, from an agent session.
   the compose healthcheck reads it. The dead-man's switch for the puller needs
   no new marker.
 
-Not measured, and the plan starts by measuring them:
+Measured by `launchd-spike` on 2026-11-10 at 16:07Z. A throwaway LaunchAgent
+ran each command once from the main checkout under a 20 second timeout, with
+`PATH` set to `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`.
 
-- Whether `gh` gets its token when launchd runs it, with no terminal and no
-  agent session.
-- Which `av` command probes the broker without raising an approval prompt.
+| Command under launchd | Exit | Time | Result |
+|---|---|---|---|
+| `gh auth status` | 124 | 20s | timed out, printing `automic vault: human approval required` |
+| `av list --json` | 124 | 20s | timed out with no output |
+| `av history --json --since 1m --no-pager` | 124 | 20s | timed out with no output |
+| `av doctor gh --json` | 1 | 1s | answered at once, and reported an unrelated Git transport issue |
+
+So `gh` does not get its token under launchd without a person approving it,
+and `gh-auth` as designed here would be critical on every run. None of the
+three candidates qualifies as a broker probe: two wait on approval, and
+`av doctor` checks installed hardening and exits nonzero for a reason that
+has nothing to do with whether the broker answers.
+
+This blocks `checks-and-collector` until the check is redesigned. See "Open
+risks".
+
+Still not measured:
+
 - Whether a scan right after the Mac wakes sees a stale report before launchd
   reruns the collector.
 
@@ -293,9 +310,12 @@ Then, in order, each a small pull request that ends in a check:
   the rule, for example requiring the report to be stale by more than the time
   the container itself has been running since wake. The plan decides after it
   has the number.
-- **launchd may not get a token.** If the broker refuses `gh` outside an
-  approved session, `gh-auth` under launchd would always be critical. The
-  spike answers this first. A fallback is a check that asks the broker a
-  question it answers without approval.
+- **launchd does not get a token.** Confirmed by the spike. The broker asks a
+  person to approve `gh` when launchd runs it, so the check can't run
+  unattended as written. Two ways out are open, and neither is measured:
+  approve the check script itself with the broker so it runs without a
+  prompt, the way `scripts/deploy` takes its token through `av inject`, or
+  change the check to ask whether the broker is alive without asking it for
+  a credential.
 - **The thresholds are defaults.** Ten minutes, 24 hours, and 30 minutes are
   chosen, not measured. They are constants in one place.
