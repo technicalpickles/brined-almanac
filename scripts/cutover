@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Resolves history in prod Bugsink at the cutover (docs/superpowers/plans/2026-11-09-cutover.md).
 # A dry run by default. `scripts/cutover --apply` resolves and comments.
-# The 1Password service-account token comes from Automic Vault (`av save BRINED_ALMANAC_OP_TOKEN`),
-# approved on the phone or the Mac, so this runs away from the terminal's own 1Password session.
 set -euo pipefail
 [[ -n ${BRINED_ALMANAC_OP_TOKEN:-} ]] || exec av inject +BRINED_ALMANAC_OP_TOKEN -- "$0" "$@"
 cd "$(dirname "$0")/.."

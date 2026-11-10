@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Build both images and start or update the prod stack. --db-only starts just
 # Postgres (the first deploy, before the secrets exist in 1Password).
-# The 1Password service-account token comes from Automic Vault (`av save BRINED_ALMANAC_OP_TOKEN`),
-# approved on the phone or the Mac, so this runs away from the terminal's own 1Password session.
 set -euo pipefail
 
 runbook=docs/runbooks/prod-on-the-mac.md
