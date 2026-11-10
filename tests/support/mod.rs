@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use almanac::prelude::*;
+use brined_almanac::bugsink::BugsinkClient;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::transcript::Transcripts;
 use brined_almanac::workflows::security_alerts::AlertsClient;
@@ -39,6 +40,7 @@ impl Fixture {
         Providers::new()
             .provide::<Tiers>(Arc::new(Tiers::parse("", None).expect("empty tiers")))
             .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+            .provide::<BugsinkClient>(Arc::new(BugsinkClient(None)))
             .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))
             .provide::<dyn Tracker>(tracker)
     }

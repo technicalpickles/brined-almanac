@@ -20,8 +20,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 almanac \
-    && mkdir -p /var/lib/brined-almanac/taskchampion \
-    && chown almanac /var/lib/brined-almanac/taskchampion
+    && mkdir -p /var/lib/brined-almanac/taskchampion /var/lib/brined-almanac/bugsink \
+    && chown almanac /var/lib/brined-almanac/taskchampion /var/lib/brined-almanac/bugsink
 
 COPY --from=build /src/target/release/brined-almanac /usr/local/bin/
 

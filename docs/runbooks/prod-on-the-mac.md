@@ -27,15 +27,16 @@ before you type a `docker compose` command yourself.
 1. In a mise-activated shell, `COMPOSE_PROJECT_NAME` is set to the dev project
    name. A bare `docker compose -f compose.prod.yaml ...` then targets the wrong
    project. Put `env -u COMPOSE_PROJECT_NAME` in front.
-2. `compose.prod.yaml` refuses to load unless six values are set:
+2. `compose.prod.yaml` refuses to load unless seven values are set:
    `BRINED_ALMANAC_GITHUB_TOKEN`, `BRINED_ALMANAC_GITHUB_ALERTS_TOKEN`,
    `BRINED_ALMANAC_PULLER_KEY`, `BRINED_ALMANAC_TIERS_SHA256`,
-   `BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID` and
-   `BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET`. For any subcommand other
-   than `up`, put all six in front with the value `unused`:
+   `BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID`,
+   `BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET` and
+   `BRINED_ALMANAC_BUGSINK_DSN`. For any subcommand other
+   than `up`, put all seven in front with the value `unused`:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml ps
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml ps
    ```
 
    Never do this with `up`: it creates containers that hold the unused
@@ -45,7 +46,7 @@ Every hand-typed `docker compose` command in this runbook carries that prefix.
 
 ## One-time setup
 
-Do this once, before the first deploy. The six steps in 1Password come first.
+Do this once, before the first deploy. The seven steps in 1Password come first.
 
 ### 1Password
 
@@ -86,6 +87,11 @@ Do this once, before the first deploy. The six steps in 1Password come first.
    a device, so the container shares the Mac's history. The two items hold the
    same values. A rotation touches both, and rotating the encryption secret
    re-initialises every replica.
+7. Create an item `bugsink` with a field `dsn`: the DSN of the
+   `brent-tool-failures` project in Bugsink, from the project's settings page.
+   The DSN's host is a tailnet name, so it stays in the vault and out of the
+   repo. Every scan sends the transcripts' new failed tool calls there as
+   events (see "Bugsink gets no events" below).
 
 `prod.secrets.env` in the repo holds the `op://` references to these items.
 The item and field names above must match it.
@@ -224,7 +230,7 @@ start, and a restore into a migrated database fails on existing tables.
    ```sh
    docker start brined-almanac-d34bd55b-db-1
    set -o pipefail
-   docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac | env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac
+   docker exec brined-almanac-d34bd55b-db-1 pg_dump -U almanac almanac | env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac
    ```
 
    `docker start` does nothing if the container is already up. The dump carries
@@ -238,7 +244,7 @@ start, and a restore into a migrated database fails on existing tables.
    ```sh
    for q in 'select count(*) from seen' 'select count(*) from _sqlx_migrations'; do
      docker exec brined-almanac-d34bd55b-db-1 psql -U almanac almanac -Atc "$q"
-     env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac -Atc "$q"
+     env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec -T db psql -U almanac almanac -Atc "$q"
    done
    ```
 
@@ -259,7 +265,7 @@ start, and a restore into a migrated database fails on existing tables.
    deploy returns, stop the daemon:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml stop almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml stop almanac
    ```
 
    Then check the issue counts in both repos' `almanac` label. A scan during
@@ -273,7 +279,7 @@ start, and a restore into a migrated database fails on existing tables.
 6. Start the daemon. Its first scan files what the preview showed:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml start almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml start almanac
    ```
 
    Then confirm with a live backfill:
@@ -371,7 +377,7 @@ mise run prod -- backfill
 
 The `--` hands the verb and its arguments to `brined-almanac` in the running
 `almanac` container. Argument pass-through is not yet confirmed. If a flag does
-not arrive, run the `exec` by hand with `env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec almanac brined-almanac <verb>`.
+not arrive, run the `exec` by hand with `env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec almanac brined-almanac <verb>`.
 
 To change `prod.env`, edit it and run `mise run deploy`.
 
@@ -403,20 +409,20 @@ database fails on existing tables, so recreate the database first. This uses
 1. Stop the almanac container:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml stop almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml stop almanac
    ```
 
 2. Drop and recreate the database. This keeps the volume:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec db dropdb -U almanac --force almanac
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec db createdb -U almanac almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec db dropdb -U almanac --force almanac
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec db createdb -U almanac almanac
    ```
 
 3. Restore the dump:
 
    ```sh
-   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac < "$STATE/backups/almanac-<date>.sql"
+   env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec -T db psql -v ON_ERROR_STOP=1 -U almanac almanac < "$STATE/backups/almanac-<date>.sql"
    ```
 
 4. Retag the older images and recreate the containers through `op run`, as in
@@ -451,6 +457,9 @@ and moves `prod` back.
   directory" works too.
 
   The next `mise run deploy` uses it.
+- **Bugsink DSN.** Create a new DSN on the `brent-tool-failures` project in
+  Bugsink, put it in the `bugsink` item's `dsn` field, and run
+  `mise run deploy`. Delete the old DSN in Bugsink after the next scan sends.
 - **Taskchampion `client_id` or `encryption_secret`.** The same two values live
   in the `taskchampion` item here and in picklehome's `TaskChampion Sync`
   item, and the Mac's `taskrc` reads the picklehome one. Change both items to
@@ -467,15 +476,15 @@ value reaches them only when `mise run deploy` recreates them.
 Start with the stack's state and the health endpoint:
 
 ```sh
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml ps
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml ps
 curl -f http://127.0.0.1:8788/healthz
 ```
 
 Read the logs. The almanac logs JSON lines.
 
 ```sh
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml logs -f almanac
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml logs -f puller
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml logs -f almanac
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml logs -f puller
 ```
 
 ### The puller is unhealthy
@@ -526,6 +535,28 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 - If `mise run deploy` fails on a `:?` message, you ran `up` by hand. Use
   `mise run deploy`.
 
+### Bugsink gets no events
+
+Each scan prints one `transcript-shipper:` line to the daemon's log:
+
+```sh
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml logs almanac | grep transcript-shipper
+```
+
+- `sent N of M event(s)` is a healthy scan. The first scan after a deploy
+  sends all history; later scans send the last hour again plus anything new,
+  and Bugsink stores a repeated event once.
+- `Bugsink unreachable` means the container cannot reach the DSN's host.
+  The host is a tailnet name, so check the Mac's Tailscale first.
+- `Bugsink answered 403` or `401` means the DSN is wrong or was deleted in
+  Bugsink. Rotate it as in "Rotation".
+- A failure stops that scan's send and keeps the cursor at the last event
+  Bugsink accepted, so the next scan picks up where it stopped. It never
+  stops the tool-failures filer.
+
+The cursor is a file in the `bugsink` volume. Removing the volume resends all
+history on the next scan, which costs traffic and nothing else.
+
 ### Files in the state directory
 
 The puller writes these under `$STATE/transcripts/`:
@@ -556,7 +587,7 @@ transcripts themselves.
 To take a dump by hand, before a deploy that adds a migration:
 
 ```sh
-env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused docker compose -f compose.prod.yaml exec -T db pg_dump -U almanac almanac > "$STATE/backups/almanac-$(date +%F).sql"
+env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused docker compose -f compose.prod.yaml exec -T db pg_dump -U almanac almanac > "$STATE/backups/almanac-$(date +%F).sql"
 ```
 
 The backups live on the same disk as the volume. They cover a lost volume or a

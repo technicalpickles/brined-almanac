@@ -9,6 +9,7 @@ use github::client::{Auth, GithubClient};
 use github::tracker::GithubIssues;
 use taskchampion::{ServerConfig, Uuid};
 
+use crate::bugsink::{Bugsink, BugsinkClient, Cursor, Dsn};
 use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
 use crate::tiers::Tiers;
@@ -318,13 +319,44 @@ pub fn alerts_client_from(lookup: impl Fn(&str) -> Option<String>) -> AlertsClie
     AlertsClient(token.map(|t| GithubClient::new(API, Auth::Token(t)).read_only()))
 }
 
+const DEFAULT_CURSOR: &str = "/var/lib/brined-almanac/bugsink/cursor";
+
+/// The shipper for `BUGSINK_DSN`, or none when it is unset. An empty value is unset, as in
+/// `choose`. The `Err` never carries the DSN, which holds a key.
+pub fn bugsink_client_from(
+    lookup: impl Fn(&str) -> Option<String>,
+    live: bool,
+) -> Result<BugsinkClient, String> {
+    let lookup = |key: &str| lookup(key).filter(|value| !value.is_empty());
+    let Some(raw) = lookup("BUGSINK_DSN") else {
+        return Ok(BugsinkClient(None));
+    };
+    let dsn = raw.parse::<Dsn>()?;
+    let cursor = lookup("BUGSINK_CURSOR").unwrap_or_else(|| DEFAULT_CURSOR.to_string());
+    Ok(BugsinkClient(Some(Bugsink::new(
+        dsn,
+        Cursor(PathBuf::from(cursor)),
+        live,
+    ))))
+}
+
+/// Almanac's own rule for a live run, which it keeps to itself: `ALMANAC_MODE=live`, and no
+/// `--dry-run`. The shipper sends outside almanac's effects, so it has to ask the same question.
+fn live(mode: Option<String>, mut args: impl Iterator<Item = String>) -> bool {
+    mode.as_deref() == Some("live") && !args.any(|arg| arg == "--dry-run")
+}
+
 pub fn all(_config: &Config) -> Providers {
     let dir = env::var("BRENT_TRANSCRIPTS").unwrap_or_else(|_| "transcripts".to_string());
     let choice = choose(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     let tiers = tiers_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
+    let live = live(env::var("ALMANAC_MODE").ok(), env::args());
+    let bugsink =
+        bugsink_client_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
         .provide::<Tiers>(Arc::new(tiers))
         .provide::<AlertsClient>(Arc::new(alerts_client_from(|key| env::var(key).ok())))
+        .provide::<BugsinkClient>(Arc::new(bugsink))
         .provide::<Transcripts>(Arc::new(Transcripts(PathBuf::from(dir))))
         .provide::<dyn Tracker>(tracker_from(choice))
 }
@@ -352,6 +384,22 @@ mod tests {
         };
         let config = sync_check_config(lookup, PathBuf::from("/tmp/check")).unwrap();
         assert_eq!(config.replica_dir, PathBuf::from("/tmp/check"));
+    }
+
+    #[test]
+    fn only_almanac_mode_live_without_dry_run_is_live() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let live_mode = || Some("live".to_string());
+        assert!(live(live_mode(), args(&["bin", "run"]).into_iter()));
+        assert!(!live(
+            live_mode(),
+            args(&["bin", "backfill", "--dry-run"]).into_iter()
+        ));
+        assert!(!live(None, args(&["bin", "run"]).into_iter()));
+        assert!(!live(
+            Some("dry".to_string()),
+            args(&["bin", "run"]).into_iter()
+        ));
     }
 
     #[test]
