@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::bugsink::{Dsn, TIMEOUT};
-use crate::bugsink_api::{Issue, Tag, TurningPoint};
+use crate::bugsink_api::{Event, Issue, Tag, TurningPoint};
 
 /// Bugsink joins a custom fingerprint's parts with this to make its grouping key.
 const JOIN: &str = " ⋄ ";
@@ -490,6 +490,15 @@ impl Bugsink {
         self.all(
             format!("{}/issues/{}/tags/", self.api, issue.id),
             &format!("Bugsink tags of {}", issue.friendly_id),
+        )
+        .await
+    }
+
+    /// The issue's events, newest-digested first.
+    pub async fn events(&self, issue: &Issue) -> Result<Vec<Event>, String> {
+        self.all(
+            format!("{}/events/?issue={}", self.api, issue.id),
+            &format!("Bugsink events of {}", issue.friendly_id),
         )
         .await
     }

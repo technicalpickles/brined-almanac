@@ -12,8 +12,6 @@ use time::format_description::well_known::Rfc3339;
 pub struct Issue {
     pub id: String,
     pub friendly_id: String,
-    pub first_seen: String,
-    pub last_seen: String,
     #[serde(rename = "digested_event_count")]
     pub count: u64,
     /// The first event's message, which is transcript text.
@@ -39,6 +37,28 @@ pub struct Tag {
 pub struct TurningPoint {
     pub kind: String,
     pub timestamp: String,
+}
+
+/// One event as `GET /events/` lists it. `timestamp` is when the failure happened, as the shipper
+/// sent it. The issue's own `first_seen` and `last_seen` are when Bugsink ingested events, so
+/// replayed history all lands on the day it was replayed.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct Event {
+    pub timestamp: String,
+}
+
+/// The earliest and latest event times, as Bugsink wrote them. Bugsink lists events newest-digested
+/// first, which is not time order for replayed history.
+pub fn seen(events: &[Event]) -> Result<(String, String), String> {
+    let mut at = Vec::with_capacity(events.len());
+    for e in events {
+        let parsed = OffsetDateTime::parse(&e.timestamp, &Rfc3339)
+            .map_err(|err| format!("event has the time {:?}: {err}", e.timestamp))?;
+        at.push((parsed, &e.timestamp));
+    }
+    let first = at.iter().min_by_key(|(t, _)| *t).ok_or("no events")?;
+    let last = at.iter().max_by_key(|(t, _)| *t).ok_or("no events")?;
+    Ok((first.1.clone(), last.1.clone()))
 }
 
 /// When the issue was last unmuted, by a person or by its mute's volume condition.

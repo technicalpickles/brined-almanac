@@ -13,6 +13,7 @@ use brined_almanac::workflows;
 use brined_almanac::workflows::bugsink_issues::{
     BugsinkIssues, BugsinkReader, Reading, Unaddressed, facts, policy, unaddressed,
 };
+use github::tracker::GithubIssues;
 use serde_json::{Value, json};
 use support::Fixture;
 use support::api::Api;
@@ -23,8 +24,6 @@ fn issue(count: u64, resolved: bool, muted: bool) -> Issue {
     serde_json::from_value(json!({
         "id": ID,
         "friendly_id": "BRENT-12",
-        "first_seen": "2026-11-04T10:00:00Z",
-        "last_seen": "2026-11-09T21:00:00Z",
         "digested_event_count": count,
         "calculated_value": "boom",
         "is_resolved": resolved,
@@ -169,8 +168,8 @@ fn listed(id: &str, count: u64, resolved: bool, muted: bool) -> Value {
     json!({
         "id": id,
         "friendly_id": format!("BRENT-{}", &id[id.len() - 2..]),
-        "first_seen": "2026-11-04T10:00:00Z",
-        "last_seen": "2026-11-09T21:00:00Z",
+        "first_seen": INGESTED,
+        "last_seen": INGESTED,
         "digested_event_count": count,
         "calculated_value": "MCP error -32001: Request timed out",
         "is_resolved": resolved,
@@ -192,6 +191,16 @@ fn history(kinds: &[&str]) -> Value {
     let rows: Vec<Value> = kinds
         .iter()
         .map(|k| json!({"kind": k, "timestamp": "2026-11-09T20:00:00Z"}))
+        .collect();
+    json!({"next": null, "results": rows})
+}
+
+const INGESTED: &str = "2026-11-10T03:12:13.710632Z";
+
+fn events(times: &[&str]) -> Value {
+    let rows: Vec<Value> = times
+        .iter()
+        .map(|t| json!({"timestamp": t, "ingested_at": INGESTED}))
         .collect();
     json!({"next": null, "results": rows})
 }
@@ -230,6 +239,14 @@ async fn bugsink() -> Api {
     api.route(
         &format!("/api/canonical/0/issue-history/?issue={LOUD}"),
         history(&["first_seen"]),
+    );
+    api.route(
+        &format!("/api/canonical/0/events/?issue={LOUD}"),
+        events(&[
+            "2026-10-30T15:54:40.045000Z",
+            "2026-09-03T01:48:25.567000Z",
+            "2026-10-19T14:04:13.275000Z",
+        ]),
     );
     api
 }
@@ -274,6 +291,32 @@ async fn a_live_scan_files_only_the_issue_that_is_loud_unresolved_and_unmuted() 
         filed[0].2,
         "Brent: brineworks/triage_apply approval-timeout (5 events)"
     );
+}
+
+#[tokio::test]
+async fn the_filed_body_dates_the_failures_by_their_events_and_not_by_ingest() {
+    let (fx, api, github) = (Fixture::new(), bugsink().await, Api::serve(vec![]).await);
+    github.route(
+        "/repos/technicalpickles/brineworks/issues?state=all&labels=almanac&per_page=100",
+        json!([]),
+    );
+    github.route("/repos/technicalpickles/brineworks/issues", json!({}));
+    let tracker = Arc::new(GithubIssues::new(github.origin.clone(), "gh-token"));
+    let rt = runtime(&fx, &api, tracker, Mode::Live);
+    rt.backfill(None).await.unwrap();
+    rt.settle().await.unwrap();
+
+    let posts = github.posts();
+    assert_eq!(posts.len(), 1);
+    let posted: Value = serde_json::from_str(&posts[0].body).unwrap();
+    let body = posted["body"].as_str().unwrap();
+    assert!(
+        body.contains(
+            "\nevents: 5\nfirst seen: 2026-09-03T01:48:25.567000Z\nlast seen: 2026-10-30T15:54:40.045000Z\n"
+        ),
+        "{body}"
+    );
+    assert!(!body.contains(INGESTED), "{body}");
 }
 
 #[tokio::test]

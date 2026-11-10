@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::bugsink::ship_from;
-use crate::bugsink_api::{Issue, Labels, generation, labels, last_unmuted};
+use crate::bugsink_api::{Issue, Labels, generation, labels, last_unmuted, seen};
 use crate::classes::{class_named, owner_of};
 use crate::cutover::{self, REPOS};
 use crate::resolve_on_close::{
@@ -77,7 +77,13 @@ pub fn unaddressed(issue: &Issue, class: &str) -> bool {
     !issue.resolved && !issue.muted && issue.count >= class_named(class).threshold
 }
 
-fn scanned(issue: &Issue, labels: &Labels, generation: u64, link: String) -> Scanned<Unaddressed> {
+fn scanned(
+    issue: &Issue,
+    labels: &Labels,
+    generation: u64,
+    (first_seen, last_seen): (String, String),
+    link: String,
+) -> Scanned<Unaddressed> {
     let surfaces: Vec<_> = labels
         .surfaces
         .iter()
@@ -90,8 +96,8 @@ fn scanned(issue: &Issue, labels: &Labels, generation: u64, link: String) -> Sca
         "tool": labels.tool,
         "class": labels.class,
         "count": issue.count,
-        "first_seen": issue.first_seen,
-        "last_seen": issue.last_seen,
+        "first_seen": first_seen,
+        "last_seen": last_seen,
         "surfaces": surfaces,
         "sessions": labels.sessions,
         "link": link,
@@ -226,8 +232,10 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<Unaddressed>>, StepEr
             continue;
         }
         let history = bugsink.history(&issue).await.map_err(failed)?;
+        let events = bugsink.events(&issue).await.map_err(failed)?;
+        let when = seen(&events).map_err(failed)?;
         let link = bugsink.issue_url(&issue);
-        found.push(scanned(&issue, &labels, generation(&history), link));
+        found.push(scanned(&issue, &labels, generation(&history), when, link));
     }
     Ok(found)
 }
