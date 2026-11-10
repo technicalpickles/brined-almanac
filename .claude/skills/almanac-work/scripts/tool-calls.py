@@ -5,6 +5,7 @@
     python3 tool-calls.py triage_apply --since 2026-11-07
     python3 tool-calls.py triage_apply --errors
     python3 tool-calls.py --list
+    python3 tool-calls.py --list --since 2026-11-08
 
 Reads $BRINED_ALMANAC_STATE/transcripts, default ~/.local/share/brined-almanac/transcripts.
 Prints one row per call: time, surface, input, outcome, seconds, and for an error the line that says why.
@@ -130,18 +131,39 @@ def calls(tool, since):
     return rows
 
 
-def list_tools():
-    seen = collections.Counter()
+def list_tools(since):
+    stats = collections.defaultdict(lambda: [0, 0, ""])
     for path in glob.glob(os.path.join(TRANSCRIPTS, "*.jsonl")):
         with open(path, errors="replace") as fh:
             for line in fh:
-                if "nested-tool" not in line:
+                if "nested-tool" not in line and '"toolResult"' not in line:
                     continue
-                m = re.search(r'"toolName":"([^"]+)"', line)
-                if m:
-                    seen[m.group(1)] += 1
-    for name, n in seen.most_common():
-        print(f"{n:6d}  {name}")
+                try:
+                    o = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = o.get("message", {})
+                ts = o.get("timestamp", "")
+                if ts[:10] < since:
+                    continue
+                if msg.get("customType") == "openclaw.nested-tool.v1":
+                    d = msg.get("details", {})
+                    name, failed = d.get("toolName"), d.get("isError")
+                elif msg.get("role") == "toolResult":
+                    name, failed = msg.get("toolName"), msg.get("isError")
+                else:
+                    continue
+                # the tool_call dispatcher repeats each nested tool's error, so counting it doubles them
+                if not name or name == "tool_call":
+                    continue
+                st = stats[name]
+                st[0] += 1
+                if failed:
+                    st[1] += 1
+                    st[2] = max(st[2], ts)
+    print(f"{'calls':>6} {'errors':>6}  {'last error':<16}  tool")
+    for name, (n, errs, last) in sorted(stats.items(), key=lambda kv: (kv[1][2], kv[1][0]), reverse=True):
+        print(f"{n:6d} {errs:6d}  {last[:16] or '-':<16}  {name}")
 
 
 def main():
@@ -149,12 +171,12 @@ def main():
     ap.add_argument("tool", nargs="?", help="tool name, with or without the brineworks__ prefix")
     ap.add_argument("--since", default="0000", help="YYYY-MM-DD, keep calls on or after this day")
     ap.add_argument("--errors", action="store_true", help="rows for failed calls only")
-    ap.add_argument("--list", action="store_true", help="list tool names seen and exit")
+    ap.add_argument("--list", action="store_true", help="every tool seen, with calls, errors and last error time, newest error first, and exit")
     args = ap.parse_args()
     if not os.path.isdir(TRANSCRIPTS):
         sys.exit(f"no transcripts at {TRANSCRIPTS}; set BRINED_ALMANAC_STATE or run the prod puller")
     if args.list:
-        list_tools()
+        list_tools(args.since)
         return
     if not args.tool:
         ap.error("tool name required (or --list)")
