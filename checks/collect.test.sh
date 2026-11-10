@@ -216,6 +216,13 @@ mkcheck a 0 'echo "A OK - fine"'
 run_collect
 check "bad check name: refused" "yes" "$([ "$rc" -ne 0 ] && [ ! -e "$OUT" ] && echo yes || echo no)"
 
+reset
+conf "a stale"
+mkcheck a 0 'echo "A OK - fine"'
+mkcheck stale 0 'echo "STALE OK - fine"'
+run_collect
+check "check named stale: refused" "yes" "$([ "$rc" -ne 0 ] && [ ! -e "$OUT" ] && echo yes || echo no)"
+
 if [ "$fails" -ne 0 ]; then
   echo "$fails case(s) failed" >&2
   exit 1

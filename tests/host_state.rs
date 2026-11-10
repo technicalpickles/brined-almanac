@@ -51,6 +51,16 @@ fn rejects_a_check_name_outside_the_alphabet() {
 }
 
 #[test]
+fn rejects_a_check_named_stale() {
+    let err = Report::parse(&report_with(&format!(
+        "[{}]",
+        check_json("stale", "0", "x")
+    )))
+    .unwrap_err();
+    assert!(err.contains("stale"), "{err}");
+}
+
+#[test]
 fn rejects_a_duplicate_check_name() {
     let two = format!(
         "[{},{}]",

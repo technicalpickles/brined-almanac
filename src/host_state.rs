@@ -104,6 +104,9 @@ impl Report {
             if !name_is_valid(&name) {
                 return Err(format!("check {name:?} is outside [a-z0-9-]"));
             }
+            if name == "stale" {
+                return Err("check \"stale\" is reserved for the stale finding's key".to_string());
+            }
             if !seen.insert(name.clone()) {
                 return Err(format!("check {name} appears twice"));
             }
