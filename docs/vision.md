@@ -83,7 +83,7 @@ A small step that code can do, such as a clean merge of main, needs no model and
 
 A finding goes to one of two places. How the finding gets closed decides which.
 
-**An issue, when a pull request in a private repository closes it.** The issue goes to the repository whose code changes, and merging the pull request closes the issue. pickleclaw owns OpenClaw and the apps built on it, and brineworks owns brineworks. The issue gets the `almanac` label, and the issue is the alert. tool-failures works this way today.
+**An issue, when a pull request in a private repository closes it.** The issue goes to the repository whose code changes, and merging the pull request closes the issue. pickleclaw owns OpenClaw and the apps built on it, and brineworks owns brineworks. The issue gets the `almanac` label, and the issue is the alert. bugsink-issues works this way today.
 
 **Taskwarrior, for everything else.** That covers a finding about a public repository such as picklehome or dotfiles, an ops action with no pull request, and a decision only I can make, like closing a task or archiving a repository. A public repository never holds a finding, because the finding may carry transcript or task text. Findings that cut across projects, like a session-friction review or a lesson that applies to many repositories, are tasks too. Under this rule picklehome needs no owner of its own.
 

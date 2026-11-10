@@ -18,8 +18,8 @@ trap 'rm -rf "$empty" "$errs"' EXIT
 docker build -f Containerfile -t "$image" .
 
 docker run --rm "$image" synth --format json |
-  jq -e '.[0].workflow == "tool-failures" and .[0].scans == true' >/dev/null ||
-  fail "synth manifest lacks the tool-failures workflow with scans"
+  jq -e '.[0].workflow == "bugsink-issues" and .[0].scans == true' >/dev/null ||
+  fail "synth manifest lacks the bugsink-issues workflow with scans"
 docker run --rm "$image" synth --format json |
   jq -e '.[1].workflow == "security-alerts"' >/dev/null ||
   fail "synth manifest lacks the security-alerts workflow"

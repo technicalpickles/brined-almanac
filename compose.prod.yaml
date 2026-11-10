@@ -37,6 +37,8 @@ services:
       TASKCHAMPION_ENCRYPTION_SECRET: "${BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET:?run `mise run deploy`, which resolves it through op run}"
       # The brent-tool-failures project's DSN. Its host is a tailnet name, so it lives in 1Password only.
       BUGSINK_DSN: "${BRINED_ALMANAC_BUGSINK_DSN:?run `mise run deploy`, which resolves it through op run}"
+      # Reads the project's issues, tags and history back to file them.
+      BUGSINK_API_TOKEN: "${BRINED_ALMANAC_BUGSINK_API_TOKEN:?run `mise run deploy`, which resolves it through op run}"
     ports:
       - "127.0.0.1:8788:8788"
     volumes:

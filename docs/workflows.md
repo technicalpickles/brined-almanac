@@ -54,13 +54,13 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 
 ## Catalog
 
-### tool-failures
+### bugsink-issues
 
 - **Status:** shipped.
-- **Watches:** OpenClaw transcripts pulled from picklelab.
-- **Reports:** one issue per cluster of failed tool calls, grouped by service, tool, error class, and day, once a cluster crosses its threshold. Brineworks failures go to brineworks, and everything else goes to pickleclaw.
+- **Watches:** OpenClaw transcripts pulled from picklelab, which it ships to Bugsink as one event per failed tool call, and then Bugsink's open issues for that project.
+- **Reports:** one issue per Bugsink issue that is unresolved, not muted, and has as many events as its error class needs. Bugsink groups by service, tool, and error class. An issue that regresses after being resolved files again. Brineworks failures go to brineworks, and everything else goes to pickleclaw.
 - **Model:** none.
-- **Design:** [the tool error scan design](superpowers/specs/2026-11-06-tool-error-scan-design.md).
+- **Design:** [the tracker consumer plan](superpowers/plans/2026-11-10-tracker-consumer.md). It replaced the per-day `tool-failures` filer of [the tool error scan design](superpowers/specs/2026-11-06-tool-error-scan-design.md).
 
 ### task-reconciler
 
@@ -177,7 +177,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 ### session-friction
 
 - **Status:** next.
-- **Watches:** my Claude Code transcripts under `~/.claude/projects/`, read through [cq](https://github.com/technicalpickles/pickled-claude-plugins/tree/main/plugins/cq). tool-failures does this for Brent's transcripts. This workflow does it for mine.
+- **Watches:** my Claude Code transcripts under `~/.claude/projects/`, read through [cq](https://github.com/technicalpickles/pickled-claude-plugins/tree/main/plugins/cq). bugsink-issues does this for Brent's transcripts. This workflow does it for mine.
 - **cq is the tool**, decided 2026-11-08, and it has gaps to close before a daemon can lean on it. On 2026-11-08 two processes ran `cq sql` at once, the second got a conflicting lock on the DuckDB index, both retried in loops, and the retries plus an index sync hung the Mac. What this workflow needs from cq, sorted as integration point, feature gap, or ops: a way to read while another process indexes, or a single long-lived reader other callers query (feature); `--no-reindex` as the default for a secondary reader, with lock waits instead of retry loops (feature); a schedule for the index sync so the daemon never triggers one (ops); and a way to tell eval-harness sessions from mine. They run from `/private/tmp/claude-501/`, so the project path already tells them apart, and they were 0.6% of assistant messages in 2026-09 to 2026-11 (integration point).
 - **Attribution:** since about 2026-10-16 nearly every session starts from `~/github.com` and works in worktrees, so the transcript's project field says `github.com` for 28k of 113k messages since 2026-09-01, and for 67% of them since 2026-10-16. Decided 2026-11-08: attribute by `cwd` first, tool-call paths second, git only as a fallback. Every transcript message carries a `cwd`, and 68% of messages have one inside a repository or its worktree, so they attribute directly. For the rest, the file paths in tool calls named a repository in 34 of the last 40 sessions. The same answer serves the budget rule and continue-work.
 - **Schedule:** weekly, at the end of the week, the same window as the review I did by hand for picklelab on 2026-10-18. Running it when a burst ends waits until the weekly version shows the counts are useful.
