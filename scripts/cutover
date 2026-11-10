@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Resolves history in prod Bugsink at the cutover (docs/superpowers/plans/2026-11-09-cutover.md).
+# A dry run by default. `scripts/cutover --apply` resolves and comments.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+STATE=${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}
+cargo build -q
+OP_SERVICE_ACCOUNT_TOKEN="$(cat "$STATE/op-token")" op run --env-file cutover.secrets.env -- target/debug/brined-almanac cutover "$@"

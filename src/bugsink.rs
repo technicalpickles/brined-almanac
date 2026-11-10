@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::macros::datetime;
 
 use crate::transcript::{At, ToolError};
 use crate::workflows::tool_failures::classify;
@@ -21,10 +22,18 @@ use crate::workflows::tool_failures::classify;
 /// still ships. Resending is harmless: the event id makes Bugsink digest it once.
 pub const OVERLAP: time::Duration = time::Duration::HOUR;
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// When history went quiet in Bugsink. Every issue first seen before it was replayed from old
+/// transcripts by the first full ship, and `cutover` resolved those GitHub had already closed. The
+/// tracker consumer never files an issue first seen before it. Issue first-seen is ingest time,
+/// so this is just after the last new issue of that ship, read from the prod dry run.
+pub const CUTOVER: OffsetDateTime = datetime!(2026-11-10 03:13:00 UTC);
+
+pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A project's DSN, `scheme://key@host[:port]/project`, split into what a send needs.
 pub struct Dsn {
+    base: String,
+    project: String,
     store: String,
     key: String,
 }
@@ -38,6 +47,15 @@ impl fmt::Debug for Dsn {
 impl Dsn {
     pub fn store_url(&self) -> &str {
         &self.store
+    }
+
+    /// `scheme://host[:port]`, where Bugsink's API lives. It names the tailnet host: never print it.
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
+
+    pub fn project(&self) -> &str {
+        &self.project
     }
 }
 
@@ -58,8 +76,11 @@ impl FromStr for Dsn {
         if !fine {
             return Err(malformed());
         }
+        let base = format!("{scheme}://{host}");
         Ok(Dsn {
-            store: format!("{scheme}://{host}/api/{project}/store/"),
+            store: format!("{base}/api/{project}/store/"),
+            base,
+            project: project.to_string(),
             key: key.to_string(),
         })
     }
