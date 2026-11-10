@@ -118,6 +118,23 @@ fn empty_details_falls_back_to_content() {
 }
 
 #[test]
+fn details_that_only_name_the_tool_fall_back_to_content() {
+    let failure = Failure::builtin("brineworks__tasks_update")
+        .details(Details::StatusOnly)
+        .error("sorry, too many clients already");
+    let result = read_one(failure);
+    assert_eq!(result.errors.len(), 1);
+    let e = &result.errors[0];
+    assert_eq!(
+        (e.service.to_string(), e.tool.to_string()),
+        pair("brineworks", "tasks_update")
+    );
+    assert!(e.text.narrow(|s| s.contains("too many clients already")));
+    let excerpt = serde_json::to_value(e.text.excerpt()).unwrap();
+    assert_eq!(excerpt, "sorry, too many clients already");
+}
+
+#[test]
 fn an_apostrophe_in_the_repr_still_reads() {
     let failure = Failure::mcp("brineworks", "triage_apply").error("it's broken");
     let result = read_one(failure);

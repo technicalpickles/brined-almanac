@@ -12,7 +12,7 @@ use brined_almanac::workflows::tool_failures::{
     policy,
 };
 use serde_json::json;
-use support::{Failure, Fixture};
+use support::{Details, Failure, Fixture};
 
 fn slug(raw: &str) -> Slug {
     raw.parse().expect("slug")
@@ -100,6 +100,21 @@ fn twelve_approval_timeouts_on_one_day_are_one_cluster_of_twelve() {
     assert_eq!(c.count, 12);
     assert_eq!(c.first.as_str(), "2026-11-04T10:00:00Z");
     assert_eq!(c.last.as_str(), "2026-11-04T10:00:11Z");
+}
+
+#[test]
+fn a_message_that_is_only_in_content_still_picks_the_class() {
+    let errors = errors_of(vec![
+        Failure::builtin("brineworks__tasks_update")
+            .details(Details::StatusOnly)
+            .error("sorry, too many clients already")
+            .times(2),
+    ]);
+    let clusters = cluster(errors);
+    assert_eq!(clusters.len(), 1);
+    let (key, c) = &clusters[0];
+    assert_eq!(key.class, "pg-too-many-clients");
+    assert_eq!(c.count, 2);
 }
 
 #[test]

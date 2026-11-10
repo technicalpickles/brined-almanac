@@ -114,6 +114,8 @@ pub enum Details {
     NamedOnly,
     Empty,
     Object,
+    /// Names the tool and says it failed, with the message only in `content`.
+    StatusOnly,
 }
 
 pub struct Failure {
@@ -263,6 +265,14 @@ impl Failure {
                 ("tool", self.tool_value()),
                 ("error", Value::from(self.error.as_str())),
             ]),
+            Details::StatusOnly => {
+                let (server, tool) = self.tool.split_once("__").unwrap_or(("", &self.tool));
+                obj([
+                    ("mcpServer", Value::from(server)),
+                    ("mcpTool", Value::from(tool)),
+                    ("status", Value::from("error")),
+                ])
+            }
             Details::Mcp | Details::NamedOnly => Value::from(self.details_repr()),
         }
     }

@@ -202,16 +202,28 @@ fn remember_calls(message: &Value, calls: &mut HashMap<String, String>) {
     }
 }
 
-/// `details` as text, or the text blocks of `content` when `details` is empty.
+/// What a failed call said. `details` holds it as a string, or as an object with an `error` or
+/// a `result`. Any other `details` only names the tool and its status, and the message is in
+/// the text blocks of `content`.
 fn error_text(message: &Value) -> String {
-    let details = match &message["details"] {
+    let details = &message["details"];
+    let says_why = match details {
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Object(fields) => fields.contains_key("error") || fields.contains_key("result"),
+        _ => false,
+    };
+    let content = content_text(message);
+    if !says_why && !content.trim().is_empty() {
+        return content;
+    }
+    match details {
         Value::String(s) => s.clone(),
         Value::Null => String::new(),
         other => other.to_string(),
-    };
-    if details.trim().len() > 2 {
-        return details;
     }
+}
+
+fn content_text(message: &Value) -> String {
     message["content"]
         .as_array()
         .map(|blocks| {
