@@ -39,7 +39,7 @@ Decide: fixed, by design or wrong repo, real and open, or cannot tell. A model's
 
 ## End state
 
-**Fixed.** Close every issue in the case. The issue you were given, or the newest one, carries the proof, and the siblings carry one line pointing at it. The proof has these parts, in this order:
+**Fixed.** Close every issue in the case (unattended, post the proof as a comment and report the close commands instead). The issue you were given, or the newest one, carries the proof, and the siblings carry one line pointing at it. The proof has these parts, in this order:
 
 1. The cause, one paragraph, naming the file.
 2. The fix: pull request, merge date, and the evidence it is deployed.
@@ -67,15 +67,15 @@ In every shape, follow-ups become taskwarrior tasks under the target repo's proj
 One case per run, from the brined-almanac checkout, in a likely-free hour ([docs/vision.md](../../../docs/vision.md) "The budget rule"):
 
 ```bash
-claude -p "/almanac-work brineworks" --permission-mode acceptEdits --max-turns 60
+claude -p "/almanac-work brineworks" --permission-mode acceptEdits --settings .claude/settings.json --max-turns 60
 ```
 
-Nobody can approve anything under `--print`. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
+Nobody can approve anything under `--print`. `--settings` loads this repository's allow rules, which Claude Code otherwise ignores in a workspace Josh has not trusted. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
 
 - **Other checkouts.** `git -C <path>` and `cd <path> && git ...` are denied, fetches included. Read the target repo's `main` with `gh api repos/technicalpickles/<repo>/contents/<path>` and `gh search code`.
 - **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
 - **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
-- **Posting.** `gh issue comment` and `gh issue close` have no allow rule. When one is denied, put the exact command in the report. `task add` and `gh issue create` are allowed.
+- **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule: put the exact command in the report, and Josh closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
 - **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
 
 Checked by hand on 2026-11-09: a `--dry-run` against pickleclaw loaded the skill, ran 44 turns in 5 minutes for about $1.60, and posted nothing. Still unverified: a run started by a schedule, and a run without `--dry-run`. Start with `--dry-run` and read what it would have posted.

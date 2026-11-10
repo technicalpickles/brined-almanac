@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh issue comment * -R technicalpickles/pickleclaw --body-file *)",
+      "Bash(gh issue comment * -R technicalpickles/brineworks --body-file *)"
+    ]
+  }
+}
