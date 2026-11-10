@@ -11,8 +11,11 @@ if [ ! -f "$marker" ]; then
   exit 2
 fi
 
-stamp=$(tr -d '\n' <"$marker")
-if [[ ! $stamp =~ ^[0-9]+$ ]]; then
+if ! stamp=$(cat "$marker" 2>/dev/null); then
+  echo "PULLER UNKNOWN - marker unreadable"
+  exit 3
+fi
+if [[ ! $stamp =~ ^[0-9]{1,12}$ ]]; then
   echo "PULLER UNKNOWN - marker is not a timestamp"
   exit 3
 fi

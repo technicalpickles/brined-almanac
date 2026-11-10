@@ -165,6 +165,30 @@ run_collect
 check "control bytes removed" "A[31mBC" "$(field ctl output)"
 
 reset
+mkcheck quiet1 1 ':'
+mkcheck quiet0 0 ':'
+conf "quiet1 quiet0"
+run_collect
+check "no output, exit 1: status" "3" "$(field quiet1 status)"
+check "no output, exit 1: output" "QUIET1 UNKNOWN - no output" "$(field quiet1 output)"
+check "no output, exit 0: status" "3" "$(field quiet0 status)"
+check "no output, exit 0: output" "QUIET0 UNKNOWN - no output" "$(field quiet0 output)"
+
+reset
+mkcheck stubborn 0 'trap "" TERM; sleep 30; echo "STUBBORN OK - late"'
+conf "stubborn"
+export CHECK_TIMEOUT=1
+export CHECK_KILL_AFTER=1
+start=$SECONDS
+run_collect
+elapsed=$((SECONDS - start))
+export CHECK_TIMEOUT=5
+unset CHECK_KILL_AFTER
+check "TERM ignored: status" "2" "$(field stubborn status)"
+check "TERM ignored: output" "STUBBORN CRITICAL - timed out after 1s" "$(field stubborn output)"
+check "TERM ignored: returned promptly" "yes" "$([ "$elapsed" -lt 10 ] && echo yes || echo no)"
+
+reset
 mkcheck a 0 'echo "A OK - fine"'
 conf "a"
 run_collect

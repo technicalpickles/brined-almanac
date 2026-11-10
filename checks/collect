@@ -56,8 +56,8 @@ for name in $CHECKS; do
     rc=3
     line="$upper UNKNOWN - check is not executable"
   else
-    raw=$("$tmo" "$timeout_s" "$path" </dev/null 2>/dev/null) || rc=$?
-    if [ "$rc" -eq 124 ]; then
+    raw=$("$tmo" -k "${CHECK_KILL_AFTER:-5}" "$timeout_s" "$path" </dev/null 2>/dev/null) || rc=$?
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
       rc=2
       line="$upper CRITICAL - timed out after ${timeout_s}s"
     else
@@ -65,7 +65,10 @@ for name in $CHECKS; do
       line=${raw%%$'\n'*}
       line=$(printf '%s' "$line" | tr -d '\000-\010\013-\037\177')
       line=$(printf '%s' "${line:0:500}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true)
-      [ -n "$line" ] || line="$upper UNKNOWN - no output"
+      if [ -z "$line" ]; then
+        rc=3
+        line="$upper UNKNOWN - no output"
+      fi
     fi
   fi
 

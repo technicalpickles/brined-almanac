@@ -5,7 +5,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+trap 'chmod -R u+rw "$TMP"; rm -rf "$TMP"' EXIT
 
 export CHECK_NOW=1794326400
 export PULLER_MARKER="$TMP/.last-pull"
@@ -63,6 +63,20 @@ check "later than now" "0 PULLER OK - last pull 0s ago" "$rc ${out%% |*}"
 printf '1794325986\n' >"$PULLER_MARKER"
 run_check
 check "trailing newline" "0 $fresh" "$rc $out"
+
+printf '99999999999999999999' >"$PULLER_MARKER"
+run_check
+check "20-digit marker" "3 PULLER UNKNOWN - marker is not a timestamp" "$rc $out"
+
+printf '1794325986\n1794325986\n' >"$PULLER_MARKER"
+run_check
+check "two-line marker" "3 PULLER UNKNOWN - marker is not a timestamp" "$rc $out"
+
+printf '1794325986' >"$PULLER_MARKER"
+chmod 000 "$PULLER_MARKER"
+run_check
+chmod 644 "$PULLER_MARKER"
+check "unreadable marker" "3 PULLER UNKNOWN - marker unreadable" "$rc $out"
 
 if [ "$fails" -ne 0 ]; then
   echo "$fails case(s) failed" >&2
