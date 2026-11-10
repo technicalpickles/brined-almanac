@@ -1,0 +1,13 @@
+{
+  "host": "mac",
+  "generated_at": "2026-11-10T15:00:00Z",
+  "interval_seconds": 300,
+  "checks": [
+    {
+      "name": "gh-auth",
+      "status": 2,
+      "since": "2026-11-10T14:50:00Z",
+      "output": "GH CRITICAL - gh auth status timed out after 20s"
+    }
+  ]
+}
