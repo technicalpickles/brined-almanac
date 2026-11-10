@@ -14,7 +14,7 @@ use crate::bugsink_api::{Issue, Tag, TurningPoint};
 /// Bugsink joins a custom fingerprint's parts with this to make its grouping key.
 const JOIN: &str = " ⋄ ";
 
-/// Where the filer files: `classes::owner_of` sends brineworks to the first, all else to
+/// Where the consumer files: `classes::owner_of` sends brineworks to the first, all else to
 /// the second.
 pub const REPOS: [&str; 2] = ["technicalpickles/brineworks", "technicalpickles/pickleclaw"];
 
@@ -24,7 +24,7 @@ pub fn grouping_key(service: &str, tool: &str, class: &str) -> String {
 }
 
 /// The grouping key named by an almanac issue body. Only the header lines before the first blank
-/// line count, so the transcript sample after it can never supply a field.
+/// line count, so the reason after it can never supply a field.
 pub fn key_in_body(body: &str) -> Option<String> {
     let mut fields: BTreeMap<&str, &str> = BTreeMap::new();
     for line in body
