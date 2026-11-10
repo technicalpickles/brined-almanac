@@ -1,17 +1,20 @@
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
+#[derive(Clone)]
 pub struct Seen {
+    pub method: String,
     pub target: String,
     pub auth: String,
+    pub body: String,
 }
 
 type Routes = Arc<Mutex<Vec<(String, Value)>>>;
 
-/// A read API on loopback. A route pairs a request target (path and query) with its JSON answer,
+/// An API on loopback. A route pairs a request target (path and query) with its JSON answer,
 /// and a `{base}` in an answer becomes the server's own origin, so a page can link to the next.
 pub struct Api {
     pub origin: String,
@@ -43,8 +46,10 @@ impl Api {
                         if socket.read_line(&mut request_line).await.unwrap_or(0) == 0 {
                             return;
                         }
+                        let method = request_line.split(' ').next().unwrap_or("").to_string();
                         let target = request_line.split(' ').nth(1).unwrap_or("").to_string();
                         let mut auth = String::new();
+                        let mut length = 0;
                         loop {
                             let mut header = String::new();
                             socket.read_line(&mut header).await.unwrap();
@@ -56,14 +61,24 @@ impl Api {
                             if name.eq_ignore_ascii_case("authorization") {
                                 auth = value.trim().to_string();
                             }
+                            if name.eq_ignore_ascii_case("content-length") {
+                                length = value.trim().parse().unwrap();
+                            }
                         }
+                        let mut body = vec![0; length];
+                        socket.read_exact(&mut body).await.unwrap();
                         let found = routes
                             .lock()
                             .unwrap()
                             .iter()
                             .find(|(t, _)| *t == target)
                             .map(|(_, answer)| answer.to_string().replace("{base}", &origin));
-                        log.lock().unwrap().push(Seen { target, auth });
+                        log.lock().unwrap().push(Seen {
+                            method,
+                            target,
+                            auth,
+                            body: String::from_utf8(body).unwrap(),
+                        });
                         let reply = match found {
                             Some(body) => format!(
                                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
@@ -86,6 +101,17 @@ impl Api {
         let mut routes = self.routes.lock().unwrap();
         routes.retain(|(t, _)| t != target);
         routes.push((target.to_string(), answer));
+    }
+
+    /// The requests that changed something, oldest first.
+    pub fn posts(&self) -> Vec<Seen> {
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.method == "POST")
+            .cloned()
+            .collect()
     }
 
     pub fn targets(&self) -> Vec<String> {

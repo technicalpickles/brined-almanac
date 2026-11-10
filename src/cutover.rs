@@ -507,21 +507,59 @@ impl Bugsink {
         format!("{}/issues/issue/{}/event/last/", self.dsn_base, issue.id)
     }
 
-    /// Comments first, so a failure before the resolve leaves the proof on an unresolved issue
-    /// that the next `--apply` picks up again.
-    pub async fn resolve(&self, issue: &Tracked, proof: &[String]) -> Result<(), String> {
+    /// Comments first, so a failure before the action leaves the proof on an unchanged issue
+    /// that the next attempt picks up again.
+    async fn triage(
+        &self,
+        id: &str,
+        name: &str,
+        comment: String,
+        action: &str,
+        body: Option<Value>,
+    ) -> Result<(), String> {
         let commented = self
             .http
             .post(format!("{}/issue-comments/", self.api))
             .bearer_auth(&self.token)
-            .json(&json!({"issue": issue.id, "comment": comment(proof)}));
-        send(commented, &format!("comment on {}", issue.name)).await?;
-        let resolved = self
+            .json(&json!({"issue": id, "comment": comment}));
+        send(commented, &format!("comment on {name}")).await?;
+        let mut acted = self
             .http
-            .post(format!("{}/issues/{}/resolve/", self.api, issue.id))
+            .post(format!("{}/issues/{id}/{action}/", self.api))
             .bearer_auth(&self.token);
-        send(resolved, &format!("resolve {}", issue.name)).await?;
+        if let Some(body) = body {
+            acted = acted.json(&body);
+        }
+        send(acted, &format!("{action} {name}")).await?;
         Ok(())
+    }
+
+    pub async fn resolve(&self, issue: &Tracked, proof: &[String]) -> Result<(), String> {
+        self.triage(&issue.id, &issue.name, comment(proof), "resolve", None)
+            .await
+    }
+
+    pub async fn resolve_issue(&self, issue: &Issue, comment: String) -> Result<(), String> {
+        self.triage(&issue.id, &issue.friendly_id, comment, "resolve", None)
+            .await
+    }
+
+    /// Mutes until `wake_events` events arrive within one day. A plain mute would never wake.
+    pub async fn mute_until(
+        &self,
+        issue: &Issue,
+        comment: String,
+        wake_events: u64,
+    ) -> Result<(), String> {
+        let wake = json!({"period_name": "day", "nr_of_periods": 1, "gte_threshold": wake_events});
+        self.triage(
+            &issue.id,
+            &issue.friendly_id,
+            comment,
+            "mute-until",
+            Some(wake),
+        )
+        .await
     }
 }
 

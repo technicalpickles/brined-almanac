@@ -8,7 +8,7 @@ use almanac::testing::FakeTracker;
 use brined_almanac::bugsink::Dsn;
 use brined_almanac::bugsink_api::Issue;
 use brined_almanac::classes::CLASSES;
-use brined_almanac::cutover::Bugsink;
+use brined_almanac::cutover::{Bugsink, Github};
 use brined_almanac::workflows;
 use brined_almanac::workflows::bugsink_issues::{
     BugsinkIssues, BugsinkReader, Reading, Unaddressed, facts, policy, unaddressed,
@@ -235,6 +235,16 @@ async fn bugsink() -> Api {
 }
 
 fn runtime(fx: &Fixture, api: &Api, tracker: Arc<dyn Tracker>, mode: Mode) -> Runtime {
+    runtime_reading(fx, api, tracker, mode, false)
+}
+
+fn runtime_reading(
+    fx: &Fixture,
+    api: &Api,
+    tracker: Arc<dyn Tracker>,
+    mode: Mode,
+    with_github: bool,
+) -> Runtime {
     let dsn: Dsn = format!(
         "http://0123abcd@{}/7",
         api.origin.trim_start_matches("http://")
@@ -243,7 +253,7 @@ fn runtime(fx: &Fixture, api: &Api, tracker: Arc<dyn Tracker>, mode: Mode) -> Ru
     .unwrap();
     let reader = BugsinkReader(Some(Reading {
         bugsink: Bugsink::new(&dsn, "api-token".into()),
-        github: None,
+        github: with_github.then(|| Github::at(api.origin.clone(), "gh-token".into())),
         live: mode == Mode::Live,
     }));
     Runtime::new(workflows::all(), fx.reading(tracker, reader)).in_mode(mode)
@@ -355,4 +365,289 @@ async fn a_failed_read_of_bugsink_fails_the_scan() {
     let (fx, api) = (Fixture::new(), Api::serve(vec![]).await);
     let rt = runtime(&fx, &api, Arc::new(FakeTracker::default()), Mode::DryRun);
     assert!(rt.backfill(None).await.is_err());
+}
+
+const BRINEWORKS_ISSUES: &str =
+    "/repos/technicalpickles/brineworks/issues?labels=almanac&state=all&per_page=100&page=1";
+const PICKLECLAW_ISSUES: &str =
+    "/repos/technicalpickles/pickleclaw/issues?labels=almanac&state=all&per_page=100&page=1";
+
+/// One almanac issue as GitHub lists it, whose body links the Bugsink issue `id`.
+fn almanac_issue(
+    number: u64,
+    id: &str,
+    generation: u64,
+    created: &str,
+    closed: Option<(&str, Option<&str>)>,
+) -> Value {
+    let regressions = if generation > 0 {
+        format!("regressions: {generation} (came back after being resolved)\n")
+    } else {
+        String::new()
+    };
+    json!({
+        "html_url": format!("https://github.com/example/repo/issues/{number}"),
+        "number": number,
+        "state": if closed.is_some() { "closed" } else { "open" },
+        "state_reason": closed.and_then(|(_, reason)| reason),
+        "created_at": created,
+        "closed_at": closed.map(|(at, _)| at),
+        "body": format!(
+            "```text\nservice: brineworks\ntool: triage_apply\nclass: approval-timeout\n{regressions}bugsink: http://bugsink.example/issues/issue/{id}/event/last/\n\nreason:\nboom\n```\n"
+        ),
+    })
+}
+
+/// Serves the almanac issues of the first repository and none for the second.
+fn on_github(api: &Api, issues: Vec<Value>) {
+    api.route(BRINEWORKS_ISSUES, Value::Array(issues));
+    api.route(PICKLECLAW_ISSUES, json!([]));
+}
+
+fn accept_changes(api: &Api, id: &str) {
+    api.route("/api/canonical/0/issue-comments/", json!({}));
+    for action in ["resolve", "mute-until"] {
+        api.route(
+            &format!("/api/canonical/0/issues/{id}/{action}/"),
+            json!({}),
+        );
+    }
+}
+
+fn changes(api: &Api) -> Vec<String> {
+    api.posts().into_iter().map(|p| p.target).collect()
+}
+
+const COMPLETED: Option<(&str, Option<&str>)> = Some(("2026-11-06T09:00:00Z", Some("completed")));
+const NOT_PLANNED: Option<(&str, Option<&str>)> =
+    Some(("2026-11-06T09:00:00Z", Some("not_planned")));
+
+async fn live_scan(fx: &Fixture, api: &Api, tracker: &Arc<FakeTracker>) -> usize {
+    let rt = runtime_reading(fx, api, tracker.clone(), Mode::Live, true);
+    let found = rt.backfill(None).await.unwrap().found;
+    rt.settle().await.unwrap();
+    found
+}
+
+#[tokio::test]
+async fn closing_as_completed_comments_then_resolves_and_files_nothing() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    on_github(
+        &api,
+        vec![almanac_issue(7, LOUD, 0, "2026-11-05T09:00:00Z", COMPLETED)],
+    );
+    let tracker = Arc::new(FakeTracker::default());
+
+    assert_eq!(live_scan(&fx, &api, &tracker).await, 0);
+
+    assert_eq!(
+        changes(&api),
+        [
+            "/api/canonical/0/issue-comments/".to_string(),
+            format!("/api/canonical/0/issues/{LOUD}/resolve/"),
+        ]
+    );
+    let comment = &api.posts()[0].body;
+    assert!(comment.contains(LOUD), "{comment}");
+    assert!(
+        comment.contains("https://github.com/example/repo/issues/7"),
+        "{comment}"
+    );
+    assert_eq!(api.posts()[0].auth, "Bearer api-token");
+    assert!(tracker.filed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn closing_as_not_planned_mutes_until_a_burst_of_events() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    on_github(
+        &api,
+        vec![almanac_issue(
+            7,
+            LOUD,
+            0,
+            "2026-11-05T09:00:00Z",
+            NOT_PLANNED,
+        )],
+    );
+    let tracker = Arc::new(FakeTracker::default());
+
+    assert_eq!(live_scan(&fx, &api, &tracker).await, 0);
+
+    assert_eq!(
+        changes(&api),
+        [
+            "/api/canonical/0/issue-comments/".to_string(),
+            format!("/api/canonical/0/issues/{LOUD}/mute-until/"),
+        ]
+    );
+    let wake: Value = serde_json::from_str(&api.posts()[1].body).unwrap();
+    assert_eq!(
+        wake,
+        json!({"period_name": "day", "nr_of_periods": 1, "gte_threshold": 50})
+    );
+    assert!(tracker.filed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_dry_run_says_what_it_would_do_and_changes_nothing() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    on_github(
+        &api,
+        vec![almanac_issue(7, LOUD, 0, "2026-11-05T09:00:00Z", COMPLETED)],
+    );
+    let rt = runtime_reading(
+        &fx,
+        &api,
+        Arc::new(FakeTracker::default()),
+        Mode::DryRun,
+        true,
+    );
+    assert_eq!(rt.backfill(None).await.unwrap().found, 0);
+    assert!(api.posts().is_empty());
+}
+
+#[tokio::test]
+async fn a_regression_is_filed_and_not_resolved_again_by_the_old_close() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    let first = almanac_issue(7, LOUD, 0, "2026-11-05T09:00:00Z", COMPLETED);
+    on_github(&api, vec![first.clone()]);
+    let tracker = Arc::new(FakeTracker::default());
+    live_scan(&fx, &api, &tracker).await;
+    assert_eq!(api.posts().len(), 2);
+
+    api.route(
+        &format!("/api/canonical/0/issue-history/?issue={LOUD}"),
+        history(&["regressed", "resolved", "first_seen"]),
+    );
+    assert_eq!(live_scan(&fx, &api, &tracker).await, 1);
+    assert_eq!(api.posts().len(), 2, "the closed issue is at generation 0");
+    {
+        let filed = tracker.filed.lock().unwrap();
+        assert_eq!(filed.len(), 1);
+        assert_eq!(
+            filed[0].2,
+            "Brent: brineworks/triage_apply approval-timeout regressed (5 events)"
+        );
+    }
+
+    let regression = almanac_issue(8, LOUD, 1, "2026-11-09T09:00:00Z", None);
+    on_github(&api, vec![first.clone(), regression]);
+    live_scan(&fx, &api, &tracker).await;
+    assert_eq!(api.posts().len(), 2, "the newest almanac issue is open");
+
+    let closed = almanac_issue(8, LOUD, 1, "2026-11-09T09:00:00Z", COMPLETED);
+    on_github(&api, vec![first, closed]);
+    live_scan(&fx, &api, &tracker).await;
+    assert_eq!(api.posts().len(), 4, "closing the regression resolves it");
+}
+
+#[tokio::test]
+async fn a_close_with_no_reason_is_left_to_file_as_before() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    let no_reason = Some(("2026-11-06T09:00:00Z", None));
+    on_github(
+        &api,
+        vec![almanac_issue(7, LOUD, 0, "2026-11-05T09:00:00Z", no_reason)],
+    );
+    let tracker = Arc::new(FakeTracker::default());
+    assert_eq!(live_scan(&fx, &api, &tracker).await, 1);
+    assert!(api.posts().is_empty());
+}
+
+#[tokio::test]
+async fn an_issue_that_woke_after_its_not_planned_close_is_not_muted_again() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    on_github(
+        &api,
+        vec![almanac_issue(
+            7,
+            LOUD,
+            0,
+            "2026-11-05T09:00:00Z",
+            NOT_PLANNED,
+        )],
+    );
+    api.route(
+        &format!("/api/canonical/0/issue-history/?issue={LOUD}"),
+        json!({"next": null, "results": [
+            {"kind": "unmuted", "timestamp": "2026-11-09T21:00:00Z"},
+            {"kind": "muted", "timestamp": "2026-11-06T10:00:00Z"},
+            {"kind": "first_seen", "timestamp": "2026-11-04T10:00:00Z"},
+        ]}),
+    );
+    live_scan(&fx, &api, &Arc::new(FakeTracker::default())).await;
+    assert!(api.posts().is_empty());
+}
+
+#[tokio::test]
+async fn an_issue_nobody_lists_as_open_is_never_acted_on() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, RESOLVED);
+    on_github(
+        &api,
+        vec![almanac_issue(
+            7,
+            RESOLVED,
+            0,
+            "2026-11-05T09:00:00Z",
+            COMPLETED,
+        )],
+    );
+    live_scan(&fx, &api, &Arc::new(FakeTracker::default())).await;
+    assert!(api.posts().is_empty());
+    assert!(
+        !api.targets()
+            .iter()
+            .any(|t| t.contains("issue-history") && t.ends_with(RESOLVED))
+    );
+}
+
+#[tokio::test]
+async fn without_github_the_scan_still_files_and_changes_nothing() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    let tracker = Arc::new(FakeTracker::default());
+    let rt = runtime(&fx, &api, tracker.clone(), Mode::Live);
+    assert_eq!(rt.backfill(None).await.unwrap().found, 1);
+    assert!(api.posts().is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_read_of_github_skips_resolving_and_the_scan_still_files() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    accept_changes(&api, LOUD);
+    let tracker = Arc::new(FakeTracker::default());
+    assert_eq!(live_scan(&fx, &api, &tracker).await, 1);
+    assert!(api.posts().is_empty());
+    assert_eq!(tracker.filed.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_resolve_is_reported_and_the_scan_goes_on() {
+    let (fx, api) = (Fixture::new(), bugsink().await);
+    api.route("/api/canonical/0/issue-comments/", json!({}));
+    on_github(
+        &api,
+        vec![almanac_issue(7, LOUD, 0, "2026-11-05T09:00:00Z", COMPLETED)],
+    );
+    let rt = runtime_reading(
+        &fx,
+        &api,
+        Arc::new(FakeTracker::default()),
+        Mode::Live,
+        true,
+    );
+    assert!(rt.backfill(None).await.is_ok());
+    assert_eq!(
+        api.posts().len(),
+        2,
+        "the resolve was tried after the comment"
+    );
 }
