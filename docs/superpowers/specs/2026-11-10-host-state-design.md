@@ -246,6 +246,25 @@ Ten minutes is two collector runs, so one bad run files nothing and a real
 outage still files well inside the hour. A stale report files no `check`
 findings, because its results describe the past.
 
+A scan after a long gap holds the stale finding. After the Mac wakes, almanac
+scans within 30 seconds, and launchd may not have rerun the collector yet, so
+the report looks old when nothing is wrong. The scan remembers when it last
+ran. When that was more than 20 minutes ago, or this is its first run, it
+files no stale finding for a report that is merely old, and the next scan
+decides. A missing or unreadable report still files at once, because sleep
+does not cause either. The 20 minutes must stay above the scan interval, which
+defaults to 15. A one-shot `backfill --dry-run` has no earlier scan, so it
+never shows an old report as stale.
+
+This narrows the wake race and does not close it. Two short wakes 15 to 20
+minutes apart, with no collector run between them, can still file one false
+task. Judging staleness on awake time would close it, and that waits on
+measuring real wakes after the first deploy.
+
+`host-state` is registered first among the workflows. The runtime stops a scan
+pass at the first scan that fails, and the scans that read Bugsink and GitHub
+fail when the network does, which is also when the puller fails.
+
 Each finding is one event and one task.
 
 | Finding | Delivery key | Title |
@@ -352,11 +371,14 @@ Then, in order, each a small pull request that ends in a check:
 
 ## Open risks
 
-- **A false stale finding after wake.** Almanac may scan before launchd reruns
-  the collector. This is a guess. If the measurement shows it, the fix is in
-  the rule, for example requiring the report to be stale by more than the time
-  the container itself has been running since wake. The plan decides after it
-  has the number.
+- **A false stale finding after wake.** Narrowed by the long-gap rule above
+  and not closed. Measured after deploy.
+- **A second outage on the same UTC day does not file.** The key carries the
+  date the check entered its state, so after the first task is closed a new
+  outage that day is silent however long it lasts. Keying on the minute fixes
+  it and costs more tasks from a check that flaps.
+- **`stack-health` is one check over four services.** While it is critical for
+  one, a second service failing files nothing new.
 - **Docker under launchd is unmeasured.** If `docker ps` fails there,
   `stack-health` reports unknown on every run and files a task about itself
   after ten minutes. `prod-wiring` checks this before the agent is left
