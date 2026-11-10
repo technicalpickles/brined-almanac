@@ -1,10 +1,13 @@
 mod support;
 
 use brined_almanac::bugsink::Dsn;
-use brined_almanac::bugsink_api::{Issue, Labels, Tag, TurningPoint, generation, labels};
+use brined_almanac::bugsink_api::{
+    Issue, Labels, Tag, TurningPoint, generation, labels, last_unmuted,
+};
 use brined_almanac::cutover::Bugsink;
 use serde_json::{Value, json};
 use support::api::Api;
+use time::macros::datetime;
 
 const ISSUES: &str = include_str!("fixtures/bugsink/issues.json");
 const TAGS: &str = include_str!("fixtures/bugsink/tags.json");
@@ -24,7 +27,10 @@ fn tag(key: &str, value: &str, count: u64) -> Tag {
 }
 
 fn turning(kind: &str) -> TurningPoint {
-    TurningPoint { kind: kind.into() }
+    TurningPoint {
+        kind: kind.into(),
+        timestamp: "2026-11-09T20:00:00Z".into(),
+    }
 }
 
 #[test]
@@ -91,6 +97,27 @@ fn generation_counts_only_regressions_and_reopenings() {
         ]),
         0
     );
+}
+
+#[test]
+fn the_last_unmute_is_the_latest_one_whoever_did_it() {
+    let at = |kind: &str, timestamp: &str| TurningPoint {
+        kind: kind.into(),
+        timestamp: timestamp.into(),
+    };
+    assert_eq!(
+        last_unmuted(&[at("muted", "2026-11-09T20:00:00Z")]),
+        Ok(None)
+    );
+    assert_eq!(
+        last_unmuted(&[
+            at("unmuted", "2026-11-09T20:00:00.5Z"),
+            at("muted", "2026-11-09T22:00:00Z"),
+            at("unmuted", "2026-11-09T21:00:00Z"),
+        ]),
+        Ok(Some(datetime!(2026-11-09 21:00 UTC)))
+    );
+    assert!(last_unmuted(&[at("unmuted", "yesterday")]).is_err());
 }
 
 fn client(origin: &str) -> Bugsink {

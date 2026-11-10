@@ -189,7 +189,10 @@ fn tagged(class: &str) -> Value {
 }
 
 fn history(kinds: &[&str]) -> Value {
-    let rows: Vec<Value> = kinds.iter().map(|k| json!({"kind": k})).collect();
+    let rows: Vec<Value> = kinds
+        .iter()
+        .map(|k| json!({"kind": k, "timestamp": "2026-11-09T20:00:00Z"}))
+        .collect();
     json!({"next": null, "results": rows})
 }
 

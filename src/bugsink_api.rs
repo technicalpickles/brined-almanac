@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 /// One issue as `GET /issues/` lists it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -36,6 +38,18 @@ pub struct Tag {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct TurningPoint {
     pub kind: String,
+    pub timestamp: String,
+}
+
+/// When the issue was last unmuted, by a person or by its mute's volume condition.
+pub fn last_unmuted(history: &[TurningPoint]) -> Result<Option<OffsetDateTime>, String> {
+    let mut latest = None;
+    for t in history.iter().filter(|t| t.kind == "unmuted") {
+        let at = OffsetDateTime::parse(&t.timestamp, &Rfc3339)
+            .map_err(|e| format!("history has the time {:?}: {e}", t.timestamp))?;
+        latest = latest.max(Some(at));
+    }
+    Ok(latest)
 }
 
 /// How many times an issue has come back after being resolved: Bugsink marks a resolved issue
