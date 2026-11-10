@@ -10,7 +10,15 @@ use crate::transcript::{Transcripts, read};
 
 /// Always provided, because almanac checks a scan's providers at startup. `None` means no API
 /// token or no DSN.
-pub struct BugsinkReader(pub Option<cutover::Bugsink>);
+pub struct BugsinkReader(pub Option<Reading>);
+
+pub struct Reading {
+    pub bugsink: cutover::Bugsink,
+    /// `None` without `GITHUB_TOKEN`, which turns off acting on closed almanac issues.
+    pub github: Option<cutover::Github>,
+    /// A dry run reads and says what it would do, and changes nothing in Bugsink.
+    pub live: bool,
+}
 
 clean! {
     pub struct Surface {
@@ -106,7 +114,8 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<Unaddressed>>, StepEr
     }
     ship_from(scanner, &read.errors).await?;
 
-    let Some(bugsink) = &scanner.get::<BugsinkReader>()?.0 else {
+    let reader = scanner.get::<BugsinkReader>()?;
+    let Some(Reading { bugsink, .. }) = &reader.0 else {
         eprintln!("bugsink-issues: BUGSINK_API_TOKEN or BUGSINK_DSN is not set, skipping");
         return Ok(vec![]);
     };

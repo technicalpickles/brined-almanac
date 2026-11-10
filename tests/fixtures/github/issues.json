@@ -1,0 +1,59 @@
+[
+  {
+    "html_url": "https://github.com/example/repo/issues/31",
+    "number": 31,
+    "state": "closed",
+    "state_reason": "completed",
+    "created_at": "2026-11-05T09:00:00Z",
+    "closed_at": "2026-11-06T09:00:00Z",
+    "body": "```text\nservice: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nbugsink: http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/\n\nreason:\nMCP error -32001: Request timed out\n```\n\n<!-- almanac:run-7:0 -->\n"
+  },
+  {
+    "html_url": "https://github.com/example/repo/issues/32",
+    "number": 32,
+    "state": "closed",
+    "state_reason": "not_planned",
+    "created_at": "2026-11-07T09:00:00Z",
+    "closed_at": "2026-11-08T09:00:00Z",
+    "body": "```text\nservice: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nregressions: 1 (came back after being resolved)\nbugsink: http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/\n\nreason:\nMCP error -32001: Request timed out\n```\n\n<!-- almanac:run-7:0 -->\n"
+  },
+  {
+    "html_url": "https://github.com/example/repo/issues/33",
+    "number": 33,
+    "state": "open",
+    "state_reason": "reopened",
+    "created_at": "2026-11-09T09:00:00Z",
+    "closed_at": null,
+    "body": "```text\nservice: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nregressions: 2 (came back after being resolved)\nbugsink: http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/\n\nreason:\nMCP error -32001: Request timed out\n```\n\n<!-- almanac:run-7:0 -->\n"
+  },
+  {
+    "html_url": "https://github.com/example/repo/issues/34",
+    "number": 34,
+    "state": "closed",
+    "state_reason": null,
+    "created_at": "2026-11-09T10:00:00Z",
+    "closed_at": "2026-11-09T11:00:00Z",
+    "body": "```text\nservice: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nbugsink: http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/\n\nreason:\nMCP error -32001: Request timed out\n```\n\n<!-- almanac:run-7:0 -->\n"
+  },
+  {
+    "html_url": "https://github.com/example/repo/issues/35",
+    "number": 35,
+    "state": "closed",
+    "state_reason": "completed",
+    "created_at": "2026-11-09T12:00:00Z",
+    "closed_at": "2026-11-09T13:00:00Z",
+    "body": "The body names no Bugsink issue.\n"
+  },
+  {
+    "html_url": "https://github.com/example/repo/issues/36",
+    "number": 36,
+    "state": "closed",
+    "state_reason": "completed",
+    "created_at": "2026-11-09T14:00:00Z",
+    "closed_at": "2026-11-09T15:00:00Z",
+    "body": "```text\nservice: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nbugsink: http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/\n\nreason:\nMCP error -32001: Request timed out\n```\n\n<!-- almanac:run-7:0 -->\n",
+    "pull_request": {
+      "url": "x"
+    }
+  }
+]

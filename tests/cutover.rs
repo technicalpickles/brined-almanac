@@ -1,13 +1,16 @@
 use almanac::prelude::*;
 use brined_almanac::bugsink::{Dsn, event};
 use brined_almanac::cutover::{
-    Filed, State, Tracked, Verdict, comment, grouping_key, key_in_body, plan,
+    Filed, Github, Reason, Standing, State, Tracked, Verdict, bugsink_link_in_body, comment,
+    generation_in_body, grouping_key, key_in_body, plan,
 };
 use brined_almanac::transcript::read;
 use brined_almanac::workflows::bugsink_issues::{Unaddressed, facts};
 use serde_json::json;
+use time::macros::datetime;
 
 mod support;
+use support::api::Api;
 use support::{Details, Failure, Fixture};
 
 /// Reads tainted text by position: `.forbidden-patterns` forbids the literal key in source.
@@ -211,4 +214,100 @@ fn the_dsn_gives_the_api_base_and_project() {
     assert_eq!(dsn.base_url(), "https://bugsink.example:8443");
     assert_eq!(dsn.project(), "7");
     assert_eq!(dsn.store_url(), "https://bugsink.example:8443/api/7/store/");
+}
+
+const GITHUB_ISSUES: &str = include_str!("fixtures/github/issues.json");
+const LINKED_ID: &str = "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01";
+
+#[test]
+fn the_bugsink_link_names_the_issue_whatever_the_host() {
+    for host in ["http://bugsink.example", "https://other.example:8443"] {
+        let body = format!(
+            "```text\nservice: a\nbugsink: {host}/issues/issue/{}/event/last/\n\nreason:\nx\n```",
+            LINKED_ID.to_uppercase()
+        );
+        assert_eq!(bugsink_link_in_body(&body).as_deref(), Some(LINKED_ID));
+    }
+}
+
+#[test]
+fn a_body_without_a_well_formed_link_names_no_bugsink_issue() {
+    assert_eq!(bugsink_link_in_body(""), None);
+    assert_eq!(
+        bugsink_link_in_body("bugsink: http://bugsink.example/issues/issue/not-a-uuid/event/last/"),
+        None
+    );
+    assert_eq!(
+        bugsink_link_in_body(
+            "service: a\n\nreason:\nbugsink: http://b/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/"
+        ),
+        None,
+        "a link in the reason is not the filer's"
+    );
+}
+
+#[test]
+fn the_generation_is_the_regressions_count_and_zero_without_one() {
+    assert_eq!(generation_in_body("service: a\nbugsink: x\n"), Some(0));
+    assert_eq!(
+        generation_in_body("service: a\nregressions: 3 (came back after being resolved)\n"),
+        Some(3)
+    );
+    assert_eq!(generation_in_body("regressions: lots\n"), None);
+    assert_eq!(
+        generation_in_body("service: a\n\nreason:\nregressions: 9\n"),
+        Some(0),
+        "the reason never supplies a field"
+    );
+}
+
+#[tokio::test]
+async fn linked_reads_every_almanac_issue_that_names_a_bugsink_issue_with_why_it_closed() {
+    let api = Api::serve(vec![(
+        "/repos/example/repo/issues?labels=almanac&state=all&per_page=100&page=1",
+        serde_json::from_str(GITHUB_ISSUES).unwrap(),
+    )])
+    .await;
+    let github = Github::at(api.origin.clone(), "gh-token".into());
+    let found = github.linked("example/repo").await.unwrap();
+
+    let summary: Vec<_> = found
+        .iter()
+        .map(|l| (l.number, l.generation, l.standing))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (
+                31,
+                Some(0),
+                Standing::Closed {
+                    reason: Some(Reason::Completed),
+                    at: datetime!(2026-11-06 09:00 UTC)
+                }
+            ),
+            (
+                32,
+                Some(1),
+                Standing::Closed {
+                    reason: Some(Reason::NotPlanned),
+                    at: datetime!(2026-11-08 09:00 UTC)
+                }
+            ),
+            (33, Some(2), Standing::Open),
+            (
+                34,
+                Some(0),
+                Standing::Closed {
+                    reason: None,
+                    at: datetime!(2026-11-09 11:00 UTC)
+                }
+            ),
+        ],
+        "35 names no Bugsink issue and 36 is a pull request"
+    );
+    assert!(found.iter().all(|l| l.issue == LINKED_ID));
+    assert_eq!(found[0].created_at, datetime!(2026-11-05 09:00 UTC));
+    assert_eq!(found[0].url, "https://github.com/example/repo/issues/31");
+    assert_eq!(api.seen.lock().unwrap()[0].auth, "Bearer gh-token");
 }

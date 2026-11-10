@@ -11,7 +11,7 @@ use brined_almanac::classes::CLASSES;
 use brined_almanac::cutover::Bugsink;
 use brined_almanac::workflows;
 use brined_almanac::workflows::bugsink_issues::{
-    BugsinkIssues, BugsinkReader, Unaddressed, facts, policy, unaddressed,
+    BugsinkIssues, BugsinkReader, Reading, Unaddressed, facts, policy, unaddressed,
 };
 use serde_json::{Value, json};
 use support::Fixture;
@@ -238,7 +238,11 @@ fn runtime(fx: &Fixture, api: &Api, tracker: Arc<dyn Tracker>, mode: Mode) -> Ru
     )
     .parse()
     .unwrap();
-    let reader = BugsinkReader(Some(Bugsink::new(&dsn, "api-token".into())));
+    let reader = BugsinkReader(Some(Reading {
+        bugsink: Bugsink::new(&dsn, "api-token".into()),
+        github: None,
+        live: mode == Mode::Live,
+    }));
     Runtime::new(workflows::all(), fx.reading(tracker, reader)).in_mode(mode)
 }
 
