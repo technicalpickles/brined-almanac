@@ -13,20 +13,13 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use time::macros::datetime;
 
+use crate::classes::classify;
 use crate::transcript::{At, ToolError};
-use crate::workflows::tool_failures::classify;
 
 /// A scan resends this much before the cursor, so an event in a file the puller copied late
 /// still ships. Resending is harmless: the event id makes Bugsink digest it once.
 pub const OVERLAP: time::Duration = time::Duration::HOUR;
-
-/// When history went quiet in Bugsink. Every issue first seen before it was replayed from old
-/// transcripts by the first full ship, and `cutover` resolved those GitHub had already closed. The
-/// tracker consumer never files an issue first seen before it. Issue first-seen is ingest time,
-/// so this is just after the last new issue of that ship, read from the prod dry run.
-pub const CUTOVER: OffsetDateTime = datetime!(2026-11-10 03:13:00 UTC);
 
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 

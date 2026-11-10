@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Previews what the bugsink-issues scan would file from prod Bugsink, and files nothing.
+# The 1Password service-account token comes from Automic Vault (`av save BRINED_ALMANAC_OP_TOKEN`),
+# approved on the phone or the Mac, so this runs away from the terminal's own 1Password session.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+empty=$(mktemp -d)
+trap 'rm -rf "$empty"' EXIT
+cargo build -q
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c '
+  OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec op run --env-file cutover.secrets.env -- \
+    env BRENT_TRANSCRIPTS="$1" target/debug/brined-almanac backfill --dry-run
+' sh "$empty"

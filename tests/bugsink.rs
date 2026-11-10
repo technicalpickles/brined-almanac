@@ -56,6 +56,17 @@ fn an_event_carries_the_fingerprint_its_own_time_and_where_it_happened() {
 }
 
 #[test]
+fn a_message_that_is_only_in_content_still_picks_the_class() {
+    let e = one(
+        "a.jsonl",
+        Failure::builtin("brineworks__tasks_update")
+            .details(Details::StatusOnly)
+            .error("sorry, too many clients already"),
+    );
+    assert_eq!(event(&e)["tags"]["class"], "pg-too-many-clients");
+}
+
+#[test]
 fn the_session_tag_is_a_hash_of_the_file_name() {
     let session = |name: &str| {
         let e = one(name, timeout("boom"));

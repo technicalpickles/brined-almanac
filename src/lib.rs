@@ -1,4 +1,6 @@
 pub mod bugsink;
+pub mod bugsink_api;
+pub mod classes;
 pub mod cutover;
 pub mod providers;
 pub mod routing;

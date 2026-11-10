@@ -1,0 +1,13 @@
+{
+  "next": null,
+  "previous": null,
+  "results": [
+    {"id": 101, "key": "service", "value": "brineworks", "count": 14},
+    {"id": 102, "key": "tool", "value": "triage_apply", "count": 14},
+    {"id": 103, "key": "class", "value": "mcp-timeout", "count": 14},
+    {"id": 104, "key": "surface", "value": "main", "count": 3},
+    {"id": 105, "key": "surface", "value": "telegram", "count": 11},
+    {"id": 106, "key": "session", "value": "a1b2c3d4e5f6", "count": 9},
+    {"id": 107, "key": "session", "value": "0f9e8d7c6b5a", "count": 5}
+  ]
+}

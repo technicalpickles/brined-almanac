@@ -21,7 +21,7 @@ Run `mise install && hk install` to arm the hooks, and `mise run check` to run t
 
 ## Running it
 
-There are two workflows. `tool-failures` reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. The same scan also ships each failed tool call to [Bugsink](https://www.bugsink.com/) as one event, which is taking over grouping from the clusters (`docs/superpowers/plans/2026-11-09-transcript-shipper.md`). Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
+There are two workflows. `bugsink-issues` reads OpenClaw transcripts and ships each failed tool call to [Bugsink](https://www.bugsink.com/) as one event (`docs/superpowers/plans/2026-11-09-transcript-shipper.md`). Bugsink groups the events into issues and keeps their state. The same scan then reads Bugsink's open issues and files one GitHub issue for each that is unresolved, not muted, and has as many events as its error class needs. An issue that regresses files again (`docs/superpowers/plans/2026-11-10-tracker-consumer.md`). Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
 
 The binary has almanac's verbs: `synth` prints the manifest, `check` validates the providers, `backfill [--dry-run]` runs the scan once, and `run` stays up. `cutover [--apply]` resolves in Bugsink the fingerprints whose almanac issues are all closed, once, at the move to the tracker (`mise run cutover`, `docs/superpowers/plans/2026-11-09-cutover.md`). It reads its settings from the environment:
 
@@ -31,6 +31,7 @@ The binary has almanac's verbs: `synth` prints the manifest, `check` validates t
 | `GITHUB_TOKEN` | Turns on the GitHub tracker. Without it, each would-be issue prints to stdout instead. |
 | `GITHUB_ALERTS_TOKEN` | A read-only token for the security-alerts scan. Unset, that scan prints a skip message and finds nothing. |
 | `BUGSINK_DSN` | The Bugsink project that receives one event per failed tool call. Unset, the shipper prints a skip message and sends nothing. It sends only on a live run. |
+| `BUGSINK_API_TOKEN` | A Bugsink API token that reads the project's issues, tags and history. Unset, or without the DSN, the issue scan prints a skip message and finds nothing. |
 | `BUGSINK_CURSOR` | Where the shipper keeps the time of the newest event Bugsink accepted. Defaults to `/var/lib/brined-almanac/bugsink/cursor`. |
 | `DATABASE_URL` | The Postgres store that remembers what's been filed. Required for live runs; set by `mise run live`, never by hand (see below). |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
@@ -68,7 +69,7 @@ Events the old binary admitted but hasn't run fail under a new payload shape, an
 
 #### Live runs
 
-A live run from a checkout is deliberate and rare. Its store shares nothing with prod's, so it refiles every cluster prod has already filed. Point it at a transcript directory prod never sees, or don't run it.
+A live run from a checkout is deliberate and rare. Its store shares nothing with prod's, so it refiles every issue prod has already filed. Point it at a transcript directory prod never sees, or don't run it.
 
 ```bash
 mise run db
@@ -76,4 +77,4 @@ BRENT_TRANSCRIPTS=path/to/pulls mise run live -- check      # validates the tran
 BRENT_TRANSCRIPTS=path/to/pulls mise run live -- backfill   # files issues, then remembers them
 ```
 
-`live` sets `ALMANAC_MODE=live`, builds `DATABASE_URL` from this checkout's `DB_PORT`, and takes the token from `gh auth token`, so it needs a `gh` login with the `repo` scope. Run `backfill` a second time to see the store do its job: every cluster comes back as unchanged.
+`live` sets `ALMANAC_MODE=live`, builds `DATABASE_URL` from this checkout's `DB_PORT`, and takes the token from `gh auth token`, so it needs a `gh` login with the `repo` scope. Run `backfill` a second time to see the store do its job: every issue comes back as unchanged.

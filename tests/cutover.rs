@@ -4,7 +4,7 @@ use brined_almanac::cutover::{
     Filed, State, Tracked, Verdict, comment, grouping_key, key_in_body, plan,
 };
 use brined_almanac::transcript::read;
-use brined_almanac::workflows::tool_failures::{Facts, ToolFailed, facts};
+use brined_almanac::workflows::bugsink_issues::{Unaddressed, facts};
 use serde_json::json;
 
 mod support;
@@ -22,24 +22,25 @@ fn text_of(body: &Untrusted<String>) -> String {
 }
 
 /// An issue body as the tracker files it: the filer's text in a fence, then the run marker.
-fn filed_body(service: &str, tool: &str, class: &str, sample: &str) -> String {
-    let event = ToolFailed::from_json(&json!({
+fn filed_body(service: &str, tool: &str, class: &str, reason: &str) -> String {
+    let event = Unaddressed::from_json(&json!({
+        "issue": "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01",
+        "generation": 1,
         "service": service,
         "tool": tool,
         "class": class,
-        "day": "2026-11-04",
         "count": 9,
-        "first": "2026-11-04T10:00:00Z",
-        "last": "2026-11-04T10:00:02Z",
-        "sample": sample,
+        "first_seen": "2026-11-04T10:00:00Z",
+        "last_seen": "2026-11-04T10:00:02Z",
+        "surfaces": [{"name": "main", "count": 9}],
+        "sessions": 2,
+        "link": "http://bugsink.example/issues/issue/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/event/last/",
+        "reason": reason,
     }))
     .expect("payload parses");
-    let Facts::Loud { body, .. } = facts(&event) else {
-        panic!("nine failures are loud");
-    };
     format!(
         "```text\n{}\n```\n\n<!-- almanac:run-7:0 -->\n",
-        text_of(&body)
+        text_of(&facts(&event).body)
     )
 }
 
@@ -68,7 +69,7 @@ fn a_filed_body_names_the_grouping_key_bugsink_computes_for_the_same_failure() {
 }
 
 #[test]
-fn the_sample_never_supplies_a_field() {
+fn the_reason_never_supplies_a_field() {
     let body = filed_body(
         "brineworks",
         "tasks_get",

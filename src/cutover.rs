@@ -9,11 +9,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::bugsink::{Dsn, TIMEOUT};
+use crate::bugsink_api::{Issue, Tag, TurningPoint};
 
 /// Bugsink joins a custom fingerprint's parts with this to make its grouping key.
 const JOIN: &str = " ⋄ ";
 
-/// Where the filer files: `tool_failures::owner_of` sends brineworks to the first, all else to
+/// Where the consumer files: `classes::owner_of` sends brineworks to the first, all else to
 /// the second.
 pub const REPOS: [&str; 2] = ["technicalpickles/brineworks", "technicalpickles/pickleclaw"];
 
@@ -23,7 +24,7 @@ pub fn grouping_key(service: &str, tool: &str, class: &str) -> String {
 }
 
 /// The grouping key named by an almanac issue body. Only the header lines before the first blank
-/// line count, so the transcript sample after it can never supply a field.
+/// line count, so the reason after it can never supply a field.
 pub fn key_in_body(body: &str) -> Option<String> {
     let mut fields: BTreeMap<&str, &str> = BTreeMap::new();
     for line in body
@@ -276,6 +277,7 @@ impl Github {
 
 pub struct Bugsink {
     http: Client,
+    dsn_base: String,
     api: String,
     project: String,
     token: String,
@@ -304,6 +306,7 @@ impl Bugsink {
     pub fn new(dsn: &Dsn, token: String) -> Bugsink {
         Bugsink {
             http: http(),
+            dsn_base: dsn.base_url().to_string(),
             api: format!("{}/api/canonical/0", dsn.base_url()),
             project: dsn.project().to_string(),
             token,
@@ -352,6 +355,36 @@ impl Bugsink {
             });
         }
         Ok(out)
+    }
+
+    /// The project's issues that are neither resolved nor muted.
+    pub async fn open_issues(&self) -> Result<Vec<Issue>, String> {
+        self.all(
+            format!("{}/issues/?project={}&state=open", self.api, self.project),
+            "Bugsink issue list",
+        )
+        .await
+    }
+
+    pub async fn tags(&self, issue: &Issue) -> Result<Vec<Tag>, String> {
+        self.all(
+            format!("{}/issues/{}/tags/", self.api, issue.id),
+            &format!("Bugsink tags of {}", issue.friendly_id),
+        )
+        .await
+    }
+
+    pub async fn history(&self, issue: &Issue) -> Result<Vec<TurningPoint>, String> {
+        self.all(
+            format!("{}/issue-history/?issue={}", self.api, issue.id),
+            &format!("Bugsink history of {}", issue.friendly_id),
+        )
+        .await
+    }
+
+    /// Where a person reads the issue. It names the tailnet host: never print it.
+    pub fn issue_url(&self, issue: &Issue) -> String {
+        format!("{}/issues/issue/{}/event/last/", self.dsn_base, issue.id)
     }
 
     /// Comments first, so a failure before the resolve leaves the proof on an unresolved issue

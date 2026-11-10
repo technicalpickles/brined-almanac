@@ -32,7 +32,7 @@ run = "scripts/cutover"
 
 [tasks.prod]
 description = "Run a verb in the prod stack: mise run prod -- check | backfill"
-run = "env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused BRINED_ALMANAC_TIERS_SHA256=unused docker compose -f compose.prod.yaml exec almanac brined-almanac"
+run = "env -u COMPOSE_PROJECT_NAME BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused BRINED_ALMANAC_BUGSINK_API_TOKEN=unused BRINED_ALMANAC_TIERS_SHA256=unused docker compose -f compose.prod.yaml exec almanac brined-almanac"
 
 [tasks.db]
 description = "Start this checkout's Postgres on the port portool allocated (data persists in a named volume)"
