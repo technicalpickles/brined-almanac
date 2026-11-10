@@ -195,9 +195,14 @@ Each finding is one event and one task.
 | Finding | Delivery key | Title |
 |---|---|---|
 | `check` | `<host>/<check>/<UTC date of since>` | `host-state: gh-auth critical on mac since 2026-11-10 14:50Z` |
-| `stale` | `<host>/stale/<UTC date the report went stale>` | `host-state: no report from mac since 2026-11-10 14:50Z` |
+| `stale` | `<host>/stale/<UTC date of the last report>` | `host-state: no report from mac since 2026-11-10 14:50Z` |
 
 The body is the check's output line, the status, and `since`.
+
+A stale finding dates its key from the last report's `generated_at`. An
+unreadable report has no such time, so its key uses the file's modification
+date. A declared host with no file at all gets the key `<host>/stale/missing`,
+which files once.
 
 The date in the key is the design's central choice. Filing is create-once per
 key. An outage that lasts days keeps one `since`, so it files once. After the
