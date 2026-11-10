@@ -1,4 +1,5 @@
 pub mod bugsink;
+pub mod classes;
 pub mod cutover;
 pub mod providers;
 pub mod routing;

@@ -15,8 +15,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use time::macros::datetime;
 
+use crate::classes::classify;
 use crate::transcript::{At, ToolError};
-use crate::workflows::tool_failures::classify;
 
 /// A scan resends this much before the cursor, so an event in a file the puller copied late
 /// still ships. Resending is harmless: the event id makes Bugsink digest it once.

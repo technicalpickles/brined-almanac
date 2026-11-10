@@ -13,7 +13,7 @@ use crate::bugsink::{Dsn, TIMEOUT};
 /// Bugsink joins a custom fingerprint's parts with this to make its grouping key.
 const JOIN: &str = " ⋄ ";
 
-/// Where the filer files: `tool_failures::owner_of` sends brineworks to the first, all else to
+/// Where the filer files: `classes::owner_of` sends brineworks to the first, all else to
 /// the second.
 pub const REPOS: [&str; 2] = ["technicalpickles/brineworks", "technicalpickles/pickleclaw"];
 
