@@ -146,10 +146,29 @@ pub struct Facts {
 }
 
 pub fn facts(event: &Unaddressed) -> Facts {
-    let header = format!(
-        "service: {}\ntool: {}\nclass: {}\n\nreason:\n",
-        event.service, event.tool, event.class
+    let surfaces: Vec<String> = event
+        .surfaces
+        .iter()
+        .map(|s| format!("{} ({})", s.name, s.count))
+        .collect();
+    let mut header = format!(
+        "service: {}\ntool: {}\nclass: {}\nevents: {}\nfirst seen: {}\nlast seen: {}\nsurfaces: {}\nsessions: {}\n",
+        event.service,
+        event.tool,
+        event.class,
+        event.count,
+        event.first_seen,
+        event.last_seen,
+        surfaces.join(", "),
+        event.sessions,
     );
+    if event.generation > 0 {
+        header.push_str(&format!(
+            "regressions: {} (came back after being resolved)\n",
+            event.generation
+        ));
+    }
+    header.push_str(&format!("bugsink: {}\n\nreason:\n", event.link));
     Facts {
         target: owner_of(&event.service),
         service: event.service.clone(),
@@ -175,15 +194,29 @@ pub async fn bugsink_issues(_cx: &Cx, event: &Unaddressed) -> Result<Facts, Halt
 }
 
 pub fn policy(facts: &Facts) -> Vec<Effect> {
+    let Facts {
+        target,
+        service,
+        tool,
+        class,
+        count,
+        generation,
+        body,
+    } = facts;
+    let title = if *generation > 0 {
+        title!(
+            "Brent: {}/{} {} regressed ({} events)",
+            service,
+            tool,
+            class,
+            count
+        )
+    } else {
+        title!("Brent: {}/{} {} ({} events)", service, tool, class, count)
+    };
     vec![Effect::File {
-        title: title!(
-            "Brent: {}/{} {} ({} events)",
-            facts.service,
-            facts.tool,
-            facts.class,
-            facts.count
-        ),
-        target: facts.target.clone(),
-        body: facts.body.clone(),
+        title,
+        target: target.clone(),
+        body: body.clone(),
     }]
 }

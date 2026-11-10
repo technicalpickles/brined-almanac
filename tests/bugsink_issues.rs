@@ -80,6 +80,60 @@ fn unaddressed_event(service: &str, generation: u64) -> Unaddressed {
     .expect("payload parses")
 }
 
+/// Reads tainted text by position: `.forbidden-patterns` forbids the literal key in source.
+fn text_of(body: &Untrusted<String>) -> String {
+    let shown = serde_json::to_value(body).unwrap();
+    shown
+        .as_object()
+        .and_then(|fields| fields.values().next())
+        .and_then(|value| value.as_str())
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn the_body_lists_the_header_then_a_blank_line_then_the_reason() {
+    let body = facts(&unaddressed_event("brineworks", 0)).body;
+    assert_eq!(
+        text_of(&body),
+        format!(
+            "service: brineworks\ntool: triage_apply\nclass: mcp-timeout\nevents: 14\nfirst seen: 2026-11-04T10:00:00.250000Z\nlast seen: 2026-11-09T21:14:03.482113Z\nsurfaces: telegram (11), main (3)\nsessions: 2\nbugsink: http://bugsink.example/issues/issue/{ID}/event/last/\n\nreason:\nMCP error -32001: Request timed out"
+        )
+    );
+}
+
+#[test]
+fn a_regressed_issue_says_so_in_the_header() {
+    let body = text_of(&facts(&unaddressed_event("brineworks", 2)).body);
+    let (header, _) = body.split_once("\n\n").unwrap();
+    assert!(
+        header.contains("\nregressions: 2 (came back after being resolved)\n"),
+        "{header}"
+    );
+    assert!(!text_of(&facts(&unaddressed_event("brineworks", 0)).body).contains("regressions"));
+}
+
+fn title_of(effects: &[Effect]) -> String {
+    match effects {
+        [Effect::File { title, .. }] => title.to_string(),
+        other => panic!("expected one filing, got {}", other.len()),
+    }
+}
+
+#[test]
+fn the_title_names_the_failure_and_its_events_and_flags_a_regression() {
+    let plain = policy(&facts(&unaddressed_event("brineworks", 0)));
+    assert_eq!(
+        title_of(&plain),
+        "Brent: brineworks/triage_apply mcp-timeout (14 events)"
+    );
+    let regressed = policy(&facts(&unaddressed_event("brineworks", 1)));
+    assert_eq!(
+        title_of(&regressed),
+        "Brent: brineworks/triage_apply mcp-timeout regressed (14 events)"
+    );
+}
+
 #[test]
 fn brineworks_and_gog_route_to_their_repositories() {
     for (service, repo) in [
@@ -262,6 +316,10 @@ async fn a_regression_is_a_new_delivery_and_files_again() {
     let filed = tracker.filed.lock().unwrap();
     assert_eq!(filed.len(), 2);
     assert_ne!(filed[0].0, filed[1].0);
+    assert_eq!(
+        filed[1].2,
+        "Brent: brineworks/triage_apply approval-timeout regressed (5 events)"
+    );
 }
 
 #[tokio::test]
