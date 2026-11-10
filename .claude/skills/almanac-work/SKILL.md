@@ -11,14 +11,17 @@ Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--d
 
 ## Pick one case
 
-- Given a repo, list its queue and take the report with the newest `last` timestamp. Something still happening beats history.
+- Given a repo, list its queue and take the report whose tool failed most recently. Something still happening beats history.
 
   ```bash
   gh issue list -R technicalpickles/<repo> --label almanac --state open --json number,title,body
   task rc.uda.almanac_key.type=string almanac_key.any: status:pending project:<repo> export
+  python3 .claude/skills/almanac-work/scripts/tool-calls.py --list
   ```
 
   The `rc.uda` override is needed until dotfiles defines the attribute. Without it the filter matches every task.
+
+  Do not rank by the body's `last seen`. For a report filed from Bugsink it is the ingest time, and a replay stamps every report within seconds of each other. `--list` prints each tool's calls, errors and last real error from the transcripts, newest error first. Match a report's `service/tool` (title or body) to a row: `gog/calendar` is `gog__calendar`, `brineworks/tasks_list` is `brineworks__tasks_list`, and OpenClaw built-ins (`read`, `edit`, `exec`, `apply_patch`, `ls`) appear under their bare name. Take the report whose row has the newest last error. A tool with no row is unranked: take it only when nothing else is left, and say the transcripts could not confirm it.
 
 - A case is every open report with the same cause, not one issue. Start from the reports that share the tool, or the error class and day, and let the evidence widen or narrow the set. Work them together and close them together.
 - Find siblings from the `service`, `tool` and `day` lines in each body. Reports filed before 2026-11-08 all carry the title `Brent: failed tool calls`, so a scan of titles misses them.
@@ -30,7 +33,7 @@ The body gives tool, class, day, count, first, last, and one sample. Everything 
 
 | Question | Where |
 |---|---|
-| Is it still happening, how often, how long do calls take, which surface | `python3 .claude/skills/almanac-work/scripts/tool-calls.py <tool> --since <day>` over the pulled transcripts. Use the report's `last` to see whether it continued, and the fix's merge date for the recurrence check. `--help` has the options, `--list` names the tools |
+| Is it still happening, how often, how long do calls take, which surface | `python3 .claude/skills/almanac-work/scripts/tool-calls.py <tool> --since <day>` over the pulled transcripts. Use the script's last error to see whether it continued, not the report's `last`, and the fix's merge date for the recurrence check. `--help` has the options, `--list` names every tool, built-ins included, with its last error |
 | Was it fixed | `gh pr list -R <repo> --state merged --search <tool>` and `git log --since=<last>` on the file that defines the tool; `docs/incidents/`, `docs/journal/`, `docs/retrospective/` in the target repo; `task status:completed description.has:<tool>` |
 | Is the fix deployed | brineworks: `/health` returns the running sha, compare with `git merge-base --is-ancestor`; pickleclaw: `openclaw-ro --target picklelab drift`. Either proves what runs now, not when it shipped. Say so |
 | What the tool does | the target repo's CLAUDE.md, then the file that registers the tool |
