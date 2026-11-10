@@ -1,21 +1,40 @@
-# Host state, starting with the Mac's credential check
+# Host state, starting with almanac's own jobs on the Mac
 
-**Status:** design, 2026-11-10. The next slice of roadmap M1. It covers the
-credential-expiry bullet and builds the check, report, and workflow shape that
-service-down and the dead-man's switch reuse.
+**Status:** design, 2026-11-10, revised the same day after `launchd-spike`.
+The next slice of roadmap M1. It covers the dead-man's switch for almanac's
+own puller and stack, and builds the check, report, and workflow shape that
+service-down and picklelab's checks reuse.
 
 ## Goal
 
-When the credential broker stops answering or `gh auth status` fails on the
-Mac, a taskwarrior task exists within an hour, and a rescan files nothing new.
+When almanac's puller stops completing pulls, or a container in the prod stack
+stops or turns unhealthy, a taskwarrior task exists within an hour, and a
+rescan files nothing new.
 
-On 2026-11-08 the broker was unreachable for over an hour. Every `gh` call and
-every signed commit hung in every agent session on the Mac, and nothing
-reported it.
+Silent job failures were the top pick when the pain points were ranked on
+2026-11-08. The puller's compose healthcheck already knows when pulls stop,
+and nothing reads it but the runbook.
 
-No host-state code exists yet. This slice builds the first check, the first
-report, and the first workflow that reads one, so the shapes it picks are the
-ones every later check inherits.
+No host-state code existed before this slice. It builds the first checks, the
+first report, and the first workflow that reads one, so the shapes it picks
+are the ones every later check inherits.
+
+### What this slice was first, and why it changed
+
+The first version aimed at credential-expiry: a `gh-auth` check that ran `gh
+auth status` on the Mac, after the broker outage of 2026-11-08. The spike
+below showed that check can't work, and the broker's history showed it would
+have tested the wrong thing even if it could. Automic Vault decides by
+launcher, the app that started the command. Requests launched by Claude are
+approved by an automatic rule, 1692 of them in the 24 hours before the spike.
+The same `gh auth status` under launchd has `gh` itself as its launcher, has
+no rule, and waits for a person. The 11-08 outage broke the Claude-launched
+path. A launchd check travels a different one, so it could stay green while
+every agent session hangs.
+
+credential-expiry goes back to what it was before the 11-08 review moved it:
+a scan of agent transcripts for authentication errors, which reads the
+failure where it happens. That is roadmap M6 and not this slice.
 
 ## Decisions already made
 
@@ -25,6 +44,7 @@ ones every later check inherits.
 | The Mac's transport | Push: a LaunchAgent writes the report to a directory the container mounts | 2026-11-10 |
 | Where the Mac's checks live | This repository, in `checks/` | 2026-11-10 |
 | Where the Mac's tasks go | The `brined-almanac` taskwarrior project | 2026-11-10 |
+| The first checks | `puller-age` and `stack-health`, in place of `gh-auth` | 2026-11-10, after the spike |
 
 Pull over SSH was the other transport. It needs Remote Login on the Mac and a
 key in the container, to read a file that is one bind mount away.
@@ -58,27 +78,29 @@ ran each command once from the main checkout under a 20 second timeout, with
 | `av history --json --since 1m --no-pager` | 124 | 20s | timed out with no output |
 | `av doctor gh --json` | 1 | 1s | answered at once, and reported an unrelated Git transport issue |
 
-So `gh` does not get its token under launchd without a person approving it,
-and `gh-auth` as designed here would be critical on every run. None of the
-three candidates qualifies as a broker probe: two wait on approval, and
-`av doctor` checks installed hardening and exits nonzero for a reason that
-has nothing to do with whether the broker answers.
+So `gh` does not get its token under launchd without a person approving it.
+`av history` for the same minute records all three requests as `Manual`,
+`Canceled`, "Gate client exited", with the command itself as the launcher.
 
-This blocks `checks-and-collector` until the check is redesigned. See "Open
-risks".
+Also read on 2026-11-10, with no credential involved: all four prod
+containers reported healthy through `docker ps`, and `.last-pull` was 414
+seconds old.
 
 Still not measured:
 
 - Whether a scan right after the Mac wakes sees a stale report before launchd
   reruns the collector.
+- Whether `docker ps` answers when launchd runs it. Docker asks the broker for
+  nothing, so this is expected to work, and `prod-wiring` confirms it on the
+  real agent.
 
 ## Shape
 
 Three units. Each is tested alone.
 
 ```
-checks/gh-auth ──┐
-checks/...     ──┼─> checks/collect ──> $STATE/host-state/mac.json ──> host-state workflow ──> task
+checks/puller-age   ──┐
+checks/stack-health ──┼─> checks/collect ──> $STATE/host-state/mac.json ──> host-state workflow ──> task
                  │   (LaunchAgent, 5 min)   (read-only mount)          (in the almanac container)
 ```
 
@@ -91,19 +113,36 @@ warning, 2 for critical, and 3 for unknown, and prints one status line.
 A check knows nothing about the report, the collector, or almanac. It runs by
 hand and under any Nagios-shaped runner.
 
-This slice ships one check, `checks/gh-auth`:
+This slice ships two checks. Neither needs a credential.
 
-- It changes to a fixed, real directory first, so the broker's canonical-path
-  rule can't fail it.
-- It runs `gh auth status` and exits 0 when that succeeds, 2 when it fails.
-- It prints `GH OK - logged in to github.com` or `GH CRITICAL - <first line of
-  gh's error>`. It never prints a token. `gh auth status` masks the token, and
-  the check keeps only the lines it names.
+`checks/puller-age` is the dead-man's switch for the puller:
 
-A direct broker check, `checks/broker`, joins it if the spike finds an `av`
-command that probes without prompting. It covers the commit-signing path,
-which `gh auth status` does not exercise. If no such command exists, the slice
-ships with `gh-auth` alone and the gap is filed as a task.
+- It reads the epoch seconds in `$STATE/transcripts/.last-pull`, which
+  `puller/pull.sh` writes after each completed pass.
+- It is critical when the last pull is 1800 seconds old or more. That is three
+  missed passes at the 10 minute interval, the same limit the puller's compose
+  healthcheck uses.
+- A missing marker is critical, because no pass has completed. A marker that
+  is not a number is unknown. A marker later than now counts as age zero.
+- It prints `PULLER OK - last pull 414s ago | age=414s;;1800`, `PULLER
+  CRITICAL - last pull 2400s ago, limit 1800s | age=2400s;;1800`, `PULLER
+  CRITICAL - no completed pull recorded`, or `PULLER UNKNOWN - marker is not
+  a timestamp`.
+
+`checks/stack-health` covers the daemon and the rest of the stack:
+
+- It lists the containers of the compose project `brined-almanac-prod` and
+  expects the services `db`, `almanac`, `puller`, and `backup`.
+- It is critical when an expected service is missing, is not running, or
+  reports unhealthy. A service whose health is still starting is fine.
+- It is unknown when Docker doesn't answer.
+- It prints `STACK OK - 4 services healthy`, `STACK CRITICAL - puller
+  unhealthy, backup exited`, or `STACK UNKNOWN - docker not reachable`.
+
+One limit is built in. Almanac files the tasks, so a stopped almanac container
+files nothing about itself. `stack-health` reports it, and the report sits
+unread until the daemon is back. Watching the watcher from another host is
+picklelab's job, later.
 
 ### The collector
 
@@ -139,10 +178,10 @@ same run that starts the stack. The plist template lives in `checks/launchd/`.
   "interval_seconds": 300,
   "checks": [
     {
-      "name": "gh-auth",
+      "name": "puller-age",
       "status": 2,
       "since": "2026-11-10T14:50:00Z",
-      "output": "GH CRITICAL - gh auth status timed out after 20s"
+      "output": "PULLER CRITICAL - last pull 2400s ago, limit 1800s"
     }
   ]
 }
@@ -211,7 +250,7 @@ Each finding is one event and one task.
 
 | Finding | Delivery key | Title |
 |---|---|---|
-| `check` | `<host>/<check>/<UTC date of since>` | `host-state: gh-auth critical on mac since 2026-11-10 14:50Z` |
+| `check` | `<host>/<check>/<UTC date of since>` | `host-state: puller-age critical on mac since 2026-11-10 14:50Z` |
 | `stale` | `<host>/stale/<UTC date of the last report>` | `host-state: no report from mac since 2026-11-10 14:50Z` |
 
 The body is the check's output line, the status, and `since`.
@@ -235,12 +274,14 @@ effect in M2.
 
 ### service-down and credential-expiry
 
-workflows.md lists these as two workflows. In code they would read the same
-reports with the same rule, so there is one workflow, `host-state`.
-credential-expiry and service-down become the names of check sets it reports:
-`gh-auth` and `broker` now, units and site status next. The transcript scan
-that credential-expiry plans for M6 stays its own workflow, because it reads
-transcripts.
+workflows.md lists these as two workflows. service-down would read the same
+reports with the same rule, so it is not a second workflow. There is one,
+`host-state`, and service-down becomes the name of a check set it reports:
+`stack-health` now, units and site status next. The dead-man's switch is
+another check set: `puller-age` now, picklelab's timers next.
+
+credential-expiry is not a check set. It stays its own workflow, a transcript
+scan in M6, for the reason under "What this slice was first".
 
 ## Prod
 
@@ -254,18 +295,25 @@ transcripts.
 ## Doc changes
 
 - workflows.md: a `host-state` catalog entry with status next, and the
-  service-down and credential-expiry entries point at it as their workflow.
+  service-down entry points at it as its workflow. credential-expiry goes
+  back to a transcript scan with status later.
   "Host state" gains the report's fields and the `since` rule.
-- roadmap.md: the M1 credential-expiry bullet links to this design.
+- roadmap.md: the M1 dead-man's switch bullet links to this design, and the
+  credential-expiry bullet moves back to M6 with the reason.
 - README: `checks/` and `hosts.toml` in the layout, if it lists one.
 
 ## Testing
 
 Each unit is tested through what its user sees.
 
-- **`checks/gh-auth`**: a shell test with a fake `gh` first on `PATH`. It
-  asserts the exit code and status line for success, failure, and a `gh` that
-  is missing.
+- **`checks/puller-age`**: a shell test over a marker file in a temp
+  directory and a fixed clock. It asserts the exit code and status line for a
+  fresh pull, a pull at the limit, a missing marker, a marker that is not a
+  number, and a marker later than now.
+- **`checks/stack-health`**: a shell test with a fake `docker` first on
+  `PATH`. It asserts the exit code and status line for four healthy services,
+  one unhealthy, one exited, one missing, one still starting, and a `docker`
+  that fails.
 - **`checks/collect`**: a shell test with fake checks. It asserts the report
   for each exit code, a timeout recorded as critical, `since` copied when the
   status holds and reset when it changes, a missing previous report, and that
@@ -276,19 +324,19 @@ Each unit is tested through what its user sees.
   asserting the findings and their keys. The clock is a parameter.
 - **Dry run**: a fixture directory with one critical report prints the task it
   would file.
-- **The real thing**: on the Mac, after deploy, stop the broker or point the
-  check at a `gh` that fails, and confirm a task appears within an hour and a
-  second scan files nothing. Then confirm recovery writes a new `since`.
+- **The real thing**: on the Mac, after deploy, stop the puller container and
+  confirm a task appears within an hour and a second scan files nothing. Then
+  start it and confirm recovery writes a new `since`.
 
 ## Delivery
 
-The plan opens with the three measurements under "What was measured". Their
-answers can change the check list and the stale threshold, so they run before
-any code that depends on them.
+The plan opened with `launchd-spike`, whose result is under "What was
+measured" and changed the checks this slice ships.
 
 Then, in order, each a small pull request that ends in a check:
 
-- `checks-and-collector`: `checks/gh-auth` and `checks/collect`, with their tests.
+- `checks-and-collector`: `checks/puller-age`, `checks/stack-health`, and
+  `checks/collect`, with their tests.
 - `report-and-rule`: the report parser, `hosts.toml`, and the filing rule, with
   no workflow wired.
 - `host-state-workflow`: the workflow and its dry run.
@@ -298,10 +346,9 @@ Then, in order, each a small pull request that ends in a check:
 ## Not in this slice
 
 - picklelab, the WordPress droplet, and the pull transport.
-- Checks for units, site status, and job age.
+- Checks for units and site status, and job-age checks for picklelab's timers.
+- Any credential check. See "What this slice was first".
 - Closing a task when a check recovers.
-- Almanac's own list for its puller and daemon. It is the next slice, and it
-  reads `.last-pull`.
 
 ## Open risks
 
@@ -310,12 +357,9 @@ Then, in order, each a small pull request that ends in a check:
   the rule, for example requiring the report to be stale by more than the time
   the container itself has been running since wake. The plan decides after it
   has the number.
-- **launchd does not get a token.** Confirmed by the spike. The broker asks a
-  person to approve `gh` when launchd runs it, so the check can't run
-  unattended as written. Two ways out are open, and neither is measured:
-  approve the check script itself with the broker so it runs without a
-  prompt, the way `scripts/deploy` takes its token through `av inject`, or
-  change the check to ask whether the broker is alive without asking it for
-  a credential.
+- **Docker under launchd is unmeasured.** If `docker ps` fails there,
+  `stack-health` reports unknown on every run and files a task about itself
+  after ten minutes. `prod-wiring` checks this before the agent is left
+  loaded.
 - **The thresholds are defaults.** Ten minutes, 24 hours, and 30 minutes are
   chosen, not measured. They are constants in one place.

@@ -27,10 +27,9 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 - Checks in the Nagios plugin convention for units that should be running and for site status, collected into each host's host-state report over pull
 - The WordPress droplet on the tailnet, with a fenced key for its report
 - service-down, reading those reports
-- A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08
-- credential-expiry as a host check on the Mac: the credential broker answers and `gh auth status` succeeds. Moved here from M6 after the 2026-11-08 outage. [Designed 2026-11-10](superpowers/specs/2026-11-10-host-state-design.md), with the report and workflow shape service-down reuses
+- A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08. [Designed 2026-11-10](superpowers/specs/2026-11-10-host-state-design.md) for the Mac, with the report and workflow shape service-down and picklelab reuse
 
-**Done when** every overdue security alert on those repositories is on a task for its repository, a stopped unit, a site that stops returning 200, a scheduled job past its maximum age, or a broker that stops answering becomes a task within an hour, and running any scan again files nothing new.
+**Done when** every overdue security alert on those repositories is on a task for its repository, a stopped unit, a site that stops returning 200, or a scheduled job past its maximum age becomes a task within an hour, and running any scan again files nothing new.
 
 ## Side track: errors go to an error tracker
 
@@ -106,7 +105,7 @@ Almanac reports problems in running services and deployed repositories.
 
 - More checks: container images, CA packages, releases past end of life, and site checksums
 - picklehome's watchdogs rewritten as checks one at a time, each retiring its timer and Telegram alert
-- merged-on-red, with CI queue time and runner count, deploy-drift, skill-drift, and credential-expiry's transcript scan (its host check is in M1)
+- merged-on-red, with CI queue time and runner count, deploy-drift, skill-drift, and credential-expiry as a scan of agent transcripts for authentication errors. Its host check was tried in M1 on 2026-11-10 and dropped: the broker approves by launcher, so a check launchd runs can't see what an agent session sees ([the host-state design](superpowers/specs/2026-11-10-host-state-design.md) has the measurement)
 - deployed-upkeep: Renovate on deployed-tier repositories, then upstream's `almanacs/renovate` repairing what breaks, under the budget rule
 - container-logs, once brineworks logs each call
 - eval-queue, running queued plugin evals in likely-free hours under the budget rule

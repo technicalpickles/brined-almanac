@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** When `gh` authentication breaks on the Mac, a task appears in the `brined-almanac` taskwarrior project within an hour, and a rescan files nothing new.
+**Goal:** When almanac's puller stops completing pulls, or a container in the prod stack stops or turns unhealthy, a task appears in the `brined-almanac` taskwarrior project within an hour, and a rescan files nothing new.
 
-**Architecture:** A check in the Nagios plugin convention runs on the Mac. A shell collector, run by a LaunchAgent every 300 seconds, writes every check's result to one JSON report in the prod state directory. The almanac container mounts that directory read-only, and a `host-state` workflow turns reports into `File` effects on `task:brined-almanac`.
+**Revised 2026-11-10** after `launchd-spike`: the first checks are `puller-age` and `stack-health`, in place of `gh-auth`. The spec's "What this slice was first" says why. `report-and-rule` and `host-state-workflow` were built before the change and use `gh-auth` only as a check name in test data, which still stands.
+
+**Architecture:** Two checks in the Nagios plugin convention run on the Mac. A shell collector, run by a LaunchAgent every 300 seconds, writes every check's result to one JSON report in the prod state directory. The almanac container mounts that directory read-only, and a `host-state` workflow turns reports into `File` effects on `task:brined-almanac`.
 
 **Tech Stack:** bash, `jq`, `gtimeout` (coreutils), launchd, Rust 1.99 with the `almanac` crate at `b8bdefa`, `serde`, `time`, `toml`.
 
@@ -14,7 +16,7 @@ Tasks are named by slug. Commits and cross-references cite the slug. Each slug e
 
 | Slug | Depends on | Stops for Josh |
 |---|---|---|
-| `launchd-spike` | nothing | go-ahead to load a throwaway LaunchAgent |
+| `launchd-spike` | nothing | done 2026-11-10 |
 | `checks-and-collector` | `launchd-spike` | nothing |
 | `report-and-rule` | nothing | nothing |
 | `host-state-workflow` | `report-and-rule` | nothing |
@@ -51,73 +53,62 @@ Inputs the spec implies and no happy-path test reaches, most likely first. Each 
 
 ### launchd-spike
 
-Answers two of the spec's three unmeasured questions. Nothing here is kept as code. The answers go into the spec.
-
-**Files:**
-- Modify: `docs/superpowers/specs/2026-11-10-host-state-design.md` ("What was measured", and "Checks" if the answers change it)
-- Scratch only: a plist and a script under the session scratchpad
-
-- [ ] **Step 1: Ask Josh for the go-ahead** to load one throwaway LaunchAgent, `com.technicalpickles.brined-almanac.spike`, and to unload it at the end of this task.
-
-- [ ] **Step 2: Write the probe script.** It changes to the main checkout's real path, runs `gh auth status` under `gtimeout 20`, and appends the exit code, the elapsed seconds, and the first line of output to a log in the scratchpad. It pipes output through `sed` to mask anything matching `gh[pousr]_[A-Za-z0-9_]+`.
-
-- [ ] **Step 3: Write the plist** with `ProgramArguments` naming the script, `RunAtLoad` true, and `EnvironmentVariables` setting `PATH` to `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`. Load it with `launchctl bootstrap gui/$(id -u) <plist>`.
-
-- [ ] **Step 4: Read the log and the broker's history.**
-
-Run: `av history --json --since 10m --no-pager`
-Record: the exit code and time of `gh auth status` under launchd, and whether the history shows an approval prompt, an automatic approval, or a refusal.
-
-- [ ] **Step 5: Probe the broker directly.** From the same LaunchAgent, run each candidate once: `av list --json`, `av doctor gh --json`, `av history --json --since 1m --no-pager`. For each, record the exit code, the time, and whether the history shows a prompt. A candidate qualifies as the `broker` check when it exits 0 with no prompt while the broker is up.
-
-- [ ] **Step 6: Unload and delete.** `launchctl bootout gui/$(id -u)/com.technicalpickles.brined-almanac.spike`, then remove the plist. Confirm with `launchctl print gui/$(id -u)/com.technicalpickles.brined-almanac.spike`, which must report that the service is not found.
-
-- [ ] **Step 7: Record the answers in the spec** under "What was measured", with the date. Then apply the branch that matches:
-
-| Result | What changes |
-|---|---|
-| `gh` works under launchd | Nothing. `gh-auth` ships as designed. |
-| `gh` is refused or prompts under launchd | Stop and tell Josh. `gh-auth` as designed would always be critical. |
-| A candidate qualifies | `checks-and-collector` also ships `checks/broker`, running that command. |
-| No candidate qualifies | `gh-auth` ships alone. File a taskwarrior task in `brined-almanac` for the signing-path gap and cite its UUID in the spec. |
-
-- [ ] **Step 8: Commit** the spec change to the open docs pull request's branch.
+**Done 2026-11-10.** A throwaway LaunchAgent ran `gh auth status`, `av list --json`, `av history --json`, and `av doctor gh --json` once each. The first three timed out waiting on a human approval from the broker, and `av doctor` is not a broker probe. The agent was unloaded and deleted. The table and what it means are in the spec under "What was measured" and "What this slice was first". The result replaced `gh-auth` with the two checks below.
 
 ---
 
 ### checks-and-collector
 
 **Files:**
-- Create: `checks/gh-auth`, `checks/collect`, `checks/hosts/mac.conf`
-- Create: `checks/gh-auth.test.sh`, `checks/collect.test.sh`
-- Create: `checks/broker` and `checks/broker.test.sh`, only if `launchd-spike` found a qualifying command
+- Create: `checks/puller-age`, `checks/stack-health`, `checks/collect`, `checks/hosts/mac.conf`
+- Create: `checks/puller-age.test.sh`, `checks/stack-health.test.sh`, `checks/collect.test.sh`
 - Modify: `mise.toml` (`[tasks.test]` runs the new test scripts), `hk.pkl` (shellcheck covers `checks/`)
 
 **Interfaces:**
 - Produces: the report file described in Global Constraints. `report-and-rule` parses it.
-- Produces: `checks/collect <conf>`, where the conf file is shell assignments: `HOST=mac`, `OUT=<path>`, `CHECKS="gh-auth"`, `CHECK_DIR=<dir>`. `prod-wiring` runs it from the LaunchAgent. A relative `OUT` or `CHECK_DIR` resolves against the conf file's directory.
-- Environment the tests may set: `HOST_STATE_NOW` (an RFC 3339 time the collector uses in place of the clock) and `CHECK_TIMEOUT` (seconds, default 20).
+- Produces: `checks/collect <conf>`, where the conf file is shell assignments: `HOST=mac`, `OUT=<path>`, `CHECKS="puller-age stack-health"`, `CHECK_DIR=<dir>`. `prod-wiring` runs it from the LaunchAgent. A relative `OUT` or `CHECK_DIR` resolves against the conf file's directory.
+- Environment the tests may set: `HOST_STATE_NOW` (an RFC 3339 time the collector uses in place of the clock) and `CHECK_TIMEOUT` (seconds, default 20). For `puller-age`: `PULLER_MARKER` (the marker file, default `${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}/transcripts/.last-pull`), `PULLER_MAX_AGE` (seconds, default 1800), and `CHECK_NOW` (epoch seconds in place of the clock). For `stack-health`: `STACK_PROJECT` (default `brined-almanac-prod`).
 
 Both test scripts follow `puller/pull.test.sh`: a temp directory, fakes first on `PATH`, a `check name want got` helper, and a nonzero exit when any case fails.
 
-- [ ] **Step 1: Write `checks/gh-auth.test.sh`** with a fake `gh` that reads its behaviour from a file in the temp directory.
+- [ ] **Step 1: Write `checks/puller-age.test.sh`.** Each case writes a marker in the temp directory and sets `CHECK_NOW` to 1794326400.
 
-| Case | Fake `gh` | Want exit | Want stdout |
+| Case | Marker holds | Want exit | Want stdout |
 |---|---|---|---|
-| logged in | exits 0, prints the real `gh auth status` shape with a masked token line | 0 | `GH OK - logged in to github.com` |
-| broker error | exits 1, prints `failed to resolve authentication token: boom` | 2 | `GH CRITICAL - failed to resolve authentication token: boom` |
-| token in the error | exits 1, prints a line holding `gho_abcdefghijklmnopqrstuvwxyz0123456789` | 2 | a line that does not contain `gho_abc` |
-| `gh` not on `PATH` | absent | 3 | `GH UNKNOWN - gh not found` |
-| run from `/private/tmp` | records its working directory | 0 | the fake saw `$HOME`, not `/private/tmp` |
+| fresh | 1794325986 | 0 | `PULLER OK - last pull 414s ago \| age=414s;;1800` |
+| one second under the limit | 1794324601 | 0 | starts `PULLER OK - last pull 1799s ago` |
+| at the limit | 1794324600 | 2 | `PULLER CRITICAL - last pull 1800s ago, limit 1800s \| age=1800s;;1800` |
+| long dead | 1794240000 | 2 | starts `PULLER CRITICAL - last pull 86400s ago` |
+| no marker | file absent | 2 | `PULLER CRITICAL - no completed pull recorded` |
+| not a number | `soon` | 3 | `PULLER UNKNOWN - marker is not a timestamp` |
+| empty | zero bytes | 3 | `PULLER UNKNOWN - marker is not a timestamp` |
+| later than now | 1794326500 | 0 | starts `PULLER OK - last pull 0s ago` |
+| trailing newline | `1794325986` and a newline | 0 | the fresh line |
 
-- [ ] **Step 2: Run it and see it fail.**
+- [ ] **Step 2: Run it and see it fail,** then write `checks/puller-age` to the table. The 1800 second default is three missed passes at the 10 minute pull interval, the limit the puller's compose healthcheck uses, and that reason is the one comment the script needs.
 
-Run: `checks/gh-auth.test.sh`
-Expected: FAIL, `checks/gh-auth: No such file or directory`
+Run: `checks/puller-age.test.sh`
+Expected first: FAIL, `checks/puller-age: No such file or directory`. Then: every case `ok`.
 
-- [ ] **Step 3: Write `checks/gh-auth`.** It `cd`s to `$HOME`, runs `gh auth status`, and maps the result as the table says. On failure it prints the first non-empty line of `gh`'s output with any `gh[pousr]_[A-Za-z0-9_]+` replaced by `REDACTED`. It has no timeout of its own, because the collector owns the timeout.
+- [ ] **Step 3: Write `checks/stack-health.test.sh`** with a fake `docker` first on `PATH` that prints the lines a case names, one container per line as `<service><TAB><state><TAB><status>`, and records its arguments.
 
-- [ ] **Step 4: Run it and see it pass.** Then run `checks/gh-auth` for real once and confirm `GH OK - logged in to github.com` and exit 0.
+| Case | Fake prints | Want exit | Want stdout |
+|---|---|---|---|
+| all healthy | `db`, `almanac`, `puller`, `backup`, each `running` and `Up 3 hours (healthy)` | 0 | `STACK OK - 4 services healthy` |
+| one unhealthy | `puller` is `running`, `Up 3 hours (unhealthy)` | 2 | `STACK CRITICAL - puller unhealthy` |
+| one exited | `backup` is `exited`, `Exited (1) 2 hours ago` | 2 | `STACK CRITICAL - backup exited` |
+| one missing | no `db` line | 2 | `STACK CRITICAL - db missing` |
+| two bad | `puller` unhealthy and `backup` exited | 2 | `STACK CRITICAL - puller unhealthy, backup exited` |
+| still starting | `almanac` is `running`, `Up 5 seconds (health: starting)` | 0 | `STACK OK - 4 services healthy` |
+| no health reported | `db` is `running`, `Up 3 hours` | 0 | `STACK OK - 4 services healthy` |
+| docker fails | exits 1, prints `Cannot connect to the Docker daemon` | 3 | `STACK UNKNOWN - docker not reachable` |
+| docker absent | not on `PATH` | 3 | `STACK UNKNOWN - docker not found` |
+| the right project | any | any | the fake saw the filter `label=com.docker.compose.project=brined-almanac-prod` |
+
+- [ ] **Step 4: Run it and see it fail,** then write `checks/stack-health`. It runs `docker ps -a` with that label filter and a `--format` that prints the compose service label, the state, and the status, and it reports the bad services in the fixed order `db`, `almanac`, `puller`, `backup`. Then run both checks for real once.
+
+Run: `checks/puller-age` and `checks/stack-health`
+Expected: `PULLER OK - last pull ...` and `STACK OK - 4 services healthy`, each exit 0, with the prod stack up.
 
 - [ ] **Step 5: Write `checks/collect.test.sh`** with fake checks in a temp `CHECK_DIR` and `HOST_STATE_NOW` set per run.
 
@@ -143,16 +134,14 @@ Expected: FAIL, `checks/collect: No such file or directory`
 
 - [ ] **Step 7: Write `checks/collect`.** It sources the conf, runs each check under `gtimeout "$CHECK_TIMEOUT"` (falling back to `timeout` when `gtimeout` is absent), and builds the report with `jq -n`, passing every value through `--arg` or `--argjson` so no check output is ever interpolated into a filter. `gtimeout` exits 124 on a timeout, and that is the only path to the timed-out line. It reads the previous `since` values with `jq` and treats any `jq` failure as "no previous report". It writes to `$OUT.tmp.$$` and renames. It exits 0 when the rename succeeds.
 
-- [ ] **Step 8: Write `checks/hosts/mac.conf`** with `HOST=mac`, `OUT="${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}/host-state/mac.json"`, `CHECK_DIR=..`, and `CHECKS="gh-auth"` (plus `broker` if the spike qualified one).
+- [ ] **Step 8: Write `checks/hosts/mac.conf`** with `HOST=mac`, `OUT="${BRINED_ALMANAC_STATE:-$HOME/.local/share/brined-almanac}/host-state/mac.json"`, `CHECK_DIR=..`, and `CHECKS="puller-age stack-health"`.
 
 - [ ] **Step 9: Run both test scripts and see them pass.** Add them to `[tasks.test]` in `mise.toml` and `checks/*` to the shellcheck step in `hk.pkl`.
 
 Run: `mise run test` and `mise run check`
 Expected: both pass.
 
-- [ ] **Step 10: If the spike qualified a broker command, add `checks/broker`** with the same structure as `gh-auth`: status lines `BROKER OK - broker answered` and `BROKER CRITICAL - <first line>`, and a test script with the logged-in, error, and missing-binary cases.
-
-- [ ] **Step 11: Commit and open the pull request.**
+- [ ] **Step 10: Commit and open the pull request.**
 
 ---
 
@@ -412,12 +401,13 @@ Expected: pass.
 | Check | Command | Expected |
 |---|---|---|
 | The agent is loaded | `launchctl print gui/$(id -u)/com.technicalpickles.brined-almanac.host-state` | state and last exit code 0 |
-| The report is fresh | `jq . "$STATE/host-state/mac.json"` | `gh-auth` status 0, `generated_at` within 300 seconds |
+| Docker answers under launchd | `jq '.checks[] \| select(.name=="stack-health")' "$STATE/host-state/mac.json"` | status 0, `STACK OK - 4 services healthy`. A status 3 means `docker` fails under launchd: unload the agent and stop |
+| The report is fresh | `jq . "$STATE/host-state/mac.json"` | `puller-age` status 0, `generated_at` within 300 seconds |
 | The container sees it | `mise run prod -- backfill --dry-run` | a `host-state` scan that files nothing |
-| A failure files once | Put a `gh` that exits 1 first on the agent's `PATH` by editing the plist, reload, wait 15 minutes, then scan twice | exactly one task in `brined-almanac` titled `host-state: gh-auth critical on mac since ...`; the second scan files nothing |
-| Recovery resets `since` | restore the plist, reload, wait one run | `gh-auth` status 0 with a new `since` |
+| A failure files once | With Josh's go-ahead, stop the puller container, wait 45 minutes, then scan twice | exactly two tasks in `brined-almanac`: `host-state: puller-age critical on mac since ...` and `host-state: stack-health critical on mac since ...`. The second scan files nothing |
+| Recovery resets `since` | start the puller, wait for one pull and one collector run | both checks status 0 with a new `since` |
 
-Close the test task by hand afterwards and say so in the pull request.
+Close the two test tasks by hand afterwards and say so in the pull request.
 
 - [ ] **Step 8: Measure the wake.** With Josh, sleep the Mac for at least 40 minutes and wake it. Record, from `collect.log` and the almanac container's log, the time of the first collector run and the first `host-state` scan after wake.
 
