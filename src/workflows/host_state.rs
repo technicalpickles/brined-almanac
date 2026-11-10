@@ -114,9 +114,7 @@ impl Event for HostFinding {
                 return Err(malformed("/since"));
             }
         }
-        if let Some(since) = &since
-            && !since.to_string().contains('T')
-        {
+        if since.as_ref().is_some_and(|since| split(since).is_none()) {
             return Err(malformed("/since"));
         }
         Ok(Self {
@@ -170,14 +168,14 @@ pub enum Facts {
     },
 }
 
-/// Splits `2026-11-10T14:50Z`, which `parse` has checked holds a `T`.
-fn split(since: &Slug) -> Since {
+/// Splits `2026-11-10T14:50Z` into its date and time, each a slug.
+fn split(since: &Slug) -> Option<Since> {
     let text = since.to_string();
-    let (date, time) = text.split_once('T').expect("parse checked for a T");
-    Since {
-        date: date.parse().expect("part of a slug is a slug"),
-        time: time.parse().expect("part of a slug is a slug"),
-    }
+    let (date, time) = text.split_once('T')?;
+    Some(Since {
+        date: date.parse().ok()?,
+        time: time.parse().ok()?,
+    })
 }
 
 pub fn facts(event: &HostFinding) -> Facts {
@@ -191,7 +189,10 @@ pub fn facts(event: &HostFinding) -> Facts {
         return Facts::Stale {
             target,
             host: event.host.clone(),
-            since: event.since.as_ref().map(split),
+            since: event
+                .since
+                .as_ref()
+                .map(|since| split(since).expect("parse checked the since")),
             body: event.body.clone(),
         };
     }
@@ -200,7 +201,8 @@ pub fn facts(event: &HostFinding) -> Facts {
         host: event.host.clone(),
         check: event.check.clone().expect("parse checked the check"),
         status: event.status.clone().expect("parse checked the status"),
-        since: split(event.since.as_ref().expect("parse checked the since")),
+        since: split(event.since.as_ref().expect("parse checked the since"))
+            .expect("parse checked the since"),
         body: event.body.clone(),
     }
 }

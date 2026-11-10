@@ -158,3 +158,23 @@ fn the_reports_dir_is_none_when_unset_or_empty() {
         Some("/host-state".into())
     );
 }
+
+#[test]
+fn a_since_with_an_empty_half_is_malformed() {
+    for since in ["T", "2026-11-10T", "T14:50Z", "2026-11-10 14:50Z"] {
+        let mut payload = first_event();
+        payload["since"] = json!(since);
+        let err = HostFinding::from_json(&payload).unwrap_err();
+        assert_eq!(err.pointer, "/since", "{since}");
+    }
+}
+
+#[test]
+fn a_report_naming_another_host_scans_to_one_stale_pair() {
+    let other = CRITICAL.replace("\"host\": \"mac\"", "\"host\": \"lab\"");
+    let dir = dir_with(&[("mac.json", &other)]);
+    let found = scan(dir.path());
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].1["kind"], "stale");
+    assert_eq!(found[0].1["host"], "mac");
+}

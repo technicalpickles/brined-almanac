@@ -51,7 +51,7 @@ A report is one JSON file per host, named `<host>.json` in the directory `HOST_S
 | `interval_seconds` | How often the collector runs. The Mac's is 300. |
 | `checks[]` | One entry per check: `name` (`[a-z0-9-]+`, unique in the report), `status` (0 OK, 1 warning, 2 critical, 3 unknown), `since`, and `output`. `output` is one line of at most 500 bytes. |
 
-`since` is when the check entered its current status, so it does not move while the status holds. The workflow files a critical or unknown check once its `since` is 10 minutes old, and a warning once it is 24 hours old. A report whose `generated_at` is 30 minutes old is stale, and files one task for the host in place of its checks. A time ahead of the scan's clock counts as age zero.
+`since` is when the check entered its current status, so it does not move while the status holds. The workflow files a critical or unknown check once its `since` is 10 minutes old, and a warning once it is 24 hours old. A report whose `generated_at` is older than 30 minutes is stale, and files one task for the host in place of its checks. A time ahead of the scan's clock counts as age zero.
 
 Each host declares its transport. picklelab and the WordPress droplet use pull. The droplet joins the tailnet first, which also lets it close SSH to the internet.
 
@@ -217,17 +217,17 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 - **Prefer structure:** a lesson that applies to every repository files one task to promote it to a dotfiles rule or a lint. A lesson that applies to a few files one task per repository that lacks it.
 - **Model:** none for lessons with a check.
 
-### host-state
+### host-state-reports
 
-- **Status:** shipped 2026-11-10.
+- **Status:** next. The workflow is built. The collector and the prod wiring are not.
 - **Watches:** the JSON report each host's collector writes into `HOST_STATE_REPORTS`, one file per host declared in `hosts.toml`. Unset, the scan prints a skip message and finds nothing. The Mac is the first host, and its collector runs every 5 minutes.
-- **Reports:** a task on the host's project for each check that has been failing long enough, and one when a host's report stops arriving or can't be read. The delivery ID is `<host>/<check>/<UTC date of since>` or `<host>/stale/<UTC date>`, so a rescan files nothing new, and a check that recovers and fails again on another day files a fresh task. A file in the directory that no declared host owns is logged and ignored. The thresholds are in [Host state](#host-state).
+- **Reports:** a task on the host's project for each check that has been failing long enough, and one when a host's report stops arriving or can't be read. The delivery ID is `<host>/<check>/<UTC date of since>` or `<host>/stale/<UTC date>`, so a rescan files nothing new, and a check that recovers and fails again on another day files a fresh task. A file in the directory that no declared host owns is logged and ignored. The thresholds are in the Host state section above.
 - **Model:** none.
 - **Preview:** `scripts/host-state-dry-run <reports-dir>` prints what a directory of reports would file, with no database and no token.
 
 ### service-down
 
-- **Status:** next, in M1 with security-alerts. Its checks report through [host-state](#host-state).
+- **Status:** next, in M1 with security-alerts. Its checks report through [host-state](#host-state-reports).
 - **Watches:** host-state reports from picklelab and deployed-tier hosts, including the WordPress droplet. One of its sites returned HTTP 500 for weeks while it was compromised, and nothing reported it.
 - **Reports:** a check that turned critical or stayed at warning, such as a unit that should be running and isn't, or a site that doesn't return 200.
 - **Model:** none.
@@ -257,7 +257,7 @@ Each host declares its transport. picklelab and the WordPress droplet use pull. 
 ### credential-expiry
 
 - **Status:** next, in M1 with service-down. Moved from later on 2026-11-08.
-- **Watches:** first, a host check on the Mac that the credential broker answers and `gh auth status` succeeds. It reports through [host-state](#host-state). Later, authentication errors in transcripts and service logs.
+- **Watches:** first, a host check on the Mac that the credential broker answers and `gh auth status` succeeds. It reports through [host-state](#host-state-reports). Later, authentication errors in transcripts and service logs.
 - **Why first:** on 2026-11-08 the broker was unreachable for over an hour. Every `gh` call and every signed commit hung in every agent session on the Mac, and nothing reported it. A broker that is down is a service that is down, and the host check costs nothing. The vault also records a dead Gmail refresh token that was found only when a check needed it.
 - **Reports:** a credential that has started failing, such as an expired OAuth refresh token, or a broker that stops answering.
 - **Model:** none.
