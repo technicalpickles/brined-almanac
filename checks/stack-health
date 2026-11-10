@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project=${STACK_PROJECT:-brined-almanac-prod}
+services="db almanac puller backup"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "STACK UNKNOWN - docker not found"
+  exit 3
+fi
+
+if ! ps_out=$(docker ps -a --filter "label=com.docker.compose.project=$project" \
+  --format '{{.Label "com.docker.compose.service"}}'$'\t''{{.State}}'$'\t''{{.Status}}' 2>/dev/null); then
+  echo "STACK UNKNOWN - docker not reachable"
+  exit 3
+fi
+
+bad=""
+for svc in $services; do
+  found=0
+  problem=""
+  while IFS=$'\t' read -r name state status; do
+    [ "$name" = "$svc" ] || continue
+    found=1
+    if [ "$state" != "running" ]; then
+      problem=$state
+    elif [[ $status == *"(unhealthy)"* ]]; then
+      problem=unhealthy
+    fi
+    break
+  done <<<"$ps_out"
+  [ "$found" -eq 1 ] || problem=missing
+  [ -z "$problem" ] || bad="${bad:+$bad, }$svc $problem"
+done
+
+if [ -n "$bad" ]; then
+  echo "STACK CRITICAL - $bad"
+  exit 2
+fi
+echo "STACK OK - 4 services healthy"
