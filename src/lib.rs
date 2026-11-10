@@ -1,3 +1,4 @@
+pub mod bugsink;
 pub mod providers;
 pub mod routing;
 pub mod taskwarrior;

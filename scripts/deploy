@@ -81,7 +81,7 @@ fi
 # ps and exec interpolate the whole file, so the :? guards need values; neither recreates containers.
 compose() {
   BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
-    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
+    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused \
     docker compose -f compose.prod.yaml "$@"
 }
 
@@ -102,7 +102,7 @@ echo "deploy: built brined-almanac:$tag and brined-almanac-puller:$tag (tagged p
 
 if ((db_only)); then
   BRINED_ALMANAC_GITHUB_TOKEN=unused BRINED_ALMANAC_GITHUB_ALERTS_TOKEN=unused BRINED_ALMANAC_PULLER_KEY=unused BRINED_ALMANAC_TIERS_SHA256=unused \
-    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused \
+    BRINED_ALMANAC_TASKCHAMPION_CLIENT_ID=unused BRINED_ALMANAC_TASKCHAMPION_ENCRYPTION_SECRET=unused BRINED_ALMANAC_BUGSINK_DSN=unused \
     docker compose -f compose.prod.yaml up -d --wait db
   echo "deploy: db is up; run mise run deploy for the rest"
   exit 0

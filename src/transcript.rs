@@ -10,11 +10,14 @@ use almanac::prelude::*;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static SERVER_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"'serverName': '([^']+)'").expect("serverName regex"));
 static TOOL_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"'toolName': '([^']+)'").expect("toolName regex"));
+static SURFACE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^agent-[^-]+-([a-z]+)").expect("surface regex"));
 
 /// The directory of OpenClaw transcripts the scan reads.
 pub struct Transcripts(pub PathBuf);
@@ -33,10 +36,38 @@ pub struct Skipped {
 
 #[derive(Debug)]
 pub struct ToolError {
+    /// The transcript event's own id, unique across every file.
+    pub id: String,
     pub at: At,
+    /// Where Brent was talking: `telegram`, `openwebui`, `cron` and so on, from the file name.
+    pub surface: Slug,
+    pub session: SessionKey,
     pub service: Slug,
     pub tool: Slug,
     pub text: Sample,
+}
+
+/// A transcript file's name, hashed, because some names hold a chat id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionKey(String);
+
+impl SessionKey {
+    /// The first 12 hex characters of SHA-256 over the file name.
+    fn of(name: &str) -> SessionKey {
+        let hash = Sha256::digest(name.as_bytes());
+        SessionKey(hash.iter().take(6).map(|b| format!("{b:02x}")).collect())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn surface_of(name: &str) -> Slug {
+    let surface = SURFACE
+        .captures(name)
+        .map_or("unknown", |c| c.get(1).unwrap().as_str());
+    surface.parse().expect("[a-z]+ is a slug")
 }
 
 /// An ISO 8601 timestamp that starts with a calendar day.
@@ -82,6 +113,23 @@ impl Sample {
 
     pub fn excerpt(&self) -> Excerpt {
         Excerpt(self.0.chars().take(Self::MAX).collect())
+    }
+
+    /// The one line that says why: the `error` of a JSON object, the line after a `Command
+    /// failed:` header, or else the first line with text. At most 200 characters.
+    pub fn reason(&self) -> Excerpt {
+        let parsed = serde_json::from_str::<Value>(&self.0).ok();
+        let text = match parsed.as_ref().and_then(|v| v["error"].as_str()) {
+            Some(error) => error,
+            None => &self.0,
+        };
+        let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+        let line = match (lines.next(), lines.next()) {
+            (Some(first), Some(second)) if first.starts_with("Command failed:") => second,
+            (Some(first), _) => first,
+            (None, _) => "(no text)",
+        };
+        Excerpt(line.chars().take(200).collect())
     }
 }
 
@@ -131,10 +179,15 @@ pub fn read(dir: &Path) -> Result<Read, ReadError> {
 
     let mut calls: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut found: Vec<(String, ToolError)> = Vec::new();
+    let mut found: Vec<ToolError> = Vec::new();
     let mut skipped = Skipped::default();
 
     for path in paths {
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (surface, session) = (surface_of(&name), SessionKey::of(&name));
         let bytes = fs::read(&path).map_err(|source| ReadError::File {
             path: path.clone(),
             source,
@@ -171,21 +224,21 @@ pub fn read(dir: &Path) -> Result<Read, ReadError> {
                 .and_then(|c| calls.get(c))
                 .map(String::as_str);
             let (service, tool) = identity(&text, called, message["toolName"].as_str());
-            found.push((
-                id.to_string(),
-                ToolError {
-                    at,
-                    service: slug(&service),
-                    tool: slug(&tool),
-                    text: Sample(text),
-                },
-            ));
+            found.push(ToolError {
+                id: id.to_string(),
+                at,
+                surface: surface.clone(),
+                session: session.clone(),
+                service: slug(&service),
+                tool: slug(&tool),
+                text: Sample(text),
+            });
         }
     }
 
-    found.sort_by(|(a_id, a), (b_id, b)| (&a.at, a_id).cmp(&(&b.at, b_id)));
+    found.sort_by(|a, b| (&a.at, &a.id).cmp(&(&b.at, &b.id)));
     Ok(Read {
-        errors: found.into_iter().map(|(_, e)| e).collect(),
+        errors: found,
         skipped,
     })
 }
@@ -202,16 +255,28 @@ fn remember_calls(message: &Value, calls: &mut HashMap<String, String>) {
     }
 }
 
-/// `details` as text, or the text blocks of `content` when `details` is empty.
+/// What a failed call said. `details` holds it as a string, or as an object with an `error` or
+/// a `result`. Any other `details` only names the tool and its status, and the message is in
+/// the text blocks of `content`.
 fn error_text(message: &Value) -> String {
-    let details = match &message["details"] {
+    let details = &message["details"];
+    let says_why = match details {
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Object(fields) => fields.contains_key("error") || fields.contains_key("result"),
+        _ => false,
+    };
+    let content = content_text(message);
+    if !says_why && !content.trim().is_empty() {
+        return content;
+    }
+    match details {
         Value::String(s) => s.clone(),
         Value::Null => String::new(),
         other => other.to_string(),
-    };
-    if details.trim().len() > 2 {
-        return details;
     }
+}
+
+fn content_text(message: &Value) -> String {
     message["content"]
         .as_array()
         .map(|blocks| {

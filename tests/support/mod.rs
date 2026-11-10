@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use almanac::prelude::*;
+use brined_almanac::bugsink::BugsinkClient;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::transcript::Transcripts;
 use brined_almanac::workflows::security_alerts::AlertsClient;
@@ -39,6 +40,7 @@ impl Fixture {
         Providers::new()
             .provide::<Tiers>(Arc::new(Tiers::parse("", None).expect("empty tiers")))
             .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
+            .provide::<BugsinkClient>(Arc::new(BugsinkClient(None)))
             .provide::<Transcripts>(Arc::new(Transcripts(self.path().to_path_buf())))
             .provide::<dyn Tracker>(tracker)
     }
@@ -114,6 +116,8 @@ pub enum Details {
     NamedOnly,
     Empty,
     Object,
+    /// Names the tool and says it failed, with the message only in `content`.
+    StatusOnly,
 }
 
 pub struct Failure {
@@ -263,6 +267,14 @@ impl Failure {
                 ("tool", self.tool_value()),
                 ("error", Value::from(self.error.as_str())),
             ]),
+            Details::StatusOnly => {
+                let (server, tool) = self.tool.split_once("__").unwrap_or(("", &self.tool));
+                obj([
+                    ("mcpServer", Value::from(server)),
+                    ("mcpTool", Value::from(tool)),
+                    ("status", Value::from("error")),
+                ])
+            }
             Details::Mcp | Details::NamedOnly => Value::from(self.details_repr()),
         }
     }

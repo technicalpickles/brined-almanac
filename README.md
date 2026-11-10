@@ -21,7 +21,7 @@ Run `mise install && hk install` to arm the hooks, and `mise run check` to run t
 
 ## Running it
 
-There are two workflows. `tool-failures` reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
+There are two workflows. `tool-failures` reads OpenClaw transcripts, clusters the failed tool calls by service, tool, error class and day, and files one issue per cluster that crosses its threshold. The same scan also ships each failed tool call to [Bugsink](https://www.bugsink.com/) as one event, which is taking over grouping from the clusters (`docs/superpowers/plans/2026-11-09-transcript-shipper.md`). Brineworks failures go to `technicalpickles/brineworks`, everything else to `technicalpickles/pickleclaw`, and nothing files on a repo that isn't private. `security-alerts` reads the open Dependabot and secret scanning alerts on deployed, active, and maintained repositories, and files a taskwarrior task for each repository with an alert still open past its severity window, plus one task listing repositories where those alerts are off. The design docs in `docs/superpowers/specs/` have the full story.
 
 The binary has almanac's verbs: `synth` prints the manifest, `check` validates the providers, `backfill [--dry-run]` runs the scan once, and `run` stays up. It reads its settings from the environment:
 
@@ -30,6 +30,8 @@ The binary has almanac's verbs: `synth` prints the manifest, `check` validates t
 | `BRENT_TRANSCRIPTS` | Directory of `*.jsonl` transcripts. Defaults to `transcripts/`, which is gitignored. |
 | `GITHUB_TOKEN` | Turns on the GitHub tracker. Without it, each would-be issue prints to stdout instead. |
 | `GITHUB_ALERTS_TOKEN` | A read-only token for the security-alerts scan. Unset, that scan prints a skip message and finds nothing. |
+| `BUGSINK_DSN` | The Bugsink project that receives one event per failed tool call. Unset, the shipper prints a skip message and sends nothing. It sends only on a live run. |
+| `BUGSINK_CURSOR` | Where the shipper keeps the time of the newest event Bugsink accepted. Defaults to `/var/lib/brined-almanac/bugsink/cursor`. |
 | `DATABASE_URL` | The Postgres store that remembers what's been filed. Required for live runs; set by `mise run live`, never by hand (see below). |
 | `ALMANAC_MODE` | `live` lets effects reach GitHub. Anything else is a dry run, and `--dry-run` always wins. |
 

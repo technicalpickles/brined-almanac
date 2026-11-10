@@ -6,6 +6,7 @@ use regex::RegexSet;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::bugsink::ship_from;
 use crate::transcript::{At, Sample, ToolError, Transcripts, read};
 
 pub struct Class {
@@ -186,6 +187,7 @@ pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<ToolFailed>>, StepErr
             read.skipped.undated
         );
     }
+    ship_from(scanner, &read.errors).await?;
     Ok(cluster(read.errors)
         .into_iter()
         .map(|(key, c)| {
