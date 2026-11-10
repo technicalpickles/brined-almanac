@@ -68,6 +68,12 @@ if ! grep -q '^TASKCHAMPION_SYNC_URL=.' "$STATE/prod.env"; then
 fi
 echo "deploy: state dir ok ($STATE)"
 
+# Docker creates a missing bind source as a root-owned directory, which the collector could not write.
+# --db-only starts no almanac, so it skips this.
+if ((!db_only)); then
+  mkdir -p "$STATE/host-state"
+fi
+
 # The private tier declarations live in the vault, not the repo; compose mounts this copy.
 # --db-only starts no almanac, so it skips the fetch.
 if ((!db_only)); then
@@ -123,6 +129,15 @@ if ! compose exec -T almanac brined-almanac sync-check; then
   exit 1
 fi
 
+# The stack is up and checked by now, so a failed install is reported last instead of cutting the deploy short.
+install_failed=0
+scripts/install-host-state || install_failed=1
+
 compose ps
 curl -fsS http://127.0.0.1:8788/healthz
 echo
+
+if ((install_failed)); then
+  echo "deploy: the stack is running, but the host-state LaunchAgent did not install; see $runbook, section Host state" >&2
+  exit 1
+fi

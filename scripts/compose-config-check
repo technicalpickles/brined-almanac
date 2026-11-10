@@ -38,6 +38,9 @@ jq -e '
   and .services.almanac.environment.LOCAL_TIERS == "/etc/brined-almanac/tiers.toml"
   and ([.services.almanac.volumes[] | select(.target == "/etc/brined-almanac/tiers.toml")] | length == 1 and .[0].read_only == true)
   and .services.almanac.environment.LOCAL_TIERS_SHA256 == "h"
+  and .services.almanac.environment.HOST_STATE_REPORTS == "/host-state"
+  and ([.services.almanac.volumes[] | select(.target == "/host-state")] | length == 1 and .[0].read_only == true)
+  and ([.services[] | select(.volumes != null) | .volumes[] | select(.target == "/host-state")] | length == 1)
   and .services.almanac.ports[0].published == "8788"
   and .services.almanac.ports[0].host_ip == "127.0.0.1"
   and .services.puller.environment.PULLER_KEY == "y"

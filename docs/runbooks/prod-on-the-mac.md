@@ -633,6 +633,76 @@ grep -rl 'github_pat_' "$STATE"
 
 Both print nothing.
 
+## Host state
+
+A LaunchAgent on the Mac runs `checks/collect` every 300 seconds. The collector
+runs `puller-age` and `stack-health` and writes their results to
+`$STATE/host-state/mac.json`. The almanac container mounts that directory
+read-only at `/host-state` (`HOST_STATE_REPORTS`), and each scan files a task
+into `brined-almanac` when a check has stayed critical or unknown for 10
+minutes, or warning for 24 hours, or when the report is older than 30 minutes.
+A rescan files nothing new.
+
+- Report: `$STATE/host-state/mac.json`.
+- Collector log: `$STATE/host-state.log`. It sits one level above
+  `host-state/` because the scan logs every file in that directory that no
+  declared host owns.
+- Plist: `~/Library/LaunchAgents/com.technicalpickles.brined-almanac.host-state.plist`,
+  rendered from `checks/launchd/` by `scripts/install-host-state`. It points at
+  the main checkout, so the agent follows `main`.
+
+`mise run deploy` creates `$STATE/host-state` before `up` (Docker would create
+a missing bind source as a root-owned directory) and installs the agent once
+the stack is healthy. If the install fails, the deploy says the stack is
+running and exits 1. Fix the cause and run `scripts/install-host-state` again;
+it unloads a loaded agent before loading, so it is safe to repeat.
+
+To see what the installer would write, without changing anything:
+
+```sh
+scripts/install-host-state --print
+```
+
+Run one check by hand:
+
+```sh
+checks/puller-age
+checks/stack-health
+```
+
+Each prints one status line. The exit code is 0 OK, 1 warning, 2 critical, 3
+unknown.
+
+Run the collector by hand:
+
+```sh
+checks/collect checks/hosts/mac.conf
+jq . "$STATE/host-state/mac.json"
+```
+
+Read the agent's state:
+
+```sh
+launchctl print gui/$(id -u)/com.technicalpickles.brined-almanac.host-state
+```
+
+`state = not running` between runs is normal. `last exit code = 0` means the
+last run finished; `runs` counts them. A check that failed is not a failed run:
+the collector exits 0 and records the status in the report. `stack-health`
+status 3 with `docker not reachable` means `docker` fails under launchd, so
+check the plist's `PATH` and `HOME`.
+
+To unload the agent:
+
+```sh
+launchctl bootout gui/$(id -u)/com.technicalpickles.brined-almanac.host-state
+rm ~/Library/LaunchAgents/com.technicalpickles.brined-almanac.host-state.plist
+```
+
+With the agent gone the report goes stale, and the next scan after 30 minutes
+files `host-state: no report from mac since ...`. Unload the agent only when
+you also mean to stop that.
+
 ## Backups
 
 Losing the `pgdata` volume refiles every issue. The `backup` service writes
