@@ -653,9 +653,16 @@ A rescan files nothing new.
 
 `mise run deploy` creates `$STATE/host-state` before `up` (Docker would create
 a missing bind source as a root-owned directory) and installs the agent once
-the stack is healthy. If the install fails, the deploy says the stack is
+the stack is healthy. Before `up`, it also runs the collector once, so a
+report exists when the almanac's first scan runs; if that fails, the deploy
+stops before `up`. If the install fails, the deploy says the stack is
 running and exits 1. Fix the cause and run `scripts/install-host-state` again;
 it unloads a loaded agent before loading, so it is safe to repeat.
+
+Deploy from the main checkout, after the host-state work is merged: the deploy
+refuses when `checks/collect` is missing. The agent runs whatever that
+checkout's working tree holds, so leaving the checkout on a branch without
+`checks/collect` stops the report, and a task files after 30 minutes.
 
 To see what the installer would write, without changing anything:
 
@@ -686,8 +693,9 @@ Read the agent's state:
 launchctl print gui/$(id -u)/com.technicalpickles.brined-almanac.host-state
 ```
 
-`state = not running` between runs is normal. `last exit code = 0` means the
-last run finished; `runs` counts them. A check that failed is not a failed run:
+`state = not running` between runs is normal. Before the agent's first run
+finishes, `last exit code = (never exited)`; after that, `last exit code = 0`
+means the last run finished; `runs` counts them. A check that failed is not a failed run:
 the collector exits 0 and records the status in the report. `stack-health`
 status 3 with `docker not reachable` means `docker` fails under launchd, so
 check the plist's `PATH` and `HOME`.

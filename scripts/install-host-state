@@ -29,7 +29,7 @@ plist=$plist_dir/$label.plist
 # One level above host-state/, which the workflow scans: a log there would count as a file no host owns.
 log=$state/host-state.log
 
-for value in "$checkout" "$HOME" "$log"; do
+for value in "$checkout" "$HOME" "$state"; do
   case $value in
     *[\&\<\>\"\']*)
       echo "install-host-state: refusing a path with XML metacharacters: $value" >&2
@@ -48,6 +48,7 @@ rendered=$(
   while IFS= read -r line; do
     line=${line//@CHECKOUT@/$checkout}
     line=${line//@HOME@/$HOME}
+    line=${line//@STATE@/$state}
     line=${line//@LOG@/$log}
     printf '%s\n' "$line"
   done <"$here/../checks/launchd/$label.plist.template"
@@ -61,13 +62,37 @@ fi
 domain=gui/$(id -u)
 
 mkdir -p "$plist_dir" "$state/host-state"
-printf '%s\n' "$rendered" >"$plist"
-plutil -lint "$plist"
+new_plist=$(mktemp "$plist_dir/.$label.XXXXXX")
+trap 'rm -f "$new_plist"' EXIT
+printf '%s\n' "$rendered" >"$new_plist"
+plutil -lint "$new_plist"
+mv "$new_plist" "$plist"
+
+manual="launchctl bootstrap $domain $plist"
 
 if launchctl print "$domain/$label" >/dev/null 2>&1; then
   launchctl bootout "$domain/$label"
+  # bootout returns before launchd has finished tearing the service down, and a bootstrap in that
+  # window fails with "Input/output error" or "Operation already in progress".
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    launchctl print "$domain/$label" >/dev/null 2>&1 || break
+    sleep 1
+  done
 fi
-launchctl bootstrap "$domain" "$plist"
+
+loaded=0
+for attempt in 1 2 3; do
+  if launchctl bootstrap "$domain" "$plist"; then
+    loaded=1
+    break
+  fi
+  echo "install-host-state: bootstrap attempt $attempt of 3 failed" >&2
+  sleep 2
+done
+if ((!loaded)); then
+  echo "install-host-state: the agent is NOT loaded; the plist is at $plist. Load it by hand with: $manual" >&2
+  exit 1
+fi
 echo "install-host-state: loaded $label"
 
 "$checkout/checks/collect" "$checkout/checks/hosts/mac.conf"
