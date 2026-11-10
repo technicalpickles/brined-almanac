@@ -121,8 +121,8 @@ Almanac files a GitHub issue when the tracker reports a new problem or a regress
 
 A closed GitHub issue must not silence its failure. Almanac files again only after the tracker regresses an issue, and only a resolved issue can regress, so a close with an unresolved tracker issue hides every later event. The scan closes that gap, and the worker never touches the tracker.
 
-- [ ] The scan finds each almanac issue closed as completed whose Bugsink issue is still unresolved, using the Bugsink link in the issue body, and resolves it with a comment that links the close.
-- [ ] A close as not planned mutes the Bugsink issue instead of resolving it, since a resolve would refile on the next event. Check that Bugsink can unmute on volume before choosing the threshold.
+- [x] The scan finds each almanac issue closed as completed whose Bugsink issue is still unresolved, using the Bugsink link in the issue body, and resolves it with a comment that links the close.
+- [x] A close as not planned mutes the Bugsink issue instead of resolving it, since a resolve would refile on the next event. Check that Bugsink can unmute on volume before choosing the threshold.
 - [ ] The almanac-work skill comments its proof on the issue. It closes the issue only as completed, with a merged pull request and a recurrence check, and only after D4's reviewed runs.
 
 Until this lands, `mise run cutover --apply` resolves every Bugsink issue whose almanac issues are all closed.

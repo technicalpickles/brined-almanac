@@ -93,9 +93,11 @@ Do this once, before the first deploy. The seven steps in 1Password come first.
    repo. Every scan sends the transcripts' new failed tool calls there as
    events (see "Bugsink gets no events" below). Give the item a second field,
    `api_token`: an API token that can read issues and their events in that
-   project. The same scan reads the project's open issues back with it and
-   files a GitHub issue for each one that nobody has resolved or muted (see
-   "Bugsink issues do not file" below).
+   project, and comment on, resolve and mute them. The same scan reads the
+   project's open issues back with it and files a GitHub issue for each one
+   that nobody has resolved or muted (see "Bugsink issues do not file" below).
+   It also resolves or mutes an issue whose almanac issue was closed (see
+   "Closed issues do not resolve" below).
 
 `prod.secrets.env` in the repo holds the `op://` references to these items.
 The item and field names above must match it.
@@ -579,6 +581,32 @@ read and the status. A `401` or `403` means the token is wrong or was deleted.
 An issue files once its event count reaches its class's threshold, so a quiet
 issue stays unfiled until it grows. Muting an issue in Bugsink stops its
 filing, and resolving it does too until it regresses.
+
+### Closed issues do not resolve
+
+Each scan reads the almanac issues in both repositories before it files, using
+`GITHUB_TOKEN`. A Bugsink issue is acted on when its newest almanac issue is
+closed and was filed for the issue's current regression count:
+
+- Closed as completed: the scan comments on the Bugsink issue with a link to the
+  close, then resolves it.
+- Closed as not planned: the scan comments, then mutes it until 50 events arrive
+  within a day. `MUTE_WAKE_EVENTS` in `src/resolve_on_close.rs` sets the 50.
+  The scan does not mute it again after it wakes.
+- Closed with no reason, or reopened: nothing changes.
+
+The scan prints a `bugsink-issues:` line when it cannot:
+
+- `GITHUB_TOKEN is not set, not resolving closed issues` means the container has
+  no token. Check `BRINED_ALMANAC_GITHUB_TOKEN`, then run `mise run deploy`.
+- `not resolving closed issues: GitHub ... answered <status>` means the read
+  failed. Filing goes on, and the next scan tries again.
+- `resolve <issue>: answered <status>`, or the same for `mute-until`, means
+  Bugsink refused. A `401` or `403` means the token lacks the right to comment,
+  resolve or mute. The next scan tries again.
+
+A dry run prints `dry run, would resolve <issue> for <url>` and changes nothing.
+`scripts/bugsink-dry-run` shows what the next live scan would do.
 
 ### Files in the state directory
 
