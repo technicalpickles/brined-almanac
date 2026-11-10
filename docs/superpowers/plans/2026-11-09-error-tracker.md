@@ -18,7 +18,7 @@
 | `transcript-shipper` | brined-almanac | `bugsink-service` live | prod secret, `mise run deploy` |
 | `cutover` | brined-almanac | `transcript-shipper` live | go-ahead to resolve history |
 | `tracker-consumer` | brined-almanac | `cutover` done | `mise run deploy` |
-| `worker-resolves` | brined-almanac | `tracker-consumer` live | the open posting decision |
+| `worker-resolves` | brined-almanac | `tracker-consumer` live | `mise run deploy` |
 
 `server-reporting` and `transcript-shipper` do not depend on each other and can run at the same time.
 
@@ -119,23 +119,26 @@ Almanac files a GitHub issue when the tracker reports a new problem or a regress
 
 ## worker-resolves
 
-The almanac-work skill closes the loop in the tracker.
+A closed GitHub issue must not silence its failure. Almanac files again only after the tracker regresses an issue, and only a resolved issue can regress, so a close with an unresolved tracker issue hides every later event. The scan closes that gap, and the worker never touches the tracker.
 
-- [ ] The issue body carries the Bugsink link, so the skill resolves the tracker issue when it closes the GitHub issue with proof, and adds a comment that links the proof.
-- [ ] When the resolve is denied in an unattended run, the skill puts the exact command in its report.
+- [ ] The scan finds each almanac issue closed as completed whose Bugsink issue is still unresolved, using the Bugsink link in the issue body, and resolves it with a comment that links the close.
+- [ ] A close as not planned mutes the Bugsink issue instead of resolving it, since a resolve would refile on the next event. Check that Bugsink can unmute on volume before choosing the threshold.
+- [ ] The almanac-work skill comments its proof on the issue. It closes the issue only as completed, with a merged pull request and a recurrence check, and only after D4's reviewed runs.
 
-**Blocked on** decision D4.
+Until this lands, `mise run cutover --apply` resolves every Bugsink issue whose almanac issues are all closed.
+
+**Verify.** Close an issue in a test repository, run the scan, and read that the Bugsink issue resolved. Send one more event and read that a regression issue files.
 
 ## Decisions for Josh
 
-Josh accepted the plan with these recommendations on 2026-11-09. D4 is still open.
+Josh accepted the plan with these recommendations on 2026-11-09. He decided D4 on 2026-11-10.
 
 | | Decision | Outcome |
 |---|---|---|
 | D1 | Retention on a 30G `/srv` | 10,000 events per project, which is Bugsink's default, and a 90-day age cap. The spike stored 358 events in 2.8 MB. |
 | D2 | Postgres or SQLite for Bugsink | Postgres, per Bugsink's docs. It costs one more container and the backup wiring. |
 | D3 | Phone-home | Off. It sends install metadata and counts. |
-| D4 | May the unattended worker comment, close and resolve on its own | Open. Carried over from the almanac-work skill. |
+| D4 | May the unattended worker comment, close and resolve on its own | The worker comments with proof. It never resolves, because the scan does. It may close an issue as completed, with a merged pull request and a recurrence check, after a few reviewed comment-only runs. Closing as not planned, and muting, stay with Josh. |
 
 ## Appendix A. What the spike proved
 
