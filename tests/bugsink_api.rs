@@ -1,11 +1,10 @@
-use std::sync::{Arc, Mutex};
+mod support;
 
 use brined_almanac::bugsink::Dsn;
 use brined_almanac::bugsink_api::{Issue, Labels, Tag, TurningPoint, generation, labels};
 use brined_almanac::cutover::Bugsink;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
+use support::api::Api;
 
 const ISSUES: &str = include_str!("fixtures/bugsink/issues.json");
 const TAGS: &str = include_str!("fixtures/bugsink/tags.json");
@@ -94,66 +93,6 @@ fn generation_counts_only_regressions_and_reopenings() {
     );
 }
 
-struct Seen {
-    target: String,
-    auth: String,
-}
-
-/// A read API on loopback. `routes` pairs a request target (path and query) with its JSON
-/// answer; a `{base}` in the answer becomes the server's own origin, so a page can link to the next.
-async fn api(routes: Vec<(&'static str, Value)>) -> (String, Arc<Mutex<Vec<Seen>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let origin = format!("http://{}", listener.local_addr().unwrap());
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let (log, base) = (seen.clone(), origin.clone());
-    tokio::spawn(async move {
-        loop {
-            let (socket, _) = listener.accept().await.unwrap();
-            let (log, routes, base) = (log.clone(), routes.clone(), base.clone());
-            tokio::spawn(async move {
-                let mut socket = BufReader::new(socket);
-                loop {
-                    let mut request_line = String::new();
-                    if socket.read_line(&mut request_line).await.unwrap_or(0) == 0 {
-                        return;
-                    }
-                    let target = request_line.split(' ').nth(1).unwrap_or("").to_string();
-                    let mut auth = String::new();
-                    loop {
-                        let mut header = String::new();
-                        socket.read_line(&mut header).await.unwrap();
-                        let header = header.trim_end();
-                        if header.is_empty() {
-                            break;
-                        }
-                        let (name, value) = header.split_once(':').unwrap();
-                        if name.eq_ignore_ascii_case("authorization") {
-                            auth = value.trim().to_string();
-                        }
-                    }
-                    let found = routes.iter().find(|(t, _)| *t == target);
-                    log.lock().unwrap().push(Seen {
-                        target: target.clone(),
-                        auth,
-                    });
-                    let reply = match found {
-                        Some((_, body)) => {
-                            let body = body.to_string().replace("{base}", &base);
-                            format!(
-                                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
-                                body.len()
-                            )
-                        }
-                        None => "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n".to_string(),
-                    };
-                    socket.get_mut().write_all(reply.as_bytes()).await.unwrap();
-                }
-            });
-        }
-    });
-    (origin, seen)
-}
-
 fn client(origin: &str) -> Bugsink {
     let dsn: Dsn = format!("http://0123abcd@{}/7", origin.trim_start_matches("http://"))
         .parse()
@@ -167,27 +106,25 @@ fn body(raw: &str) -> Value {
 
 #[tokio::test]
 async fn open_issues_asks_for_the_projects_open_state_with_the_bearer_token() {
-    let (origin, seen) = api(vec![(
+    let api = Api::serve(vec![(
         "/api/canonical/0/issues/?project=7&state=open",
         body(ISSUES),
     )])
     .await;
-    let issues = client(&origin).open_issues().await.unwrap();
+    let issues = client(&api.origin).open_issues().await.unwrap();
     assert_eq!(issues.len(), 2);
-    let seen = seen.lock().unwrap();
-    assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].auth, "Bearer api-token");
     assert_eq!(
-        seen[0].target,
-        "/api/canonical/0/issues/?project=7&state=open"
+        api.targets(),
+        ["/api/canonical/0/issues/?project=7&state=open"]
     );
+    assert_eq!(api.seen.lock().unwrap()[0].auth, "Bearer api-token");
 }
 
 #[tokio::test]
 async fn a_list_follows_the_next_link_to_the_last_page() {
     let issues: Value = body(ISSUES);
     let (first, second) = (issues["results"][0].clone(), issues["results"][1].clone());
-    let (origin, seen) = api(vec![
+    let api = Api::serve(vec![
         (
             "/api/canonical/0/issues/?project=7&state=open",
             json!({"next": "{base}/api/canonical/0/issues/?project=7&state=open&cursor=abc", "results": [first]}),
@@ -198,16 +135,16 @@ async fn a_list_follows_the_next_link_to_the_last_page() {
         ),
     ])
     .await;
-    let found = client(&origin).open_issues().await.unwrap();
+    let found = client(&api.origin).open_issues().await.unwrap();
     let names: Vec<&str> = found.iter().map(|i| i.friendly_id.as_str()).collect();
     assert_eq!(names, ["BRENT-12", "BRENT-13"]);
-    assert_eq!(seen.lock().unwrap().len(), 2);
+    assert_eq!(api.targets().len(), 2);
 }
 
 #[tokio::test]
 async fn tags_and_history_are_read_by_the_issue_id() {
     let issue: Issue = page::<Issue>(ISSUES).remove(0);
-    let (origin, seen) = api(vec![
+    let api = Api::serve(vec![
         (
             "/api/canonical/0/issues/6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01/tags/",
             body(TAGS),
@@ -218,26 +155,19 @@ async fn tags_and_history_are_read_by_the_issue_id() {
         ),
     ])
     .await;
-    let bugsink = client(&origin);
+    let bugsink = client(&api.origin);
     assert_eq!(bugsink.tags(&issue).await.unwrap().len(), 7);
     assert_eq!(generation(&bugsink.history(&issue).await.unwrap()), 2);
-    let targets: Vec<String> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|s| s.target.clone())
-        .collect();
-    assert_eq!(targets.len(), 2);
-    assert!(targets[0].ends_with("/tags/") && targets[1].contains("issue-history/?issue="));
+    assert_eq!(api.targets().len(), 2);
 }
 
 #[tokio::test]
 async fn a_refusal_is_an_error_that_names_the_read_and_not_the_host() {
-    let (origin, _) = api(vec![]).await;
-    let err = client(&origin).open_issues().await.unwrap_err();
+    let api = Api::serve(vec![]).await;
+    let err = client(&api.origin).open_issues().await.unwrap_err();
     assert!(err.contains("Bugsink issue list"), "{err}");
     assert!(err.contains("404"), "{err}");
-    assert!(!err.contains(&origin), "{err}");
+    assert!(!err.contains(&api.origin), "{err}");
 }
 
 #[test]

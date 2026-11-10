@@ -10,10 +10,12 @@ use github::tracker::GithubIssues;
 use taskchampion::{ServerConfig, Uuid};
 
 use crate::bugsink::{Bugsink, BugsinkClient, Cursor, Dsn};
+use crate::cutover;
 use crate::routing::{AnyTracker, Router};
 use crate::taskwarrior::{Taskwarrior, TaskwarriorConfig};
 use crate::tiers::Tiers;
 use crate::transcript::Transcripts;
+use crate::workflows::bugsink_issues::BugsinkReader;
 use crate::workflows::security_alerts::AlertsClient;
 
 const API: &str = "https://api.github.com";
@@ -340,6 +342,19 @@ pub fn bugsink_client_from(
     ))))
 }
 
+/// The reader for `BUGSINK_API_TOKEN` and `BUGSINK_DSN`, or none when either is unset. An empty
+/// value is unset, as in `choose`. The `Err` never carries a value.
+pub fn bugsink_reader_from(
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<BugsinkReader, String> {
+    let lookup = |key: &str| lookup(key).filter(|value| !value.is_empty());
+    let (Some(raw), Some(token)) = (lookup("BUGSINK_DSN"), lookup("BUGSINK_API_TOKEN")) else {
+        return Ok(BugsinkReader(None));
+    };
+    let dsn = raw.parse::<Dsn>()?;
+    Ok(BugsinkReader(Some(cutover::Bugsink::new(&dsn, token))))
+}
+
 /// Almanac's own rule for a live run, which it keeps to itself: `ALMANAC_MODE=live`, and no
 /// `--dry-run`. The shipper sends outside almanac's effects, so it has to ask the same question.
 fn live(mode: Option<String>, mut args: impl Iterator<Item = String>) -> bool {
@@ -353,10 +368,13 @@ pub fn all(_config: &Config) -> Providers {
     let live = live(env::var("ALMANAC_MODE").ok(), env::args());
     let bugsink =
         bugsink_client_from(|key| env::var(key).ok(), live).unwrap_or_else(|err| panic!("{err}"));
+    let reader =
+        bugsink_reader_from(|key| env::var(key).ok()).unwrap_or_else(|err| panic!("{err}"));
     Providers::new()
         .provide::<Tiers>(Arc::new(tiers))
         .provide::<AlertsClient>(Arc::new(alerts_client_from(|key| env::var(key).ok())))
         .provide::<BugsinkClient>(Arc::new(bugsink))
+        .provide::<BugsinkReader>(Arc::new(reader))
         .provide::<Transcripts>(Arc::new(Transcripts(PathBuf::from(dir))))
         .provide::<dyn Tracker>(tracker_from(choice))
 }
