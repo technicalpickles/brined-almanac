@@ -126,18 +126,26 @@ op document get tiers.toml --vault brined-almanac --output local/tiers.toml
 
 ### State directory
 
-Create the directory. Copy the token from step 5 in 1Password, then write it
-from the clipboard so it never appears on a command line:
+Create the directory:
 
 ```sh
 mkdir -p "$STATE/transcripts" "$STATE/backups"
-(umask 077; pbpaste > "$STATE/op-token")
-chmod 600 "$STATE/op-token"
 ```
 
-To paste into the terminal instead, use `read -rs token` and then
-`(umask 077; printf '%s' "$token" > "$STATE/op-token"); unset token`. Never put
-the token itself in a command.
+The service account token lives in Automic Vault, not on disk. Copy the token
+from step 5 in 1Password, then save it. `av` prompts for the value, so it never
+appears on a command line:
+
+```sh
+av save BRINED_ALMANAC_OP_TOKEN
+```
+
+`scripts/deploy`, `scripts/cutover` and `scripts/bugsink-dry-run` run
+themselves under `av inject +BRINED_ALMANAC_OP_TOKEN`, so each use is approved
+on the phone or the Mac and works from an agent session. For a hand-typed
+command, wrap it the way the commands below do. Only
+`scripts/live-interop` still reads `$STATE/op-token`; if you run it, write the
+file with `(umask 077; pbpaste > "$STATE/op-token")` and `chmod 600` it.
 
 Write `$STATE/prod.env`:
 
@@ -173,7 +181,7 @@ ssh-keyscan picklelab > "$STATE/known_hosts"
 Check that the service account can read the private key:
 
 ```sh
-OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op read "op://brined-almanac/puller/private key?ssh-format=openssh" | head -1
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op read "op://brined-almanac/puller/private key?ssh-format=openssh" | head -1
 ```
 
 The output is one line, the OpenSSH private key header. If you see more, or an
@@ -202,7 +210,7 @@ delete it:
 
 ```sh
 key=$(mktemp)
-OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op read "op://brined-almanac/puller/private key?ssh-format=openssh" > "$key"
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op read "op://brined-almanac/puller/private key?ssh-format=openssh" > "$key"
 ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab sessions | jq '.sessions | length'
 ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab version; echo "exit $?"
 rm -f "$key"
@@ -323,7 +331,7 @@ docker network create ba-preview
 docker run -d --name ba-preview-db --network ba-preview -e POSTGRES_USER=almanac -e POSTGRES_DB=almanac -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17-alpine
 until docker exec ba-preview-db pg_isready -U almanac -q; do sleep 1; done
 (set -o pipefail; docker exec brined-almanac-prod-db-1 pg_dump -U almanac almanac | docker exec -i ba-preview-db psql -q -v ON_ERROR_STOP=1 -U almanac almanac)
-OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op run --env-file prod.secrets.env -- sh -c 'GITHUB_ALERTS_TOKEN=$BRINED_ALMANAC_GITHUB_ALERTS_TOKEN exec "$@"' sh docker run --rm --network ba-preview -e DATABASE_URL=postgres://almanac@ba-preview-db:5432/almanac -e BRENT_TRANSCRIPTS=/transcripts -v "$STATE/transcripts:/transcripts:ro" -e GITHUB_ALERTS_TOKEN -e LOCAL_TIERS=/etc/brined-almanac/tiers.toml -v "$STATE/tiers.toml:/etc/brined-almanac/tiers.toml:ro" brined-almanac:prod backfill > "$STATE/preview.out"
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op run --env-file prod.secrets.env -- sh -c 'GITHUB_ALERTS_TOKEN=$BRINED_ALMANAC_GITHUB_ALERTS_TOKEN exec "$@"' sh docker run --rm --network ba-preview -e DATABASE_URL=postgres://almanac@ba-preview-db:5432/almanac -e BRENT_TRANSCRIPTS=/transcripts -v "$STATE/transcripts:/transcripts:ro" -e GITHUB_ALERTS_TOKEN -e LOCAL_TIERS=/etc/brined-almanac/tiers.toml -v "$STATE/tiers.toml:/etc/brined-almanac/tiers.toml:ro" brined-almanac:prod backfill > "$STATE/preview.out"
 ```
 
 `op run` resolves every secret in `prod.secrets.env`, but the container gets
@@ -359,7 +367,7 @@ docker rm -f ba-preview-db && docker network rm ba-preview && rm "$STATE/preview
    mise run deploy
    ```
 
-The task checks that `$STATE` has `prod.env`, `op-token` (mode 600),
+The task checks that `$STATE` has `prod.env`,
 `known_hosts`, and `transcripts/`, then fetches `tiers.toml` from the vault.
 It refuses while prod's `pending` table holds events: a binary with a different payload shape fails them, and their
 delivery ids stay seen, so they never run
@@ -403,7 +411,7 @@ on the Mac. Find the SHA with `docker images brined-almanac`.
    real secrets, so it goes through `op run`:
 
    ```sh
-   OP_SERVICE_ACCOUNT_TOKEN=$(cat "$STATE/op-token") op run --env-file prod.secrets.env -- env -u COMPOSE_PROJECT_NAME docker compose -f compose.prod.yaml up -d --wait
+   av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op run --env-file prod.secrets.env -- env -u COMPOSE_PROJECT_NAME docker compose -f compose.prod.yaml up -d --wait
    ```
 
 Migrations are forward-only. If the newer build ran a migration that the older
@@ -452,15 +460,14 @@ and moves `prod` back.
   `authorized_keys` line on picklelab with the new public key. Run
   `mise run deploy`.
 - **Service account token.** Create a new token in 1Password, then overwrite
-  the file:
+  the Automic Vault entry:
 
   ```sh
-  (umask 077; pbpaste > "$STATE/op-token")
-  chmod 600 "$STATE/op-token"
+  av save BRINED_ALMANAC_OP_TOKEN
   ```
 
-  Copy the new token from 1Password first. The `read -rs` flow from "State
-  directory" works too.
+  Copy the new token from 1Password first. If you use `scripts/live-interop`,
+  rewrite `$STATE/op-token` too.
 
   The next `mise run deploy` uses it.
 - **Bugsink DSN.** Create a new DSN on the `brent-tool-failures` project in
