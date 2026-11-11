@@ -37,6 +37,7 @@ The body gives tool, class, day, count, first, last, and one sample. Everything 
 | Was it fixed | `gh pr list -R <repo> --state merged --search <tool>` and `git log --since=<last>` on the file that defines the tool; `docs/incidents/`, `docs/journal/`, `docs/retrospective/` in the target repo; `task status:completed description.has:<tool>` |
 | Is the fix deployed | brineworks: `/health` returns the running sha, compare with `git merge-base --is-ancestor`; pickleclaw: `openclaw-ro --target picklelab drift`. Either proves what runs now, not when it shipped. Say so |
 | What the tool does | the target repo's CLAUDE.md, then the file that registers the tool |
+| Which model made the calls | the transcript's model per turn. A session pinned to a different model than the configured primary can be the whole cause |
 
 Decide: fixed, by design or wrong repo, real and open, or cannot tell. A model's reading closes nothing. A close names a merged pull request or a measured absence.
 
@@ -53,11 +54,52 @@ Then fix what now lies. A status line in an incident doc that still says "not ye
 
 **By design, or another repo's problem.** Close with the proof above, file a task under the right project, and link it.
 
+The close reason acts on the whole Bugsink fingerprint, `[service, tool, class]`, not just this issue. `completed` resolves it, so the next event reopens it as a regression. `not planned` mutes it, so a real failure that lands in the same fingerprint stays silent. When the fingerprint's class is `other`, or otherwise mixes this cause with ones that could be real, recommend `hold until <task>` for the classifier fix that splits them out, and close after it lands.
+
 **Real and open.** Branch in a worktree, failing repro first, fix, pull request. Follow the target repo's CLAUDE.md for setup and tests. The body's `## Why` opens with the report, and `Closes #n` for every issue in the case. Never merge.
 
 **Cannot tell.** One comment: what was found, what was not, what would settle it. Leave the issue open.
 
-In every shape, follow-ups become taskwarrior tasks under the target repo's project, and the session gets a devlog entry.
+In every shape, follow-ups become taskwarrior tasks under the target repo's project, the case gets a record (below), and the session gets a devlog entry.
+
+## Case record
+
+Every worked case leaves one record in the repo that owns its issues, at `docs/almanac/cases/<YYYY-MM-DD>-<tool-slug>.md`. The records are labelled data: what almanac filed next to what it turned out to be, so the classifier and filer can be checked and tuned against them later. Both target repos are private, so a record may quote error text. It never goes in brined-almanac.
+
+The frontmatter is the record. Fill every key, using `null` or `[]` when there is nothing.
+
+```yaml
+---
+date: 2026-11-11
+repo: pickleclaw
+issues: [82, 83, 87]            # every issue in the case, given one first
+fingerprint:                    # what almanac filed, from the given issue
+  service: openclaw
+  tool: edit
+  class: arg-validation
+true_class: model-error         # what the class should have been; null if the filed class was right
+verdict: by-design              # fixed | by-design | wrong-repo | real-open | cannot-tell
+cause: model-wrong-arg-names    # short kebab-case slug, reused across cases with the same cause
+fault: model                    # tool | model | config | upstream | almanac | transient
+model: kimi-k2.7-code           # the model that made the failing calls, when it mattered; else null
+events: 79                      # failed calls in the case, from the transcripts
+real_window: {first: 2026-09-03, last: 2026-11-09}   # from the transcripts, never Bugsink's seen times
+recurrence: "34 edit calls since 2026-10-31, 0 validation errors"
+close:                          # per issue: completed | not-planned | hold until <task or PR>
+  82: completed
+  83: hold until a47480a4
+prs: []
+tasks: [a47480a4-94de-4705-a389-e7e03328241f]
+comments: [https://github.com/technicalpickles/pickleclaw/issues/82#issuecomment-6808045019]
+evidence: [transcripts, merged-prs, journal, deploy-config]   # where the verdict came from
+skill_gaps: ["no step for checking which model made the calls"]
+worker: {how: subagent, model: opus, tokens: 140283, minutes: 5}   # how: subagent | claude-p | interactive
+---
+```
+
+Below it, a few short paragraphs: the cause with the file, the evidence, the recurrence check, and what was left untouched.
+
+Put the same frontmatter at the end of the proof or "cannot tell" comment, as a fenced `yaml` block whose first line is `# almanac-case`. That block is the record of last resort. An unattended run cannot commit to another checkout, so it posts the block and reports that the file is not written yet.
 
 ## Never
 
@@ -79,6 +121,7 @@ Nobody can approve anything under `--print`. `--settings` loads this repository'
 - **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
 - **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
 - **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule: put the exact command in the report, and Josh closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
+- **Case record.** End the comment with the `almanac-case` block and list the record file under "not done". Whoever reviews the run writes the file from the block.
 - **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
 
 Checked by hand on 2026-11-09: a `--dry-run` against pickleclaw loaded the skill, ran 44 turns in 5 minutes for about $1.60, and posted nothing. Still unverified: a run started by a schedule, and a run without `--dry-run`. Start with `--dry-run` and read what it would have posted.
