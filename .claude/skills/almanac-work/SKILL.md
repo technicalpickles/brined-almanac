@@ -52,7 +52,9 @@ Decide: fixed, by design or wrong repo, real and open, or cannot tell. A model's
 
 Then fix what now lies. A status line in an incident doc that still says "not yet deployed" gets a pull request or a task.
 
-**By design, or another repo's problem.** Close with the proof above, file a task under the right project, and link it.
+**By design, or another repo's problem.** First answer one question in the proof: would a change to the tool's description, its interface, the config, the agent's instructions, or the environment have prevented these failures? "The tool did what it was built to do" is not an answer, and neither is "the model made a mistake": a model mistake has a cause, usually a description, example or shape that led it there. If yes, the case is real and open at that layer. File the task there and say which layer, even when the failures stopped. Only when no change would have helped (an external site, a person interrupting) is it by design. A yes whose fix is not worth making can still be by design, with the reason in `fix_note`.
+
+Then close with the proof above, file a task under the right project, and link it.
 
 The close reason acts on the whole Bugsink fingerprint, `[service, tool, class]`, not just this issue. `completed` resolves it, so the next event reopens it as a regression. `not planned` mutes it, so a real failure that lands in the same fingerprint stays silent. When the fingerprint's class is `other`, or otherwise mixes this cause with ones that could be real, recommend `hold until <task>` for the classifier fix that splits them out, and close after it lands.
 
@@ -80,7 +82,8 @@ fingerprint:                    # what almanac filed, from the given issue
 true_class: model-error         # what the class should have been; null if the filed class was right; the dominant cause when events mix causes
 verdict: by-design              # fixed | by-design | wrong-repo | real-open | cannot-tell
 cause: model-wrong-arg-names    # short kebab-case slug, reused across cases with the same cause
-fault: model                    # tool | model | human | config | upstream | almanac | transient
+fix_layer: config                # description | interface | config | instructions | reliability | ux | environment | external | none
+fix_note: "one session pinned to kimi for 7 weeks; nothing flagged it"   # one sentence: what change at that layer prevents this, or why none would
 model: kimi-k2.7-code           # the model that made the failing calls, when it mattered; else null
 events: 79                      # failed calls in the case, from the transcripts
 real_window: {first: 2026-09-03, last: 2026-11-09}   # from the transcripts, never Bugsink's seen times
