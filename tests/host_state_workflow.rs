@@ -1,11 +1,13 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use almanac::prelude::*;
 use almanac::runtime::Runtime;
 use almanac::testing::FakeTracker;
 use brined_almanac::bugsink::BugsinkClient;
-use brined_almanac::host_state::{Finding, Hosts, Status};
+use brined_almanac::host_state::{Episodes, Finding, Hosts, Status};
 use brined_almanac::providers::host_reports_from;
 use brined_almanac::tiers::Tiers;
 use brined_almanac::transcript::Transcripts;
@@ -16,6 +18,7 @@ use brined_almanac::workflows::host_state::{
 };
 use brined_almanac::workflows::security_alerts::AlertsClient;
 use serde_json::{Value, json};
+use time::format_description::well_known::Rfc3339;
 use time::macros::datetime;
 use time::{Duration, OffsetDateTime};
 
@@ -40,7 +43,7 @@ fn scan(dir: &Path) -> Vec<(String, Value)> {
 }
 
 fn scan_after(dir: &Path, previous: Option<OffsetDateTime>) -> Vec<(String, Value)> {
-    scan_findings(&hosts(), dir, NOW, previous)
+    scan_findings(&hosts(), dir, NOW, previous, &mut Episodes::default())
 }
 
 fn stale_report() -> String {
@@ -67,7 +70,7 @@ fn a_critical_report_scans_to_one_event() {
     let dir = dir_with(&[("mac.json", CRITICAL)]);
     let found = scan(dir.path());
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].0, "mac/gh-auth/2026-11-10");
+    assert_eq!(found[0].0, "mac/gh-auth/2026-11-10T14:50Z");
     assert_eq!(found[0].1["kind"], "check");
     assert_eq!(found[0].1["project"], "brined-almanac");
 }
@@ -94,7 +97,7 @@ fn an_undeclared_report_files_nothing() {
     let dir = dir_with(&[("mac.json", CRITICAL), ("lab.json", &lab)]);
     let found = scan(dir.path());
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].0, "mac/gh-auth/2026-11-10");
+    assert_eq!(found[0].0, "mac/gh-auth/2026-11-10T14:50Z");
 }
 
 #[test]
@@ -221,7 +224,7 @@ fn a_stale_report_after_a_scan_fifteen_minutes_ago_files_stale_only() {
     let dir = dir_with(&[("mac.json", &stale_report())]);
     let found = scan_after(dir.path(), Some(NOW - Duration::minutes(15)));
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].0, "mac/stale/2026-11-10");
+    assert_eq!(found[0].0, "mac/stale/2026-11-10T14:29Z");
     assert_eq!(found[0].1["kind"], "stale");
 }
 
@@ -275,4 +278,129 @@ async fn a_stale_report_files_on_the_second_scan_in_a_process() {
     let rt = Runtime::new(workflows::all(), providers);
     assert_eq!(rt.backfill(None).await.unwrap().found, 0);
     assert_eq!(rt.backfill(None).await.unwrap().found, 1);
+}
+
+#[derive(Clone, Copy)]
+enum Truth {
+    Status(i64),
+    Invalid,
+    Silent,
+}
+
+/// Replays `minutes` of a host whose one check follows `truth`, with the collector writing every
+/// 5 minutes as `checks/collect` does and a scan every 15, and returns how many tasks filed.
+fn tasks_filed(minutes: i64, truth: impl Fn(i64) -> Truth) -> usize {
+    let start = datetime!(2026-11-11 08:00 UTC);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mac.json");
+    let rfc = |t: OffsetDateTime| t.format(&Rfc3339).unwrap();
+    let mut last: Option<(i64, OffsetDateTime)> = None;
+    let mut episodes = Episodes::default();
+    let mut filed = BTreeSet::new();
+    for m in 0..minutes {
+        let now = start + Duration::minutes(m);
+        if m % 5 == 0 {
+            match truth(m) {
+                Truth::Status(status) => {
+                    let since = match last {
+                        Some((s, since)) if s == status => since,
+                        _ => now,
+                    };
+                    last = Some((status, since));
+                    let report = json!({
+                        "host": "mac",
+                        "generated_at": rfc(now),
+                        "interval_seconds": 300,
+                        "checks": [{"name": "c", "status": status, "since": rfc(since), "output": ""}],
+                    });
+                    std::fs::write(&path, report.to_string()).unwrap();
+                }
+                Truth::Invalid => {
+                    std::fs::write(&path, "{").unwrap();
+                    std::fs::File::options()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_modified(SystemTime::from(now))
+                        .unwrap();
+                }
+                Truth::Silent => {}
+            }
+        }
+        if m % 15 == 7 && m > 15 {
+            let previous = Some(now - Duration::minutes(15));
+            for (id, _) in scan_findings(&hosts(), dir.path(), now, previous, &mut episodes) {
+                filed.insert(id);
+            }
+        }
+    }
+    filed.len()
+}
+
+#[test]
+fn a_second_outage_the_same_day_files_again() {
+    assert_eq!(
+        tasks_filed(600, |m| {
+            Truth::Status(if (60..110).contains(&m) || (240..300).contains(&m) {
+                2
+            } else {
+                0
+            })
+        }),
+        2
+    );
+}
+
+#[test]
+fn an_outage_across_midnight_files_once() {
+    assert_eq!(
+        tasks_filed(60 * 40, |m| {
+            Truth::Status(if (60..60 * 37).contains(&m) { 2 } else { 0 })
+        }),
+        1
+    );
+}
+
+#[test]
+fn a_check_flapping_inside_the_hold_files_once() {
+    let truth = |m| Truth::Status(if m >= 30 && m % 40 < 30 { 2 } else { 0 });
+    assert_eq!(tasks_filed(540, truth), 1);
+}
+
+#[test]
+fn a_warning_that_turns_critical_files_both() {
+    let truth = |m| {
+        Truth::Status(if m < 60 {
+            0
+        } else if m < 60 * 31 {
+            1
+        } else {
+            2
+        })
+    };
+    assert_eq!(tasks_filed(60 * 34, truth), 2);
+}
+
+#[test]
+fn an_unreadable_report_rewritten_every_run_files_once() {
+    let truth = |m| {
+        if (30..210).contains(&m) {
+            Truth::Invalid
+        } else {
+            Truth::Status(0)
+        }
+    };
+    assert_eq!(tasks_filed(240, truth), 1);
+}
+
+#[test]
+fn a_collector_that_stops_twice_in_a_day_files_twice() {
+    let truth = |m| {
+        if (60..120).contains(&m) || (240..300).contains(&m) {
+            Truth::Silent
+        } else {
+            Truth::Status(0)
+        }
+    };
+    assert_eq!(tasks_filed(480, truth), 2);
 }
