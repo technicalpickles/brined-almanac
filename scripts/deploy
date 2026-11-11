@@ -132,6 +132,15 @@ if ! checks/collect checks/hosts/mac.conf; then
   exit 1
 fi
 
+# The same race for picklelab: the first scan can run before the puller's first fetch, and a
+# declared host with no report files "no report from picklelab" at once. The one-off run uses the
+# real env, key and mounts. fetch-report.sh always exits 0, so a missing report only warns.
+OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN \
+  op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml run --rm --no-deps --entrypoint /usr/local/bin/fetch-report.sh puller
+if [[ ! -e $STATE/host-state/picklelab.json ]]; then
+  echo "deploy: no picklelab report was fetched, so a \"no report from picklelab\" task will be filed; see $runbook, section Host state" >&2
+fi
+
 OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN \
   op run --env-file prod.secrets.env -- docker compose -f compose.prod.yaml up -d --wait
 echo "deploy: stack is up"

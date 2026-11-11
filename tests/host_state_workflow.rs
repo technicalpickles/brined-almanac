@@ -264,7 +264,7 @@ async fn a_stale_report_files_on_the_second_scan_in_a_process() {
     let providers = Providers::new()
         .provide::<Tiers>(Arc::new(Tiers::parse("", None).unwrap()))
         .provide::<AlertsClient>(Arc::new(AlertsClient(None)))
-        .provide::<Hosts>(Arc::new(Hosts::load().unwrap()))
+        .provide::<Hosts>(Arc::new(hosts()))
         .provide::<HostReports>(Arc::new(HostReports::new(Some(
             reports.path().to_path_buf(),
         ))))

@@ -665,7 +665,10 @@ report. A missing or unreadable report files at once either way.
 a missing bind source as a root-owned directory) and installs the agent once
 the stack is healthy. Just before `up`, after the image builds, it also runs
 the collector once, so a fresh report exists when the almanac's first scan runs; if that fails, the deploy
-stops before `up`. If the install fails, the deploy says the stack is
+stops before `up`. It then runs the puller's `fetch-report.sh` once through compose, so
+picklelab's report is in place for that scan too. That fetch never fails the deploy: if
+`$STATE/host-state/picklelab.json` is still missing, the deploy warns that a
+`no report from picklelab` task will be filed and goes on. If the install fails, the deploy says the stack is
 running and exits 1. Fix the cause and run `scripts/install-host-state` again;
 it unloads a loaded agent before loading, so it is safe to repeat.
 
@@ -720,6 +723,66 @@ rm ~/Library/LaunchAgents/com.technicalpickles.brined-almanac.host-state.plist
 With the agent gone the report goes stale, and the next scan after 30 minutes
 files `host-state: no report from mac since ...`. Unload the agent only when
 you also mean to stop that.
+
+### picklelab's report
+
+picklelab runs its own collector, which writes `/var/lib/host-state/picklelab.json`
+(mode 0644) every 300 seconds. The puller fetches that file on each pass with
+a second fenced key and writes it to `$STATE/host-state/picklelab.json`. The
+Mac's collector keeps writing `mac.json` in the same directory. The puller
+mounts it read-write, and the almanac container still mounts it read-only.
+
+`fetch-report.sh` keeps the old file when the fetch fails and logs one
+`fetch-report:` line. It reuses the puller's `known_hosts`, which already holds
+picklelab, so strict host key checking needs nothing new.
+
+Set it up once, in this order:
+
+1. Create an SSH key item named `host-state-report` in the `brined-almanac`
+   vault, with a new ed25519 key. 1Password generates the key. The item must
+   exist before the deploy, because `op run` fails on a reference to a
+   missing item. The reference is in `prod.secrets.env` as
+   `BRINED_ALMANAC_REPORT_KEY`.
+2. Add the fence line to `~technicalpickles/.ssh/authorized_keys` on picklelab:
+
+```text
+restrict,from="<the Mac's tailnet address>",command="cat /var/lib/host-state/picklelab.json" ssh-ed25519 <public key from the host-state-report item> brined-almanac-host-state
+```
+
+The forced command prints the report and does nothing else, whatever the
+client asks to run. `restrict` and `from=` work as in the puller's line above.
+
+Test the fence from the Mac the same way as the puller's, with the
+`host-state-report` item. The output is the report:
+
+```sh
+key=$(mktemp)
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op read "op://brined-almanac/host-state-report/private key?ssh-format=openssh" > "$key"
+ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab | jq '{host, generated_at, checks: (.checks | length)}'
+ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab anything-else | jq .host
+rm -f "$key"
+```
+
+Both commands print the same report, because the command after the host name is ignored.
+
+`REPORT_KEY` is optional in `compose.prod.yaml`, so the `unused` placeholder
+lists in `mise.toml`, this runbook, and `scripts/deploy` do not include it.
+Without the key the puller logs `REPORT_KEY is empty, skipping`, the
+transcript pass runs as usual, and the next scan files `picklelab/stale/missing`.
+
+What a stale picklelab means. The same finding, `no report from picklelab
+since ...`, covers four causes. Check them in this order:
+
+1. `docker logs brined-almanac-prod-puller-1 | grep fetch-report` names the
+   failure: `ssh failed` (the fence, the key, or picklelab down), `not json`,
+   or `not a report for picklelab`.
+2. `ssh failed` with a report that exists on picklelab means the fence line or
+   `from=` is wrong. Run the fence test above.
+3. The report on picklelab is old when picklelab's collector timer stopped. The
+   fetch succeeds and the file's `generated_at` stays old, so the finding names
+   that age. If the report is missing on picklelab, the fence's `cat` exits 1 and
+   the log says `ssh failed`, as in cause 1.
+4. The puller is down. Its healthcheck says so first.
 
 ## Backups
 

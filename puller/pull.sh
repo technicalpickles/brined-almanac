@@ -94,14 +94,18 @@ pass() {
 }
 
 main() {
+  local rc
   install_key
   : "${PULL_HOST:?PULL_HOST is required}" "${PULL_USER:?PULL_USER is required}"
   if [ "${PULL_ONCE:-}" = 1 ]; then
-    pass
-    return
+    rc=0
+    pass || rc=$?
+    "$(dirname "$0")/fetch-report.sh" || true
+    return "$rc"
   fi
   while true; do
     pass || true
+    "$(dirname "$0")/fetch-report.sh" || true
     sleep $((PULL_INTERVAL_MINUTES * 60))
   done
 }

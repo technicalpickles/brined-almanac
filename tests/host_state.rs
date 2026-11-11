@@ -106,12 +106,14 @@ fn cuts_output_to_500_bytes_on_a_char_boundary() {
 }
 
 #[test]
-fn the_committed_hosts_file_declares_the_mac() {
+fn the_committed_hosts_file_declares_the_mac_and_picklelab() {
     let hosts = Hosts::load().unwrap();
     let all: Vec<&Host> = hosts.iter().collect();
-    assert_eq!(all.len(), 1);
+    assert_eq!(all.len(), 2);
     assert_eq!(all[0].name, "mac");
     assert_eq!(all[0].project.as_str(), "brined-almanac");
+    assert_eq!(all[1].name, "picklelab");
+    assert_eq!(all[1].project.as_str(), "homelab");
 }
 
 #[test]
