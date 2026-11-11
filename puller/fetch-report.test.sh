@@ -61,7 +61,7 @@ check "good only report file" "picklelab.json " "$(state_files)"
 check "good key file mode" 600 "$(mode "$REPORT_KEY_FILE")"
 check "good key file contents" "$key_text" "$(cat "$REPORT_KEY_FILE")"
 check "good ssh uses key" 1 "$(grep -c -e "-i $REPORT_KEY_FILE" "$TMP/ssh.log")"
-check "good ssh options" 1 "$(grep -c -e "-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=30 u@h$" "$TMP/ssh.log")"
+check "good ssh options" 1 "$(grep -c -e "-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 u@h$" "$TMP/ssh.log")"
 good=$(cat "$HOST_STATE_DIR/picklelab.json")
 
 # 2. not-json
@@ -77,11 +77,11 @@ report mac >"$TMP/ssh.out"
 run_fetch
 check "wrong-host exit" 0 "$rc"
 check "wrong-host unchanged" "$good" "$(cat "$HOST_STATE_DIR/picklelab.json")"
-check "wrong-host stderr" 1 "$(grep -c 'wrong host' "$TMP/stderr")"
+check "wrong-host stderr" 1 "$(grep -c 'not a report for picklelab' "$TMP/stderr")"
 check "wrong-host no temp files" "picklelab.json " "$(state_files)"
 
 # 4. ssh-fails: report valid-looking on stdout must not be accepted either
-rm -f "$TMP/ssh.out"
+report picklelab >"$TMP/ssh.out"
 echo 'cat: /var/lib/host-state/picklelab.json: No such file or directory' >"$TMP/ssh.err"
 echo 1 >"$TMP/ssh.rc"
 run_fetch
@@ -91,6 +91,12 @@ check "ssh-fails stderr" 1 "$(grep -c 'ssh failed' "$TMP/stderr")"
 check "ssh-fails one log line" 1 "$(grep -c '^fetch-report:' "$TMP/stderr")"
 check "ssh-fails no temp files" "picklelab.json " "$(state_files)"
 rm -f "$TMP/ssh.err" "$TMP/ssh.rc"
+
+# 4b. checks not an array: same rejection, reason names the report
+printf '{"host":"picklelab","checks":{}}\n' >"$TMP/ssh.out"
+run_fetch
+check "bad-checks unchanged" "$good" "$(cat "$HOST_STATE_DIR/picklelab.json")"
+check "bad-checks stderr" 1 "$(grep -c 'not a report for picklelab' "$TMP/stderr")"
 
 # 5. last-pull-untouched (after good and ssh-fails)
 check "last-pull untouched" absent "$([ -e "$TRANSCRIPTS/.last-pull" ] && echo present || echo absent)"
@@ -117,6 +123,17 @@ check "rewritten key mode" 600 "$(mode "$REPORT_KEY_FILE")"
 report other >"$TMP/ssh.out"
 env REPORT_HOST_NAME=other "$here/fetch-report.sh" 2>"$TMP/stderr" || true
 check "custom host file" present "$([ -e "$HOST_STATE_DIR/other.json" ] && echo present || echo absent)"
+
+# 9. install fails (mv broken): logged, temp removed, old report kept
+report picklelab >"$TMP/ssh.out"
+mkdir -p "$TMP/badbin"
+printf '#!/bin/sh\nexit 1\n' >"$TMP/badbin/mv"
+chmod +x "$TMP/badbin/mv"
+before=$(state_files)
+PATH="$TMP/badbin:$PATH" run_fetch
+check "mv-fails exit" 0 "$rc"
+check "mv-fails stderr" 1 "$(grep -c 'could not install report' "$TMP/stderr")"
+check "mv-fails no temp files" "$before" "$(state_files)"
 
 [ "$fails" -eq 0 ] || { echo "$fails failed"; exit 1; }
 echo "all passed"

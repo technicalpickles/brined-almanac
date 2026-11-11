@@ -38,15 +38,15 @@ install_key() {
 fetch() {
   local tmp="$HOST_STATE_DIR/$REPORT_HOST_NAME.json.tmp.$$"
   mkdir -p "$HOST_STATE_DIR"
-  if ! ssh -i "$REPORT_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=30 "$PULL_USER@$PULL_HOST" </dev/null >"$tmp"; then
+  if ! ssh -i "$REPORT_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$PULL_USER@$PULL_HOST" </dev/null >"$tmp"; then
     log "ssh failed"
   elif ! jq -e . "$tmp" >/dev/null 2>&1; then
     log "not json"
   elif ! jq -e --arg h "$REPORT_HOST_NAME" '.host == $h and (.checks | type) == "array"' "$tmp" >/dev/null; then
-    log "wrong host"
+    log "not a report for $REPORT_HOST_NAME"
+  elif ! { chmod 644 "$tmp" && mv "$tmp" "$HOST_STATE_DIR/$REPORT_HOST_NAME.json"; }; then
+    log "could not install report"
   else
-    chmod 644 "$tmp"
-    mv "$tmp" "$HOST_STATE_DIR/$REPORT_HOST_NAME.json"
     return 0
   fi
   rm -f "$tmp"

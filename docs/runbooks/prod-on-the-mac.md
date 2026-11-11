@@ -665,7 +665,10 @@ report. A missing or unreadable report files at once either way.
 a missing bind source as a root-owned directory) and installs the agent once
 the stack is healthy. Just before `up`, after the image builds, it also runs
 the collector once, so a fresh report exists when the almanac's first scan runs; if that fails, the deploy
-stops before `up`. If the install fails, the deploy says the stack is
+stops before `up`. It then runs the puller's `fetch-report.sh` once through compose, so
+picklelab's report is in place for that scan too. That fetch never fails the deploy: if
+`$STATE/host-state/picklelab.json` is still missing, the deploy warns that a
+`no report from picklelab` task will be filed and goes on. If the install fails, the deploy says the stack is
 running and exits 1. Fix the cause and run `scripts/install-host-state` again;
 it unloads a loaded agent before loading, so it is safe to repeat.
 
@@ -772,12 +775,13 @@ since ...`, covers four causes. Check them in this order:
 
 1. `docker logs brined-almanac-prod-puller-1 | grep fetch-report` names the
    failure: `ssh failed` (the fence, the key, or picklelab down), `not json`,
-   or `wrong host`.
+   or `not a report for picklelab`.
 2. `ssh failed` with a report that exists on picklelab means the fence line or
    `from=` is wrong. Run the fence test above.
-3. The report on picklelab is old, or missing, when picklelab's collector timer
-   stopped. The fetch succeeds and the file's `generated_at` stays old, so the
-   finding names that age.
+3. The report on picklelab is old when picklelab's collector timer stopped. The
+   fetch succeeds and the file's `generated_at` stays old, so the finding names
+   that age. If the report is missing on picklelab, the fence's `cat` exits 1 and
+   the log says `ssh failed`, as in cause 1.
 4. The puller is down. Its healthcheck says so first.
 
 ## Backups
