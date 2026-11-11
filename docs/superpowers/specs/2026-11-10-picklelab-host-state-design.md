@@ -74,7 +74,10 @@ On picklelab on 2026-11-10, read-only over SSH:
   obsidian-sync, open-webui, openclaw, taskchampion-sync, woodpecker), and the
   template `notify-failure@.service`.
 - `openclaw-approvals-watch.service` and `.timer` are plain files, not
-  symlinks, and the timer reported no next elapse time.
+  symlinks. Its timer is monotonic (`OnUnitActiveSec` style): its realtime
+  next elapse is empty and its monotonic one is set, which is how
+  `list-timers` came to show it with no next time. `timer-check` must read
+  both.
   `climate-auto-switch.timer` is in the repository and not installed, while
   its service is linked. Discovery will treat that service as a long-running
   unit and report it inactive, which is a true finding: its schedule is gone.
@@ -105,7 +108,7 @@ brined-almanac first and is copied.
 OK, 2 critical, 3 unknown, one status line).
 
 - `timer-check <name>.timer` is critical when the timer is not active, when it
-  has no next elapse time, when its service's last run's `Result` is not
+  has neither a realtime nor a monotonic next elapse time, when its service's last run's `Result` is not
   `success`, or when its service has been `activating` for more than an hour.
   It reads `systemctl show`. It does not judge an overdue run: picklehome's
   timers are `Persistent=true`, so systemd catches up missed runs itself.
