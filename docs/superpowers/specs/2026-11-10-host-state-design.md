@@ -294,6 +294,9 @@ A key of `<host>/<check>` alone would file once and then stay silent forever,
 which is the trap that moved tool-failures to Bugsink. The cost is known: a
 second outage on the same UTC day as one already closed files nothing.
 
+Superseded on 2026-11-11: the key is now the minute of `since`. See the
+addendum at the end.
+
 The workflow may `File` and nothing else. It calls no model.
 
 Nothing closes a task when a check recovers. That waits for the `Resolve`
@@ -385,6 +388,7 @@ Then, in order, each a small pull request that ends in a check:
   date the check entered its state, so after the first task is closed a new
   outage that day is silent however long it lasts. Keying on the minute fixes
   it and costs more tasks from a check that flaps.
+  Resolved on 2026-11-11, see the addendum.
 - **`stack-health` is one check over four services.** While it is critical for
   one, a second service failing files nothing new.
 - **Docker under launchd is unmeasured.** If `docker ps` fails there,
@@ -393,3 +397,34 @@ Then, in order, each a small pull request that ends in a check:
   loaded.
 - **The thresholds are defaults.** Ten minutes, 24 hours, and 30 minutes are
   chosen, not measured. They are constants in one place.
+
+## Addendum, 2026-11-11: the key and the threshold
+
+Two changes since this design shipped. Both came from replaying a simulated
+collector (every 5 minutes) and scan (every 15) through the real scan code,
+and counting the tasks each rule files. The replays are now tests in
+`tests/host_state_workflow.rs`.
+
+**The key is the minute of `since` (#35).** The date key missed a second
+outage on the same UTC day whether or not the first task was closed. Filing is
+create-once per delivery ID in almanac's permanent seen set. The tracker's own
+key is per run, so closing a task never mattered. A bare minute key fixed that
+but filed 13 tasks for a check flapping all day, and 12 for one unreadable
+report, because the stale key uses the file's modification time and the
+collector rewrites the file every run. So the scan keeps an in-memory table of
+outages: a finding seen again within an hour (`RECOVERY_HOLD`) of the last scan
+that saw it keeps its outage's first `since`, and with it its key.
+
+**The threshold runs on the outage, not on `since` (#36).** The collector
+resets `since` on every status change, so a check moving between critical and
+unknown each run, or flapping faster than ten minutes, never reached its
+threshold and never filed. The scan now records every failing check in the
+outage table, due or not, and applies the 10-minute and 24-hour thresholds to
+the outage's start. Critical and unknown count as one severity, so moving
+between them is one outage. Warning is its own, so an escalation still files.
+`checks/collect` did not change.
+
+What it costs: the outage table lives in the almanac process, so after a
+restart a flapping check takes up to one more threshold to file, and a restart
+mid-flap can file once more. A task title shows the current status with the
+outage's start, so it can read "unknown since" a time the check was critical.
