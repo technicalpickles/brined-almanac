@@ -115,10 +115,12 @@ Put the same frontmatter at the end of the proof or "cannot tell" comment, as a 
 One case per run, from the brined-almanac checkout, in a likely-free hour ([docs/vision.md](../../../docs/vision.md) "The budget rule"):
 
 ```bash
-claude -p "/almanac-work brineworks" --permission-mode acceptEdits --settings .claude/settings.json --max-turns 60
+scripts/almanac-work-run brineworks
 ```
 
-Nobody can approve anything under `--print`. `--settings` loads this repository's allow rules, which Claude Code otherwise ignores in a workspace Josh has not trusted. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
+The script runs `claude -p` with this repository's settings and logs the stream to `~/.local/state/brined-almanac/almanac-work/`. It refuses to start when the run would quietly degrade: the CLI is logged out, a plugin this skill depends on (pstack) is missing or disabled, or the checkout is untrusted, which makes Claude Code ignore `.claude/settings.json` allow rules with only a stderr warning.
+
+Nobody can approve anything under `--print`. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
 
 - **Other checkouts.** `git -C <path>` and `cd <path> && git ...` are denied, fetches included. Read the target repo's `main` with `gh api repos/technicalpickles/<repo>/contents/<path>` and `gh search code`.
 - **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.

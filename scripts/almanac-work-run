@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Run one unattended almanac-work case: scripts/almanac-work-run <repo | issue url | task uuid> [extra args...]
+# Refuses to start when the run would silently degrade (see preflight).
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+log_dir="$HOME/.local/state/brined-almanac/almanac-work"
+required_plugins=(pstack)
+
+fail() { echo "almanac-work-run: $*" >&2; exit 1; }
+
+preflight() {
+  claude auth status --json | jq -e '.loggedIn' >/dev/null \
+    || fail "claude CLI is not logged in; run: claude /login"
+
+  local plugins
+  plugins="$(claude plugin list --json)"
+  for p in "${required_plugins[@]}"; do
+    jq -e --arg p "$p" 'any(.[]; (.id | startswith($p + "@")) and .enabled)' <<<"$plugins" >/dev/null \
+      || fail "plugin '$p' is not installed and enabled; almanac-work depends on it"
+  done
+
+  jq -e --arg d "$repo_root" '.projects[$d].hasTrustDialogAccepted == true' "$HOME/.claude.json" >/dev/null \
+    || fail "$repo_root is not trusted, so .claude/settings.json allow rules would be ignored; open claude there once and accept the trust prompt"
+}
+
+[[ $# -ge 1 ]] || fail "usage: almanac-work-run <repo | issue url | task uuid> [extra args...]"
+preflight
+
+mkdir -p "$log_dir"
+slug="$(printf '%s' "$1" | sed -E 's#https://github.com/technicalpickles/##; s#[^A-Za-z0-9]+#-#g')"
+log="$log_dir/$(date -u +%Y%m%dT%H%M%SZ)-$slug"
+
+cd "$repo_root"
+claude -p "/almanac-work $*" \
+  --permission-mode acceptEdits --settings .claude/settings.json --max-turns 60 \
+  --output-format stream-json --verbose >"$log.jsonl" 2>"$log.err"
+
+jq -r 'select(.type=="result") | "\(.subtype) turns=\(.num_turns) cost=$\(.total_cost_usd) ms=\(.duration_ms)\n\(.result)"' "$log.jsonl"
