@@ -7,7 +7,9 @@ description: Use when asked to work, triage, clear, or check an almanac-filed re
 
 Take one almanac report to a state Josh reviews in a minute. The report is a finding from a watcher ([docs/workflows.md](../../../docs/workflows.md)). It may be stale, already fixed, or not a bug. The job ends in one of three shapes below, never in a summary.
 
-Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to the session scratchpad instead of posting, and say so in the report.
+Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory under the session scratchpad named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
+
+The pstack plugin is installed wherever this runs (`scripts/almanac-work-run` checks). `pstack:poteto-mode` is available for a deeper pass, but the contract here is what decides a verdict: on 2026-11-11 the same case run with and without it reached the same verdict and layer at similar cost.
 
 ## Pick one case
 
@@ -58,7 +60,7 @@ Then close with the proof above, file a task under the right project, and link i
 
 The close reason acts on the whole Bugsink fingerprint, `[service, tool, class]`, not just this issue. `completed` resolves it, so the next event reopens it as a regression. `not planned` mutes it, so a real failure that lands in the same fingerprint stays silent. When the fingerprint's class is `other`, or otherwise mixes this cause with ones that could be real, recommend `hold until <task>` for the classifier fix that splits them out, and close after it lands.
 
-**Real and open.** Branch in a worktree, failing repro first, fix, pull request. Follow the target repo's CLAUDE.md for setup and tests. The body's `## Why` opens with the report, and `Closes #n` for every issue in the case. Never merge.
+**Real and open.** Branch in a worktree, failing repro first, fix, pull request. Follow the target repo's CLAUDE.md for setup and tests. The body's `## Why` opens with the report, and `Closes #n` for every issue in the case, unless the close-reason rule below says to hold: then write `Refs #n`, so merging the fix doesn't close an issue whose fingerprint still mixes causes. Never merge.
 
 **Cannot tell.** One comment: what was found, what was not, what would settle it. Leave the issue open.
 
