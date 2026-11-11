@@ -16,7 +16,7 @@ run = "hk check"
 
 [tasks.test]
 description = "Run the unit and integration tests"
-run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/install-host-state.test.sh"
+run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/install-host-state.test.sh && scripts/fence-line.test.sh"
 
 [tasks."image:smoke"]
 description = "Build the almanac image and check it: mise run image:smoke [-- TAG]"
