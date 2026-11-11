@@ -7,13 +7,13 @@ description: Use when asked to work, triage, clear, or check an almanac-filed re
 
 Take one almanac report to a state Josh reviews in a minute. The report is a finding from a watcher ([docs/workflows.md](../../../docs/workflows.md)). It may be stale, already fixed, or not a bug. The job ends in one of three shapes below, never in a summary.
 
-Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory under the session scratchpad named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
+Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, under the session scratchpad, or under `.scratch/` in this checkout when there is none (`claude -p` has none, and writes outside the checkout are denied), instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
 
 The pstack plugin is installed wherever this runs (`scripts/almanac-work-run` checks). `pstack:poteto-mode` is available for a deeper pass, but the contract here is what decides a verdict: on 2026-11-11 the same case run with and without it reached the same verdict and layer at similar cost.
 
 ## Pick one case
 
-- Given a repo, list its queue and take the report whose tool failed most recently. Something still happening beats history.
+- Given a repo, list its queue and take the report whose tool failed most recently. Something still happening beats history. Skip a report that already has a comment: almanac files the issue and only a worker or Josh comments, so a commented report has been worked (held reports stay open), and a regression arrives as a new issue.
 
   ```bash
   gh issue list -R technicalpickles/<repo> --label almanac --state open --json number,title,body
@@ -98,7 +98,7 @@ tasks: [a47480a4-94de-4705-a389-e7e03328241f]
 comments: [https://github.com/technicalpickles/pickleclaw/issues/82#issuecomment-6808045019]
 evidence: [transcripts, merged-prs, journal, deploy-config]   # where the verdict came from
 skill_gaps: ["no step for checking which model made the calls"]
-worker: {how: subagent, model: opus, tokens: 140283, minutes: 5}   # how: subagent | claude-p | interactive
+worker: {how: subagent, model: opus, tokens: 140283, minutes: 5}   # how: subagent | claude-p | interactive; never estimate tokens or minutes, leave them null if you can't read them
 ---
 ```
 
@@ -128,7 +128,7 @@ Nobody can approve anything under `--print`. A command outside Josh's allow rule
 - **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
 - **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
 - **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule: put the exact command in the report, and Josh closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
-- **Case record.** End the comment with the `almanac-case` block and list the record file under "not done". Whoever reviews the run writes the file from the block.
+- **Case record.** End the comment with the `almanac-case` block, with `worker.how: claude-p` and `tokens` and `minutes` null: a run can't see its own totals. List the record file under "not done". Whoever reviews the run writes the file from the block, taking `worker` from the `.summary.json` next to the run log the prompt names.
 - **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
 
 Checked by hand on 2026-11-09: a `--dry-run` against pickleclaw loaded the skill, ran 44 turns in 5 minutes for about $1.60, and posted nothing. Still unverified: a run started by a schedule, and a run without `--dry-run`. Start with `--dry-run` and read what it would have posted.

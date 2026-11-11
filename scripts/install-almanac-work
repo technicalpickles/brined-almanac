@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Installs one LaunchAgent per target repo that runs scripts/almanac-work-run --when-idle every two
+# hours, brineworks on even hours and pickleclaw on odd ones. The wrapper's budget rule and
+# unworked-report check decide whether a tick spends anything. --print renders the plists to stdout
+# and changes nothing.
+set -euo pipefail
+
+repos=(brineworks pickleclaw)
+print_only=0
+
+case ${1:-} in
+  "") ;;
+  --print) print_only=1 ;;
+  -h | --help)
+    echo "Usage: scripts/install-almanac-work [--print]"
+    exit 0
+    ;;
+  *)
+    echo "install-almanac-work: unknown argument $1" >&2
+    exit 2
+    ;;
+esac
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# The main checkout, not whichever worktree this runs from, so the agent follows main like deploys do.
+checkout=$(git -C "$here" worktree list --porcelain | sed -n '1s/^worktree //p')
+log_dir=$HOME/.local/state/brined-almanac/almanac-work
+plist_dir=$HOME/Library/LaunchAgents
+
+for value in "$checkout" "$HOME"; do
+  case $value in
+    *[\&\<\>\"\']*)
+      echo "install-almanac-work: refusing a path with XML metacharacters: $value" >&2
+      exit 1
+      ;;
+  esac
+done
+((print_only)) || [[ -x $checkout/scripts/almanac-work-run ]] || {
+  echo "install-almanac-work: $checkout/scripts/almanac-work-run does not exist; merge it to main first" >&2
+  exit 1
+}
+
+render() {
+  local repo=$1 first_hour=$2 hour
+  cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.technicalpickles.brined-almanac.almanac-work.$repo</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$checkout/scripts/almanac-work-run</string>
+    <string>--when-idle</string>
+    <string>$repo</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$checkout</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <array>
+EOF
+  for ((hour = first_hour; hour < 24; hour += 2)); do
+    printf '    <dict><key>Hour</key><integer>%d</integer><key>Minute</key><integer>17</integer></dict>\n' "$hour"
+  done
+  cat <<EOF
+  </array>
+  <key>StandardOutPath</key>
+  <string>$log_dir/launchd-$repo.log</string>
+  <key>StandardErrorPath</key>
+  <string>$log_dir/launchd-$repo.log</string>
+</dict>
+</plist>
+EOF
+}
+
+domain=gui/$(id -u)
+mkdir -p "$log_dir"
+
+for i in "${!repos[@]}"; do
+  repo=${repos[$i]}
+  label=com.technicalpickles.brined-almanac.almanac-work.$repo
+  rendered=$(render "$repo" "$i")
+
+  if ((print_only)); then
+    printf '%s\n' "$rendered"
+    continue
+  fi
+
+  plist=$plist_dir/$label.plist
+  new_plist=$(mktemp "$plist_dir/.$label.XXXXXX")
+  printf '%s\n' "$rendered" >"$new_plist"
+  plutil -lint "$new_plist" >/dev/null
+  mv "$new_plist" "$plist"
+
+  if launchctl print "$domain/$label" >/dev/null 2>&1; then
+    launchctl bootout "$domain/$label"
+    # bootout returns before launchd has finished tearing the service down.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      launchctl print "$domain/$label" >/dev/null 2>&1 || break
+      sleep 1
+    done
+  fi
+  launchctl bootstrap "$domain" "$plist"
+  echo "install-almanac-work: loaded $label (log $log_dir/launchd-$repo.log)"
+done
