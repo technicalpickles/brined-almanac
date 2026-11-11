@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Run one unattended almanac-work case.
+#   scripts/almanac-work-run [--when-idle] <repo | issue url | task uuid> [extra args...]
+# --when-idle applies the budget rule (docs/vision.md) and skips a repo with nothing unworked; the
+# LaunchAgent passes it. Refuses to start when the run would silently degrade (see preflight).
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+log_dir="$HOME/.local/state/brined-almanac/almanac-work"
+transcripts="$HOME/.claude/projects"
+required_plugins=(pstack)
+
+fail() { echo "almanac-work-run: $*" >&2; exit 1; }
+skip() { echo "almanac-work-run: skip: $*"; exit 0; }
+
+preflight() {
+  claude auth status --json | jq -e '.loggedIn' >/dev/null \
+    || fail "claude CLI is not logged in; run: claude auth login"
+
+  local plugins
+  plugins="$(claude plugin list --json)"
+  for p in "${required_plugins[@]}"; do
+    jq -e --arg p "$p" 'any(.[]; (.id | startswith($p + "@")) and .enabled)' <<<"$plugins" >/dev/null \
+      || fail "plugin '$p' is not installed and enabled; almanac-work depends on it"
+  done
+
+  jq -e --arg d "$repo_root" '.projects[$d].hasTrustDialogAccepted == true' "$HOME/.claude.json" >/dev/null \
+    || fail "$repo_root is not trusted, so .claude/settings.json allow rules would be ignored; open claude there once and accept the trust prompt"
+}
+
+# docs/vision.md "The budget rule": nothing runs while any session wrote in the last 5 minutes, and
+# in waking hours (07:00 to 24:00 US Eastern) nothing runs within 30 minutes of a session write.
+budget_allows() {
+  local hour window
+  hour=$(TZ=America/New_York date +%H)
+  window=5
+  ((10#$hour >= 7)) && window=30
+  if [[ -n "$(find "$transcripts" -name '*.jsonl' -mmin "-$window" -print -quit 2>/dev/null)" ]]; then
+    skip "a session wrote its transcript in the last $window minutes"
+  fi
+}
+
+# Almanac files the issue and only a worker or Josh comments on it, so an open report with no
+# comments is unworked. Held reports stay open; without this every scheduled run would re-work them.
+# A regression files a new issue, so it shows up here as unworked.
+has_unworked() {
+  local n
+  n=$(gh issue list -R "technicalpickles/$1" --label almanac --state open --limit 200 --json comments \
+    --jq '[.[] | select(.comments | length == 0)] | length')
+  ((n > 0)) || skip "no unworked almanac reports in $1"
+}
+
+when_idle=0
+if [[ ${1:-} == --when-idle ]]; then when_idle=1; shift; fi
+[[ $# -ge 1 ]] || fail "usage: almanac-work-run [--when-idle] <repo | issue url | task uuid> [extra args...]"
+
+preflight
+if ((when_idle)); then
+  budget_allows
+  [[ $1 == */* ]] || has_unworked "$1"
+fi
+
+mkdir -p "$log_dir"
+slug="$(printf '%s' "$1" | sed -E 's#https://github.com/technicalpickles/##; s#[^A-Za-z0-9]+#-#g')"
+log="$log_dir/$(date -u +%Y%m%dT%H%M%SZ)-$slug"
+
+cd "$repo_root"
+started=$(date +%s)
+claude -p "/almanac-work $* (unattended: started by scripts/almanac-work-run, run log $log.jsonl)" \
+  --permission-mode acceptEdits --settings .claude/settings.json --max-turns 60 \
+  --output-format stream-json --verbose >"$log.jsonl" 2>"$log.err" || true
+
+jq -s --argjson secs "$(($(date +%s) - started))" '
+  (map(select(.type == "system" and .subtype == "init")) | first | .model) as $model
+  | map(select(.type == "result")) | last
+  | {how: "claude-p", model: $model, turns: .num_turns, cost_usd: .total_cost_usd,
+     tokens: ((.usage.input_tokens // 0) + (.usage.output_tokens // 0)
+              + (.usage.cache_read_input_tokens // 0) + (.usage.cache_creation_input_tokens // 0)),
+     minutes: (($secs / 60) | floor), subtype, is_error, denials: (.permission_denials | length)}
+' "$log.jsonl" >"$log.summary.json"
+
+jq -r '"\(.subtype) turns=\(.turns) cost=$\(.cost_usd) minutes=\(.minutes) denials=\(.denials)"' "$log.summary.json"
+jq -r 'select(.type=="result") | .result' "$log.jsonl"
