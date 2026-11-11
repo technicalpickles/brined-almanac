@@ -190,11 +190,37 @@ error, stop and fix the item or the service account first.
 ### The authorized_keys line on picklelab
 
 picklehome does not manage `authorized_keys` on picklelab, so this is a hand
-edit. Add one line to `~technicalpickles/.ssh/authorized_keys` on picklelab:
+edit, but you do not write the line by hand. `scripts/fence-line` builds it
+from the item's public key and checks it with `ssh-keygen` before printing.
+A hand-assembled line once came out with the key type twice, because the
+item's public key field already starts with `ssh-ed25519`, and sshd skipped
+it without a word.
 
-```text
-restrict,from="<the Mac's tailnet address>",command="/opt/pickleclaw/scripts/openclaw-ro/openclaw-ro-pull" ssh-ed25519 <public key from the puller item> brined-almanac-puller
-```
+Every fenced key on every host goes through the same three steps. A new host,
+such as the WordPress droplet, repeats them with its own item, command, and
+host name.
+
+1. Print the line on the Mac and append it to `~technicalpickles/.ssh/authorized_keys`
+   on picklelab:
+
+   ```sh
+   scripts/fence-line --item puller --from "$(tailscale ip -4)" --command /opt/pickleclaw/scripts/openclaw-ro/openclaw-ro-pull --comment brined-almanac-puller
+   ```
+
+2. Check that the host holds exactly that line. This fails, with the reason,
+   on a missing line, a duplicate, or any difference:
+
+   ```sh
+   ssh picklelab cat .ssh/authorized_keys | scripts/fence-line --check --item puller --from "$(tailscale ip -4)" --command /opt/pickleclaw/scripts/openclaw-ro/openclaw-ro-pull --comment brined-almanac-puller
+   ```
+
+3. Test the fence with the real key:
+
+   ```sh
+   scripts/fence-test --item puller technicalpickles@picklelab
+   ```
+
+What the line says:
 
 - `command=` runs `openclaw-ro-pull`, which ships with pickleclaw through
   picklehome's deploy. It accepts only `sessions` and
@@ -205,8 +231,19 @@ restrict,from="<the Mac's tailnet address>",command="/opt/pickleclaw/scripts/ope
   does not arrive from that address, the puller is refused. Drop `from=` and
   keep the rest.
 
-Check the fence from the Mac. Write the key to a temporary file, test, and
-delete it:
+`fence-test` reads the key into a temporary file and deletes it. It asks for
+no command, runs `id` (which must not print `uid=`), and opens a port forward
+to the host. It passes the forward only when the server refuses the channel.
+`ssh -L` opens a channel only when something connects, so the probe connects
+to the local port itself. It exits nonzero on any FAIL.
+
+`fence-test` passes `-F /dev/null` and `IdentityAgent=none`. Without them, an
+`IdentityFile` or agent from your ssh config is offered after the fenced key,
+so a refused key falls back to your own key and the check tests the wrong
+thing (the symptom is `bash: sessions: command not found`).
+
+For the puller, also run its own commands. `fence-test` is generic and does
+not know them:
 
 ```sh
 key=$(mktemp)
@@ -216,15 +253,10 @@ ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o Bat
 rm -f "$key"
 ```
 
-`-F /dev/null` and `IdentityAgent=none` matter. Without them, an `IdentityFile`
-or agent from your ssh config is offered after the puller key, so a refused
-puller key falls back to your own key and the check tests the wrong thing
-(the symptom is `bash: sessions: command not found`).
-
 `sessions` prints a number. `version` prints nothing and exits 2. If `sessions`
 is refused with a permission error, either `from=` does not match the Mac's
-address or the `authorized_keys` line holds the wrong public key. Test once
-without `from=` to tell which.
+address or the `authorized_keys` line holds the wrong public key. Run
+`fence-line --check` to tell which, then test once without `from=`.
 
 ## First deploy
 
@@ -457,8 +489,10 @@ and moves `prod` back.
 - **GitHub alerts token.** Edit the `token` field of `github-alerts-token` in
   1Password, then check it as in the setup step. Run `mise run deploy`.
 - **Puller key.** Regenerate the SSH key in the `puller` item. Replace the
-  `authorized_keys` line on picklelab with the new public key. Run
-  `mise run deploy`.
+  `authorized_keys` line on picklelab: print the new one with
+  `scripts/fence-line`, replace the old one, and confirm with
+  `scripts/fence-line --check` (both as in "The authorized_keys line on
+  picklelab"). Run `mise run deploy`.
 - **Service account token.** Create a new token in 1Password, then overwrite
   the Automic Vault entry:
 
@@ -516,8 +550,11 @@ times `PULL_INTERVAL_MINUTES`. That means one of three things:
 - The forced command refused the request. The log shows the one-line reason
   from `openclaw-ro-pull`. Check that picklelab has the current pickleclaw
   deploy.
-- picklelab rejected the key or the source address. Check the
-  `authorized_keys` line against the `puller` item, and drop `from=` to test.
+- picklelab rejected the key or the source address. Run
+  `ssh picklelab cat .ssh/authorized_keys | scripts/fence-line --check ...`
+  with the puller's flags (see "The authorized_keys line on picklelab"). It
+  says whether the line is missing, duplicated, or differs from the `puller`
+  item. If the line is right, drop `from=` to test.
 
 `docker compose logs puller` (with the prefix) shows which.
 
@@ -743,27 +780,21 @@ Set it up once, in this order:
    exist before the deploy, because `op run` fails on a reference to a
    missing item. The reference is in `prod.secrets.env` as
    `BRINED_ALMANAC_REPORT_KEY`.
-2. Add the fence line to `~technicalpickles/.ssh/authorized_keys` on picklelab:
+2. Add the fence line and check it, as in "The authorized_keys line on
+   picklelab":
 
-```text
-restrict,from="<the Mac's tailnet address>",command="cat /var/lib/host-state/picklelab.json" ssh-ed25519 <public key from the host-state-report item> brined-almanac-host-state
-```
+   ```sh
+   scripts/fence-line --item host-state-report --from "$(tailscale ip -4)" --command 'cat /var/lib/host-state/picklelab.json' --comment brined-almanac-host-state
+   ssh picklelab cat .ssh/authorized_keys | scripts/fence-line --check --item host-state-report --from "$(tailscale ip -4)" --command 'cat /var/lib/host-state/picklelab.json' --comment brined-almanac-host-state
+   scripts/fence-test --item host-state-report technicalpickles@picklelab
+   ```
+
+   Append the first command's output to `authorized_keys` on picklelab before
+   the second.
 
 The forced command prints the report and does nothing else, whatever the
 client asks to run. `restrict` and `from=` work as in the puller's line above.
-
-Test the fence from the Mac the same way as the puller's, with the
-`host-state-report` item. The output is the report:
-
-```sh
-key=$(mktemp)
-av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op read "op://brined-almanac/host-state-report/private key?ssh-format=openssh" > "$key"
-ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab | jq '{host, generated_at, checks: (.checks | length)}'
-ssh -n -F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes technicalpickles@picklelab anything-else | jq .host
-rm -f "$key"
-```
-
-Both commands print the same report, because the command after the host name is ignored.
+The "no command" probe in `fence-test` prints the report.
 
 `REPORT_KEY` is optional in `compose.prod.yaml`, so the `unused` placeholder
 lists in `mise.toml`, this runbook, and `scripts/deploy` do not include it.
@@ -777,7 +808,7 @@ since ...`, covers four causes. Check them in this order:
    failure: `ssh failed` (the fence, the key, or picklelab down), `not json`,
    or `not a report for picklelab`.
 2. `ssh failed` with a report that exists on picklelab means the fence line or
-   `from=` is wrong. Run the fence test above.
+   `from=` is wrong. Run `fence-line --check` and `fence-test` as above.
 3. The report on picklelab is old when picklelab's collector timer stopped. The
    fetch succeeds and the file's `generated_at` stays old, so the finding names
    that age. If the report is missing on picklelab, the fence's `cat` exits 1 and
