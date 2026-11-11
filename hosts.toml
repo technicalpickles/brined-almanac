@@ -1,3 +1,7 @@
 [[host]]
 name = "mac"
 project = "brined-almanac"
+
+[[host]]
+name = "picklelab"
+project = "homelab"

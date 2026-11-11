@@ -62,6 +62,8 @@ services:
     env_file: ${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/prod.env
     environment:
       PULLER_KEY: "${BRINED_ALMANAC_PULLER_KEY:?run `mise run deploy`, which resolves it through op run}"
+      # Optional: without it the puller skips the host-state fetch and almanac files picklelab/stale/missing.
+      REPORT_KEY: "${BRINED_ALMANAC_REPORT_KEY:-}"
     tmpfs:
       # Owner and mode are explicit: the default mount is 1777 on create but root 755 after a
       # restart, which locks the puller out of its key file.
@@ -69,6 +71,7 @@ services:
     volumes:
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/transcripts:/transcripts"
       - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/known_hosts:/etc/ssh/ssh_known_hosts:ro"
+      - "${BRINED_ALMANAC_STATE:-${HOME}/.local/share/brined-almanac}/host-state:/host-state"
     healthcheck:
       test:
         - CMD-SHELL

@@ -57,7 +57,7 @@ A report is one JSON file per host, named `<host>.json` in the directory `HOST_S
 
 `since` is when the check entered its current status, so it does not move while the status holds. The workflow files a critical or unknown check once its `since` is 10 minutes old, and a warning once it is 24 hours old. A report whose `generated_at` is older than 30 minutes is stale, and files one task for the host in place of its checks. A time ahead of the scan's clock counts as age zero.
 
-Each host declares its transport. picklelab and the WordPress droplet use pull. The droplet joins the tailnet first, which also lets it close SSH to the internet.
+Each host declares its transport. picklelab is the first pull host: the puller fetches its report over a fenced SSH key, in the same pass as the transcripts, and writes it to the directory beside `mac.json`. The WordPress droplet uses pull too, once it joins the tailnet, which also lets it close SSH to the internet.
 
 ## Rules every workflow follows
 
