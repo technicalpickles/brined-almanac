@@ -869,3 +869,33 @@ Deployed 2026-11-08 from branch `prod-on-the-mac` at `6125d77`, after main
   `5bbecd8` with an explicit `mode=0700,uid=10002,gid=10002`; redeployed, and
   a second restart came back with all three healthy, the puller at 0
   restarts and a fresh `.last-pull`, `check` ok, and nothing new filed.
+
+## Resolve deploy
+
+The first deploy with the Resolve effect, which lets host-state close its own
+tasks, changes two things that a running prod notices once. Neither recurs on
+later deploys.
+
+- Before it, let prod's pending events run on the old binary, and don't pass
+  `--allow-pending`. A host-state event now carries an `outage` field, so one
+  the old build queued is malformed on the new binary, and its delivery ID
+  stays seen, so it never runs.
+- After it, close by hand what the old build filed. The old build keyed each
+  run by its outage, and a close resolves what `<host>.<check>` or
+  `<host>.stale` filed, so it never reaches them. While such an outage lasts,
+  the new build files nothing new for it either, because its delivery ID was
+  already seen. List them with:
+
+  ```sh
+  task status:pending almanac_key.any: description~host-state:
+  ```
+
+  Close each one whose check has been ok for over an hour in
+  `$STATE/host-state/<host>.json`, or whose host's report is current again.
+  One that is still failing waits until it recovers.
+  `tests/resolve_flow.rs` replays this upgrade in
+  `a_task_filed_before_resolve_stays_open_until_closed_by_hand`.
+
+Before the deploy, 2026-11-11: `53db253c` (timer-nikke-sync on picklelab) was
+the only open task, and was closed by hand once the report showed the check ok
+since 18:02Z.

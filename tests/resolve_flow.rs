@@ -7,6 +7,7 @@ use std::sync::Arc;
 use almanac::prelude::*;
 use almanac::runtime::{Envelope, Origin, Runtime};
 use almanac::store::MemoryStore;
+use almanac::workflow::Registered;
 use brined_almanac::host_state::{Episodes, Hosts};
 use brined_almanac::providers::LogTracker;
 use brined_almanac::routing::Router;
@@ -40,30 +41,78 @@ fn report(generated_at: OffsetDateTime, checks: Value) -> String {
         .to_string()
 }
 
+/// The build before the Resolve effect, which keyed each run by its outage and only filed.
+mod before_resolve {
+    use almanac::prelude::*;
+    use brined_almanac::workflows::host_state::{Facts, HostFinding, facts, policy};
+
+    #[workflow(
+        on = HostFinding,
+        key = "{subject}",
+        intent = "File one task for each host check that has been failing long enough.",
+        may = [File],
+        runs_per_hour = 1000,
+        decide = files_only,
+    )]
+    pub async fn host_state(_cx: &Cx, event: &HostFinding) -> Result<Facts, Halt> {
+        Ok(facts(event))
+    }
+
+    pub fn files_only(facts: &Facts) -> Vec<Effect> {
+        policy(facts)
+            .into_iter()
+            .filter(|effect| matches!(effect, Effect::File { .. }))
+            .collect()
+    }
+}
+
 /// A daemon's worth of host-state: the runtime, its tracker's replica, and the scanner's memory.
 struct Daemon {
     dir: tempfile::TempDir,
+    store: Arc<MemoryStore>,
+    tracker: Arc<dyn Tracker>,
     rt: Runtime,
     episodes: Episodes,
 }
 
+fn runtime(
+    workflow: Box<dyn Registered>,
+    tracker: &Arc<dyn Tracker>,
+    store: &Arc<MemoryStore>,
+) -> Runtime {
+    Runtime::new(
+        vec![workflow],
+        Providers::new().provide::<dyn Tracker>(tracker.clone()),
+    )
+    .in_mode(Mode::Live)
+    .with_store(store.clone())
+}
+
 impl Daemon {
     fn new() -> Self {
+        Self::running(Box::new(HostState))
+    }
+
+    fn running(workflow: Box<dyn Registered>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("reports")).unwrap();
         let tracker: Arc<dyn Tracker> =
             Arc::new(Router::new(LogTracker, taskwarrior(dir.path(), "almanac")));
-        let rt = Runtime::new(
-            vec![Box::new(HostState)],
-            Providers::new().provide::<dyn Tracker>(tracker),
-        )
-        .in_mode(Mode::Live)
-        .with_store(Arc::new(MemoryStore::default()));
+        let store = Arc::new(MemoryStore::default());
+        let rt = runtime(workflow, &tracker, &store);
         Self {
             dir,
+            store,
+            tracker,
             rt,
             episodes: Episodes::default(),
         }
+    }
+
+    /// Restarts on the current build, keeping the store and the tracker.
+    fn deploy(&mut self) {
+        self.rt = runtime(Box::new(HostState), &self.tracker, &self.store);
+        self.episodes = Episodes::default();
     }
 
     fn reports(&self) -> PathBuf {
@@ -240,4 +289,51 @@ async fn a_recovery_lost_to_a_newer_outage_is_made_up_by_the_next() {
         tasks.iter().all(|(_, status)| status == "completed"),
         "{tasks:?}"
     );
+}
+
+#[tokio::test]
+async fn a_task_filed_before_resolve_stays_open_until_closed_by_hand() {
+    let mut daemon = Daemon::running(Box::new(before_resolve::HostState));
+    let check = |status: i64, since: &str| json!([{"name": "timer", "status": status, "since": since, "output": ""}]);
+    let start = datetime!(2026-11-11 12:00 UTC);
+    daemon
+        .scan(start, report(start, check(2, "2026-11-11T11:00:00Z")))
+        .await;
+    daemon.deploy();
+    let after = start + Duration::minutes(15);
+    daemon
+        .scan(after, report(after, check(2, "2026-11-11T11:00:00Z")))
+        .await;
+    assert_eq!(
+        daemon.tasks().await.len(),
+        1,
+        "the outage's delivery ID was already seen, so the new build files nothing for it"
+    );
+    for minutes in [60, 75, 90, 105, 120] {
+        let now = start + Duration::minutes(minutes);
+        daemon
+            .scan(now, report(now, check(0, "2026-11-11T12:30:00Z")))
+            .await;
+    }
+    let tasks = daemon.tasks().await;
+    assert_eq!(
+        tasks
+            .iter()
+            .map(|(_, status)| status.as_str())
+            .collect::<Vec<_>>(),
+        ["pending"],
+        "the recovery resolves what <host>.<check> filed, and the old run was keyed by outage"
+    );
+    let broke = start + Duration::minutes(180);
+    daemon
+        .scan(broke, report(broke, check(2, "2026-11-11T14:45:00Z")))
+        .await;
+    let healed = start + Duration::minutes(300);
+    daemon
+        .scan(healed, report(healed, check(0, "2026-11-11T15:30:00Z")))
+        .await;
+    let tasks = daemon.tasks().await;
+    assert_eq!(tasks.len(), 2, "{tasks:?}");
+    assert_eq!(status_of(&tasks, "since 2026-11-11 11:00Z"), "pending");
+    assert_eq!(status_of(&tasks, "since 2026-11-11 14:45Z"), "completed");
 }

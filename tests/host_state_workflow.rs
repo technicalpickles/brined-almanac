@@ -798,3 +798,11 @@ fn a_resumed_event_naming_a_check_is_malformed() {
     let err = HostFinding::from_json(&payload).unwrap_err();
     assert_eq!(err.pointer, "/check");
 }
+
+#[test]
+fn a_finding_from_before_resolve_has_no_outage_so_it_is_malformed() {
+    let mut payload = first_event();
+    payload.as_object_mut().unwrap().remove("outage");
+    let err = HostFinding::from_json(&payload).unwrap_err();
+    assert_eq!(err.pointer, "/outage");
+}
