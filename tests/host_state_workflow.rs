@@ -368,6 +368,40 @@ fn a_check_flapping_inside_the_hold_files_once() {
 }
 
 #[test]
+fn a_check_wobbling_between_critical_and_unknown_files_once() {
+    let truth = |m| {
+        Truth::Status(if m < 30 {
+            0
+        } else if (m / 5) % 2 == 0 {
+            2
+        } else {
+            3
+        })
+    };
+    assert_eq!(tasks_filed(240, truth), 1);
+}
+
+#[test]
+fn a_check_flapping_faster_than_the_threshold_files_once() {
+    let truth = |m| Truth::Status(if m >= 30 && (m / 5) % 2 == 0 { 2 } else { 0 });
+    assert_eq!(tasks_filed(420, truth), 1);
+}
+
+#[test]
+fn a_check_hovering_between_warning_and_critical_files_critical() {
+    let truth = |m| {
+        Truth::Status(if m < 30 {
+            0
+        } else if (m / 20) % 2 == 0 {
+            1
+        } else {
+            2
+        })
+    };
+    assert_eq!(tasks_filed(240, truth), 1);
+}
+
+#[test]
 fn a_warning_that_turns_critical_files_both() {
     let truth = |m| {
         Truth::Status(if m < 60 {

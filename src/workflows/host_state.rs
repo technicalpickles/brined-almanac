@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::host_state::{
-    Episodes, Finding, Hosts, findings, is_old_report, iso_minute, read, scan_gap_is_trusted,
+    Episodes, Finding, Hosts, candidates, is_old_report, iso_minute, read, scan_gap_is_trusted,
 };
 use crate::routing::Project;
 
@@ -67,9 +67,9 @@ pub fn scan_findings(
                 host.name
             );
         }
-        let mut found = findings(host, &result, now, trusted);
+        let mut found = candidates(host, &result, now, trusted);
         episodes.continue_outages(&mut found, now);
-        for finding in found {
+        for finding in found.into_iter().filter(|finding| finding.is_due(now)) {
             let (kind, check, status, since) = match &finding {
                 Finding::Check {
                     check,
