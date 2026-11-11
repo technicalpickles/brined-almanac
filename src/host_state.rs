@@ -465,21 +465,25 @@ struct Episode {
 }
 
 /// The outages recent scans saw, so that a finding back within `RECOVERY_HOLD` keeps its first
-/// `since`, and with it its key. It lives in memory, so a restart mid-flap files once more.
+/// `since`, and with it its key, plus when each host's reports turned current. It lives in
+/// memory, so a restart mid-flap files once more and a restart mid-recovery waits another hold.
 #[derive(Debug, Default)]
-pub struct Episodes(std::collections::HashMap<String, Episode>);
+pub struct Episodes {
+    outages: std::collections::HashMap<String, Episode>,
+    current: std::collections::HashMap<String, OffsetDateTime>,
+}
 
 impl Episodes {
     /// Rewrites each finding's `since` to the start of the outage it continues.
     pub fn continue_outages(&mut self, findings: &mut [Finding], now: OffsetDateTime) {
-        self.0
+        self.outages
             .retain(|_, episode| now - episode.last_seen <= RECOVERY_HOLD);
         for finding in findings {
             let id = finding.episode();
             let Some(since) = finding.since_mut() else {
                 continue;
             };
-            let episode = self.0.entry(id).or_insert(Episode {
+            let episode = self.outages.entry(id).or_insert(Episode {
                 start: *since,
                 last_seen: now,
             });
@@ -491,9 +495,25 @@ impl Episodes {
     /// Whether an outage of `check` is still held, so a break now would continue it.
     pub fn holds(&self, host: &str, check: &str, now: OffsetDateTime) -> bool {
         ["warning", "broken"].iter().any(|group| {
-            self.0
+            self.outages
                 .get(&format!("{host}/{check}/{group}"))
                 .is_some_and(|episode| now - episode.last_seen <= RECOVERY_HOLD)
         })
+    }
+
+    /// When `host`'s reports turned current, once they have stayed current for longer than
+    /// `RECOVERY_HOLD`, so no stale outage of it is still held.
+    pub fn resumed(
+        &mut self,
+        host: &str,
+        read: &Read,
+        now: OffsetDateTime,
+    ) -> Option<OffsetDateTime> {
+        if !matches!(read, Read::Report(_)) || is_old_report(read, now) {
+            self.current.remove(host);
+            return None;
+        }
+        let start = *self.current.entry(host.to_string()).or_insert(now);
+        (now - start > RECOVERY_HOLD).then_some(start)
     }
 }

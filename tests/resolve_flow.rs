@@ -1,7 +1,7 @@
 //! host-state's recovery close through almanac's runtime, the router and a real taskwarrior
 //! replica, from reports to completed tasks.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use almanac::prelude::*;
@@ -12,7 +12,7 @@ use brined_almanac::providers::LogTracker;
 use brined_almanac::routing::Router;
 use brined_almanac::taskwarrior::{KEY_ATTR, Taskwarrior, TaskwarriorConfig};
 use brined_almanac::workflows::host_state::{HostState, scan_findings};
-use serde_json::json;
+use serde_json::{Value, json};
 use taskchampion::ServerConfig;
 use time::macros::datetime;
 use time::{Duration, OffsetDateTime};
@@ -30,79 +30,214 @@ fn taskwarrior(dir: &Path, name: &str) -> Taskwarrior {
     })
 }
 
-fn report(now: OffsetDateTime, checks: serde_json::Value) -> String {
-    let rfc = |t: OffsetDateTime| {
-        t.format(&time::format_description::well_known::Rfc3339)
-            .unwrap()
-    };
-    json!({"host": "box", "generated_at": rfc(now), "interval_seconds": 300, "checks": checks})
+fn rfc(t: OffsetDateTime) -> String {
+    t.format(&time::format_description::well_known::Rfc3339)
+        .unwrap()
+}
+
+fn report(generated_at: OffsetDateTime, checks: Value) -> String {
+    json!({"host": "box", "generated_at": rfc(generated_at), "interval_seconds": 300, "checks": checks})
         .to_string()
 }
 
-#[tokio::test]
-async fn a_recovered_check_completes_its_task_and_leaves_another_checks_open() {
-    let dir = tempfile::tempdir().unwrap();
-    let reports = dir.path().join("reports");
-    std::fs::create_dir(&reports).unwrap();
-    let tracker: Arc<dyn Tracker> =
-        Arc::new(Router::new(LogTracker, taskwarrior(dir.path(), "almanac")));
-    let rt = Runtime::new(
-        vec![Box::new(HostState)],
-        Providers::new().provide::<dyn Tracker>(tracker),
-    )
-    .in_mode(Mode::Live)
-    .with_store(Arc::new(MemoryStore::default()));
-    let start = datetime!(2026-11-11 12:00 UTC);
-    let broke = "2026-11-11T11:00:00Z";
-    let healed = "2026-11-11T12:30:00Z";
-    let mut episodes = Episodes::default();
-    let scans = [
-        (
-            start,
-            json!([
-                {"name": "timer", "status": 2, "since": broke, "output": "failed"},
-                {"name": "site", "status": 2, "since": broke, "output": "503"},
-            ]),
-        ),
-        (
-            start + Duration::minutes(105),
-            json!([
-                {"name": "timer", "status": 0, "since": healed, "output": ""},
-                {"name": "site", "status": 2, "since": broke, "output": "503"},
-            ]),
-        ),
-    ];
-    for (now, checks) in scans {
-        std::fs::write(reports.join("box.json"), report(now, checks)).unwrap();
+/// A daemon's worth of host-state: the runtime, its tracker's replica, and the scanner's memory.
+struct Daemon {
+    dir: tempfile::TempDir,
+    rt: Runtime,
+    episodes: Episodes,
+}
+
+impl Daemon {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("reports")).unwrap();
+        let tracker: Arc<dyn Tracker> =
+            Arc::new(Router::new(LogTracker, taskwarrior(dir.path(), "almanac")));
+        let rt = Runtime::new(
+            vec![Box::new(HostState)],
+            Providers::new().provide::<dyn Tracker>(tracker),
+        )
+        .in_mode(Mode::Live)
+        .with_store(Arc::new(MemoryStore::default()));
+        Self {
+            dir,
+            rt,
+            episodes: Episodes::default(),
+        }
+    }
+
+    fn reports(&self) -> PathBuf {
+        self.dir.path().join("reports")
+    }
+
+    /// Writes `report` and scans at `now`, as if the last scan was 15 minutes ago.
+    fn findings(&mut self, now: OffsetDateTime, report: String) -> Vec<(String, Value)> {
+        std::fs::write(self.reports().join("box.json"), report).unwrap();
         let previous = Some(now - Duration::minutes(15));
-        for (id, payload) in scan_findings(&hosts(), &reports, now, previous, &mut episodes) {
+        scan_findings(&hosts(), &self.reports(), now, previous, &mut self.episodes)
+    }
+
+    async fn ingest(&self, found: Vec<(String, Value)>) {
+        for (delivery_id, payload) in found {
             let envelope = Envelope {
                 origin: Origin::Scan,
                 source: "host-state".into(),
-                delivery_id: id,
+                delivery_id,
                 depth: 0,
                 kind: "host.state.finding".into(),
                 payload,
             };
-            rt.ingest(envelope).await.unwrap();
+            self.rt.ingest(envelope).await.unwrap();
         }
-        rt.drain().await.unwrap();
-        for delivery in rt.deliver().await.unwrap() {
+    }
+
+    async fn settle(&self) {
+        self.rt.drain().await.unwrap();
+        for delivery in self.rt.deliver().await.unwrap() {
             assert_eq!(delivery.error, None, "{}", delivery.key);
         }
     }
-    let mac = taskwarrior(dir.path(), "mac");
-    mac.sync().await.unwrap();
-    let tasks = mac.tasks().await.unwrap();
-    let status_of = |check: &str| {
-        let task = tasks
-            .iter()
-            .find(|t| t.get("description").is_some_and(|d| d.contains(check)))
-            .unwrap_or_else(|| panic!("no task for {check}"));
-        assert!(task.get(KEY_ATTR).is_some());
-        task.get("status").unwrap().to_string()
-    };
+
+    async fn scan(&mut self, now: OffsetDateTime, report: String) {
+        let found = self.findings(now, report);
+        self.ingest(found).await;
+        self.settle().await;
+    }
+
+    /// Each task's description and status, as another replica syncs them.
+    async fn tasks(&self) -> Vec<(String, String)> {
+        let mac = taskwarrior(self.dir.path(), "mac");
+        mac.sync().await.unwrap();
+        let mut tasks: Vec<_> = mac
+            .tasks()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|task| {
+                assert!(task.get(KEY_ATTR).is_some());
+                (
+                    task.get("description").unwrap().to_string(),
+                    task.get("status").unwrap().to_string(),
+                )
+            })
+            .collect();
+        tasks.sort();
+        tasks
+    }
+}
+
+fn status_of<'a>(tasks: &'a [(String, String)], needle: &str) -> &'a str {
+    &tasks
+        .iter()
+        .find(|(description, _)| description.contains(needle))
+        .unwrap_or_else(|| panic!("no task for {needle} in {tasks:?}"))
+        .1
+}
+
+#[tokio::test]
+async fn a_recovered_check_completes_its_task_and_leaves_another_checks_open() {
+    let mut daemon = Daemon::new();
+    let start = datetime!(2026-11-11 12:00 UTC);
+    let broke = "2026-11-11T11:00:00Z";
+    let healed = "2026-11-11T12:30:00Z";
+    daemon
+        .scan(
+            start,
+            report(
+                start,
+                json!([
+                    {"name": "timer", "status": 2, "since": broke, "output": "failed"},
+                    {"name": "site", "status": 2, "since": broke, "output": "503"},
+                ]),
+            ),
+        )
+        .await;
+    let later = start + Duration::minutes(105);
+    daemon
+        .scan(
+            later,
+            report(
+                later,
+                json!([
+                    {"name": "timer", "status": 0, "since": healed, "output": ""},
+                    {"name": "site", "status": 2, "since": broke, "output": "503"},
+                ]),
+            ),
+        )
+        .await;
+    let tasks = daemon.tasks().await;
     assert_eq!(tasks.len(), 2);
-    assert_eq!(status_of("timer"), "completed");
-    assert_eq!(status_of("site"), "pending");
+    assert_eq!(status_of(&tasks, "timer"), "completed");
+    assert_eq!(status_of(&tasks, "site"), "pending");
+}
+
+#[tokio::test]
+async fn a_host_whose_reports_resume_completes_its_stale_task() {
+    let mut daemon = Daemon::new();
+    let healthy =
+        json!([{"name": "timer", "status": 0, "since": "2026-11-11T09:00:00Z", "output": ""}]);
+    let start = datetime!(2026-11-11 12:00 UTC);
+    let last = start - Duration::minutes(45);
+    daemon.scan(start, report(last, healthy.clone())).await;
+    assert_eq!(
+        status_of(&daemon.tasks().await, "no report from box"),
+        "pending"
+    );
+    for minutes in [15, 30, 45, 60, 75] {
+        let now = start + Duration::minutes(minutes);
+        daemon.scan(now, report(now, healthy.clone())).await;
+    }
+    assert_eq!(
+        status_of(&daemon.tasks().await, "no report from box"),
+        "pending",
+        "current for exactly the hold"
+    );
+    let now = start + Duration::minutes(90);
+    daemon.scan(now, report(now, healthy)).await;
+    let tasks = daemon.tasks().await;
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(status_of(&tasks, "no report from box"), "completed");
+}
+
+/// A key's next event waits for its last run's effects, and a newer pending event replaces an
+/// older one. So a recovery can be lost when a new outage arrives before it runs, and the next
+/// recovery has to close both outages' tasks.
+#[tokio::test]
+async fn a_recovery_lost_to_a_newer_outage_is_made_up_by_the_next() {
+    let mut daemon = Daemon::new();
+    let start = datetime!(2026-11-11 12:00 UTC);
+    let check = |status: i64, since: &str| json!([{"name": "timer", "status": status, "since": since, "output": ""}]);
+    daemon
+        .scan(start, report(start, check(2, "2026-11-11T11:00:00Z")))
+        .await;
+    let healed_at = start + Duration::minutes(90);
+    let recovery = daemon.findings(
+        healed_at,
+        report(healed_at, check(0, "2026-11-11T12:15:00Z")),
+    );
+    let broke_at = start + Duration::minutes(180);
+    let new_outage = daemon.findings(broke_at, report(broke_at, check(2, "2026-11-11T14:00:00Z")));
+    assert!(recovery.iter().any(|(_, p)| p["kind"] == "recovered"));
+    assert!(new_outage.iter().any(|(_, p)| p["kind"] == "check"));
+    daemon.ingest(recovery).await;
+    daemon.ingest(new_outage).await;
+    daemon.settle().await;
+    let tasks = daemon.tasks().await;
+    assert_eq!(tasks.len(), 2, "{tasks:?}");
+    assert!(
+        tasks.iter().all(|(_, status)| status == "pending"),
+        "the recovery was coalesced away: {tasks:?}"
+    );
+    let healed_again = start + Duration::minutes(330);
+    daemon
+        .scan(
+            healed_again,
+            report(healed_again, check(0, "2026-11-11T15:00:00Z")),
+        )
+        .await;
+    let tasks = daemon.tasks().await;
+    assert!(
+        tasks.iter().all(|(_, status)| status == "completed"),
+        "{tasks:?}"
+    );
 }

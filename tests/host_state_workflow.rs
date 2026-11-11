@@ -293,6 +293,7 @@ struct Tracked {
     seen: BTreeSet<String>,
     tasks: Vec<(String, bool)>,
     recoveries: Vec<i64>,
+    resumes: Vec<i64>,
 }
 
 impl Tracked {
@@ -305,14 +306,17 @@ impl Tracked {
     }
 
     /// One new delivery, as almanac would handle it: a duplicate does nothing, a finding files, and
-    /// a recovery closes every open task its outage filed.
+    /// a recovery or a resume closes every open task its outage filed.
     fn deliver(&mut self, id: String, payload: &Value, minute: i64) {
         if !self.seen.insert(id) {
             return;
         }
         let outage = payload["outage"].as_str().unwrap().to_string();
-        if payload["kind"] == "recovered" {
-            self.recoveries.push(minute);
+        if payload["status"] == "ok" {
+            match payload["kind"].as_str() {
+                Some("recovered") => self.recoveries.push(minute),
+                _ => self.resumes.push(minute),
+            }
             for task in self.tasks.iter_mut().filter(|(o, _)| *o == outage) {
                 task.1 = false;
             }
@@ -558,17 +562,79 @@ fn two_outages_in_a_day_each_close() {
     );
 }
 
+fn silent(from: i64, to: i64) -> impl Fn(i64) -> Truth {
+    move |m| {
+        if (from..to).contains(&m) {
+            Truth::Silent
+        } else {
+            Truth::Status(0)
+        }
+    }
+}
+
 #[test]
-fn a_stale_report_is_not_closed_by_a_fresh_one() {
-    let silent = |m| {
-        if (60..120).contains(&m) {
+fn a_collector_back_for_over_the_hold_closes_its_stale_task_once() {
+    let tracked = replay(480, silent(60, 120), &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 0));
+    let after_silence: Vec<_> = tracked.resumes.iter().filter(|&&m| m > 120).collect();
+    assert_eq!(after_silence.len(), 1, "{:?}", tracked.resumes);
+    assert!(*after_silence[0] > 120 + 60, "{:?}", tracked.resumes);
+}
+
+#[test]
+fn a_collector_back_for_under_the_hold_stays_stale() {
+    let tracked = replay(170, silent(60, 120), &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 1));
+}
+
+#[test]
+fn a_collector_that_stops_twice_in_a_day_closes_both() {
+    let twice = |m| {
+        if (60..120).contains(&m) || (240..300).contains(&m) {
             Truth::Silent
         } else {
             Truth::Status(0)
         }
     };
-    let tracked = replay(480, silent, &[]);
-    assert_eq!((tracked.filed(), tracked.open()), (1, 1));
+    let tracked = replay(480, twice, &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (2, 0));
+}
+
+#[test]
+fn a_collector_that_stutters_back_closes_nothing_until_it_settles() {
+    let stutter = |m| {
+        if (60..120).contains(&m) || (150..200).contains(&m) {
+            Truth::Silent
+        } else {
+            Truth::Status(0)
+        }
+    };
+    let settling = replay(270, stutter, &[]);
+    assert_eq!((settling.filed(), settling.open()), (2, 2));
+    let settled = replay(480, stutter, &[]);
+    assert_eq!((settled.filed(), settled.open()), (2, 0));
+}
+
+#[test]
+fn a_resume_after_a_restart_still_closes() {
+    let tracked = replay(480, silent(60, 120), &[150]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 0));
+}
+
+#[test]
+fn an_unreadable_report_that_is_fixed_closes() {
+    let tracked = replay(
+        480,
+        |m| {
+            if (60..120).contains(&m) {
+                Truth::Invalid
+            } else {
+                Truth::Status(0)
+            }
+        },
+        &[],
+    );
+    assert_eq!((tracked.filed(), tracked.open()), (1, 0));
 }
 
 #[test]
@@ -624,6 +690,7 @@ fn kinds_at(dir: &Path, now: OffsetDateTime, episodes: &mut Episodes) -> Vec<Str
     scan_findings(&hosts(), dir, now, previous, episodes)
         .into_iter()
         .map(|(_, payload)| payload["kind"].as_str().unwrap().to_string())
+        .filter(|kind| kind != "resumed")
         .collect()
 }
 
@@ -668,4 +735,66 @@ fn a_recovery_that_is_not_ok_is_malformed() {
     payload["kind"] = json!("recovered");
     let err = HostFinding::from_json(&payload).unwrap_err();
     assert_eq!(err.pointer, "/status");
+}
+
+#[test]
+fn a_resumed_event_resolves_what_the_hosts_stale_outages_filed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mac.json");
+    let mut episodes = Episodes::default();
+    let first = datetime!(2026-11-11 14:00 UTC);
+    let resume = |generated: &str, now: OffsetDateTime, episodes: &mut Episodes| {
+        std::fs::write(&path, report(generated, 0, "2026-11-11T09:00:00Z")).unwrap();
+        scan_findings(
+            &hosts(),
+            dir.path(),
+            now,
+            Some(now - Duration::minutes(15)),
+            episodes,
+        )
+        .into_iter()
+        .filter(|(_, payload)| payload["kind"] == "resumed")
+        .collect::<Vec<_>>()
+    };
+    assert!(resume("2026-11-11T13:55:00Z", first, &mut episodes).is_empty());
+    assert!(
+        resume(
+            "2026-11-11T14:55:00Z",
+            first + Duration::minutes(60),
+            &mut episodes
+        )
+        .is_empty(),
+        "current for exactly the hold is not over it"
+    );
+    let found = resume(
+        "2026-11-11T15:00:00Z",
+        first + Duration::minutes(61),
+        &mut episodes,
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "mac/stale/ok/2026-11-11T14:00Z");
+    let event = HostFinding::from_json(&found[0].1).unwrap();
+    let effects = policy(&facts(&event));
+    let Effect::Resolve { item, evidence, .. } = &effects[0] else {
+        panic!("expected Resolve, got {effects:?}");
+    };
+    assert_eq!(
+        item,
+        &Item::Filed {
+            key: "mac.stale".to_string()
+        }
+    );
+    assert_eq!(
+        evidence.to_string(),
+        "host-state: reports from mac current since 2026-11-11 14:00Z"
+    );
+}
+
+#[test]
+fn a_resumed_event_naming_a_check_is_malformed() {
+    let mut payload = first_event();
+    payload["kind"] = json!("resumed");
+    payload["status"] = json!("ok");
+    let err = HostFinding::from_json(&payload).unwrap_err();
+    assert_eq!(err.pointer, "/check");
 }
