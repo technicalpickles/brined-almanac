@@ -30,6 +30,15 @@ pub enum Status {
 }
 
 impl Status {
+    /// Critical and unknown both mean broken, so moving between them is one outage.
+    fn group(self) -> &'static str {
+        match self {
+            Status::Ok => "ok",
+            Status::Warning => "warning",
+            Status::Critical | Status::Unknown => "broken",
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Status::Ok => "ok",
@@ -292,7 +301,7 @@ impl Finding {
                 check,
                 status,
                 ..
-            } => format!("{host}/{check}/{}", status.name()),
+            } => format!("{host}/{check}/{}", status.group()),
             Finding::Stale { host, .. } => format!("{host}/stale"),
         }
     }
@@ -301,6 +310,21 @@ impl Finding {
         match self {
             Finding::Check { since, .. } => Some(since),
             Finding::Stale { since, .. } => since.as_mut(),
+        }
+    }
+
+    /// Whether it has been failing long enough to file. A stale finding files at once.
+    pub fn is_due(&self, now: OffsetDateTime) -> bool {
+        match self {
+            Finding::Check { status, since, .. } => {
+                let threshold = match status {
+                    Status::Ok => return false,
+                    Status::Warning => WARNING_AFTER,
+                    Status::Critical | Status::Unknown => CRITICAL_AFTER,
+                };
+                age(*since, now) >= threshold
+            }
+            Finding::Stale { .. } => true,
         }
     }
 
@@ -365,9 +389,23 @@ pub fn is_old_report(read: &Read, now: OffsetDateTime) -> bool {
     matches!(read, Read::Report(report) if age(report.generated_at, now) > STALE_AFTER)
 }
 
+/// The findings that are due now, for a caller with no memory of earlier scans.
+pub fn findings(
+    host: &Host,
+    read: &Read,
+    now: OffsetDateTime,
+    old_report_may_file: bool,
+) -> Vec<Finding> {
+    candidates(host, read, now, old_report_may_file)
+        .into_iter()
+        .filter(|finding| finding.is_due(now))
+        .collect()
+}
+
+/// Every finding, due or not: a failing check under its threshold still counts toward an outage.
 /// `old_report_may_file` is false when an old report should file nothing for now; missing and
 /// invalid reports file regardless.
-pub fn findings(
+pub fn candidates(
     host: &Host,
     read: &Read,
     now: OffsetDateTime,
@@ -395,14 +433,7 @@ pub fn findings(
         Read::Report(report) => report
             .checks
             .iter()
-            .filter(|check| {
-                let threshold = match check.status {
-                    Status::Ok => return false,
-                    Status::Warning => WARNING_AFTER,
-                    Status::Critical | Status::Unknown => CRITICAL_AFTER,
-                };
-                age(check.since, now) >= threshold
-            })
+            .filter(|check| check.status != Status::Ok)
             .map(|check| Finding::Check {
                 host: host.name.clone(),
                 check: check.name.clone(),
