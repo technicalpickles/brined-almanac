@@ -78,9 +78,13 @@ On picklelab on 2026-11-10, read-only over SSH:
   next elapse is empty and its monotonic one is set, which is how
   `list-timers` came to show it with no next time. `timer-check` must read
   both.
-  `climate-auto-switch.timer` is in the repository and not installed, while
-  its service is linked. Discovery will treat that service as a long-running
-  unit and report it inactive, which is a true finding: its schedule is gone.
+- `climate-auto-switch.timer` is unlinked on purpose: picklehome ADR 0001
+  paused it on 2026-10-18. Its service is linked, and is `Type=oneshot` with
+  no `RemainAfterExit`, a job and not a long-running unit. Every real
+  long-running picklehome service is `Type=oneshot` with
+  `RemainAfterExit=yes` (compose wrappers). So discovery skips a plain
+  oneshot when it builds unit checks; once the timer is re-linked, the job is
+  watched as `timer-climate-auto-switch`.
 - `systemctl list-timers --output=json` gives `next` and `last` per timer.
 
 The tailnet sites named in picklehome's service READMEs: brineworks

@@ -130,7 +130,7 @@ README: what it watches and how (discovery rules, `sites.conf`), where the repor
 - [ ] **Verify locally.** `systemd-analyze verify` is not on the Mac, so: `shellcheck deploy.sh`, `just --list` shows both recipes, and `uv run pytest tests/homelab -q` still passes.
 - [ ] **Commit**, open the `host-state-timer` PR.
 - [ ] **Stop for Josh: merge both PRs and approve the deploy.** Then `just deploy-host-state`.
-- [ ] **Check on the box.** `ssh picklelab cat /var/lib/host-state/picklelab.json | jq` shows `host == "picklelab"`, a `generated_at` within 5 minutes, and one check per discovered item. `ls -l` shows mode 0644. Read each non-OK check and record it in the decision trail; expected non-OK today: `unit-climate-auto-switch`.
+- [ ] **Check on the box.** `ssh picklelab cat /var/lib/host-state/picklelab.json | jq` shows `host == "picklelab"`, a `generated_at` within 5 minutes, and one check per discovered item. `ls -l` shows mode 0644. Read each non-OK check and record it in the decision trail; expected non-OK today: none (`climate-auto-switch` is a plain oneshot job with its timer paused, so discover skips it).
 - [ ] **Dry run from the Mac.** Copy the report into a temp directory as `picklelab.json` and run brined-almanac's `scripts/host-state-dry-run <dir>` from a checkout whose `hosts.toml` has the picklelab entry (the `report-fetch` branch). It parses, and shows what would file.
 
 ## Slug `report-key` (Josh, by hand)
@@ -192,5 +192,5 @@ Behavior: if `REPORT_KEY` is empty, log `fetch-report: REPORT_KEY is empty, skip
 ## Close-out
 
 - [ ] Close task 1b7eff2e with an annotation linking the PRs.
-- [ ] File follow-ups (cite UUIDs): bring `openclaw-approvals-watch` under picklehome; retire `brineworks-server-watch` once `site-brineworks` has filed; the `climate-auto-switch` timer that isn't installed.
+- [ ] File follow-ups (cite UUIDs): bring `openclaw-approvals-watch` under picklehome; retire `brineworks-server-watch` once `site-brineworks` has filed; the paused `climate-auto-switch` timer is already tracked as d24bb464 (annotate it, no new task).
 - [ ] Devlog entry.
