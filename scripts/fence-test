@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Tests a forced-command fence from the Mac with the real key from 1Password: no command, a
+# command the fence must ignore, and a port forward the fence must refuse.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/fence-test --item ITEM USER@HOST
+
+ITEM is the 1Password SSH key item in the brined-almanac vault. Exits nonzero on any FAIL.
+USAGE
+}
+
+item='' target=''
+while (($#)); do
+  case $1 in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --item)
+      (($# >= 2)) || {
+        echo "fence-test: --item needs a value" >&2
+        exit 2
+      }
+      item=$2
+      shift 2
+      ;;
+    -*)
+      echo "fence-test: unknown argument $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      [[ -z $target ]] || {
+        echo "fence-test: one host only" >&2
+        exit 2
+      }
+      target=$1
+      shift
+      ;;
+  esac
+done
+if [[ -z $item || -z $target ]]; then
+  usage >&2
+  exit 2
+fi
+
+key=$(mktemp)
+errf=$(mktemp)
+fwd_pid=''
+cleanup() {
+  [[ -z $fwd_pid ]] || kill "$fwd_pid" 2>/dev/null || true
+  rm -f "$key" "$errf"
+}
+trap cleanup EXIT
+
+# shellcheck disable=SC2016 # the $ is for the inner sh
+av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh \
+  op read "op://brined-almanac/$item/private key?ssh-format=openssh" >"$key" ||
+  {
+    echo "fence-test: could not read the private key of $item" >&2
+    exit 1
+  }
+
+# Without -F /dev/null and IdentityAgent=none, an IdentityFile or agent key from your ssh config is
+# offered after this one, so a refused key falls back to your own and the test checks the wrong thing.
+ssh_opts=(-F /dev/null -o IdentityAgent=none -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes)
+
+fails=0
+fail() {
+  echo "FAIL $1"
+  fails=$((fails + 1))
+}
+
+probe() {
+  local out rc=0
+  out=$(ssh -n "${ssh_opts[@]}" "$target" "$@" 2>&1) || rc=$?
+  printf '%s\n' "${out:0:400}"
+  echo "exit $rc"
+  PROBE_OUT=$out
+}
+
+echo "== no command (prints what the forced command prints)"
+probe
+
+echo "== id (must not print uid=)"
+probe id
+if [[ $PROBE_OUT == *uid=* ]]; then
+  fail "id ran a shell command"
+else
+  echo "PASS id was ignored"
+fi
+
+echo "== port forward (the server must refuse the channel)"
+port=''
+for _ in $(seq 1 20); do
+  candidate=$((20000 + RANDOM % 40000))
+  if ! nc -z 127.0.0.1 "$candidate" 2>/dev/null; then
+    port=$candidate
+    break
+  fi
+done
+if [[ -z $port ]]; then
+  fail "forward: found no free local port"
+else
+  ssh -N -o ExitOnForwardFailure=yes -L "$port:localhost:22" "${ssh_opts[@]}" "$target" </dev/null 2>"$errf" &
+  fwd_pid=$!
+  listening=0
+  for _ in $(seq 1 50); do
+    kill -0 "$fwd_pid" 2>/dev/null || break
+    if nc -z 127.0.0.1 "$port" 2>/dev/null; then
+      listening=1
+      break
+    fi
+    sleep 0.1
+  done
+  if ((!listening)); then
+    fail "forward: ssh never listened on $port, so nothing was tested: $(cat "$errf")"
+  else
+    nc -w 3 127.0.0.1 "$port" </dev/null >/dev/null 2>&1 || true
+    sleep 1
+    if grep -Eiq 'administratively prohibited|open failed' "$errf"; then
+      echo "PASS the server refused the forwarded channel"
+    else
+      fail "forward: no refusal from the server: $(cat "$errf")"
+    fi
+  fi
+  kill "$fwd_pid" 2>/dev/null || true
+  wait "$fwd_pid" 2>/dev/null || true
+  fwd_pid=''
+fi
+
+if ((fails)); then
+  echo "fence-test: $fails FAIL"
+  exit 1
+fi
+echo "fence-test: all passed"

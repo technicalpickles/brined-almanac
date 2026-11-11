@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Prints the authorized_keys line for a forced-command key, built from the public key in
+# 1Password so nobody assembles it by hand. With --check, reads a host's authorized_keys on stdin
+# and confirms it holds exactly that line.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/fence-line --item ITEM --from ADDRESS --command COMMAND --comment COMMENT [--check]
+
+Prints: restrict,from="ADDRESS",command="COMMAND" TYPE BLOB COMMENT
+The public key comes from op://brined-almanac/ITEM/public key.
+
+--check reads an authorized_keys file on stdin and passes only if exactly one line ends in
+COMMENT and it equals the printed line. Example:
+  ssh picklelab cat .ssh/authorized_keys | scripts/fence-line --check --item ... --comment ...
+USAGE
+}
+
+die() {
+  echo "fence-line: $*" >&2
+  exit 1
+}
+
+bad_args() {
+  echo "fence-line: $*" >&2
+  usage >&2
+  exit 2
+}
+
+item='' from='' command='' comment='' check=0
+while (($#)); do
+  case $1 in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --check)
+      check=1
+      shift
+      ;;
+    --item | --from | --command | --comment)
+      (($# >= 2)) || bad_args "$1 needs a value"
+      case $1 in
+        --item) item=$2 ;;
+        --from) from=$2 ;;
+        --command) command=$2 ;;
+        --comment) comment=$2 ;;
+      esac
+      shift 2
+      ;;
+    *) bad_args "unknown argument $1" ;;
+  esac
+done
+for name in item from command comment; do
+  [[ -n ${!name} ]] || bad_args "--$name is required"
+done
+
+case $from$command in
+  *\"*) die 'from and command must not contain a double quote' ;;
+esac
+case $comment in
+  *[[:space:]]*) die 'the comment must be a single word' ;;
+esac
+
+# shellcheck disable=SC2016 # the $ is for the inner sh
+public=$(av inject +BRINED_ALMANAC_OP_TOKEN -- sh -c 'OP_SERVICE_ACCOUNT_TOKEN=$BRINED_ALMANAC_OP_TOKEN exec "$@"' sh op read "op://brined-almanac/$item/public key") ||
+  die "could not read the public key of $item"
+read -r type blob _ <<<"$public"
+case $type in
+  ssh-* | ecdsa-*) ;;
+  *) die "the public key of $item does not start with a key type (got '$type')" ;;
+esac
+[[ -n ${blob:-} ]] || die "the public key of $item has no key data after '$type'"
+
+line="restrict,from=\"$from\",command=\"$command\" $type $blob $comment"
+
+if ! reason=$(printf '%s\n' "$line" | ssh-keygen -l -f - 2>&1); then
+  die "ssh-keygen rejects the generated line: $reason"
+fi
+
+if ((!check)); then
+  printf '%s\n' "$line"
+  exit 0
+fi
+
+found=()
+while IFS= read -r l || [[ -n $l ]]; do
+  [[ $l == \#* ]] && continue
+  last=${l##*[[:space:]]}
+  [[ $last == "$comment" ]] && found+=("$l")
+done
+((${#found[@]} > 0)) || die "no line ending in '$comment' in the authorized_keys on stdin"
+((${#found[@]} == 1)) || die "${#found[@]} lines end in '$comment'; want exactly one"
+if [[ ${found[0]} != "$line" ]]; then
+  {
+    echo "fence-line: the line ending in '$comment' differs from the generated one"
+    echo "  found:    ${found[0]}"
+    echo "  expected: $line"
+  } >&2
+  exit 1
+fi
+if ! reason=$(printf '%s\n' "${found[0]}" | ssh-keygen -l -f - 2>&1); then
+  die "ssh-keygen rejects the line on the host: $reason"
+fi
+echo "ok $comment"
