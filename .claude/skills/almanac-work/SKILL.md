@@ -77,10 +77,10 @@ fingerprint:                    # what almanac filed, from the given issue
   service: openclaw
   tool: edit
   class: arg-validation
-true_class: model-error         # what the class should have been; null if the filed class was right
+true_class: model-error         # what the class should have been; null if the filed class was right; the dominant cause when events mix causes
 verdict: by-design              # fixed | by-design | wrong-repo | real-open | cannot-tell
 cause: model-wrong-arg-names    # short kebab-case slug, reused across cases with the same cause
-fault: model                    # tool | model | config | upstream | almanac | transient
+fault: model                    # tool | model | human | config | upstream | almanac | transient
 model: kimi-k2.7-code           # the model that made the failing calls, when it mattered; else null
 events: 79                      # failed calls in the case, from the transcripts
 real_window: {first: 2026-09-03, last: 2026-11-09}   # from the transcripts, never Bugsink's seen times
@@ -97,9 +97,9 @@ worker: {how: subagent, model: opus, tokens: 140283, minutes: 5}   # how: subage
 ---
 ```
 
-Below it, a few short paragraphs: the cause with the file, the evidence, the recurrence check, and what was left untouched.
+Below it, a few short paragraphs: the cause with the file, the evidence, the recurrence check, and what was left untouched. When one fingerprint holds several causes with different fixes or close decisions, write one record per cause; when they share one disposition, write one record and break the causes down in the body.
 
-Put the same frontmatter at the end of the proof or "cannot tell" comment, as a fenced `yaml` block whose first line is `# almanac-case`. That block is the record of last resort. An unattended run cannot commit to another checkout, so it posts the block and reports that the file is not written yet.
+Put the same frontmatter at the end of the proof or "cannot tell" comment, as a fenced `yaml` block whose first line is `# almanac-case`. The block can't hold its own comment's URL, so leave that out of `comments` there and add it in the file. That block is the record of last resort. An unattended run cannot commit to another checkout, so it posts the block and reports that the file is not written yet.
 
 ## Never
 
