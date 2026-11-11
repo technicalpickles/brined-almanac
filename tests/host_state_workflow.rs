@@ -287,18 +287,62 @@ enum Truth {
     Silent,
 }
 
+/// What a replay did to the tracker: each task filed, by outage, and whether it is still open.
+#[derive(Default)]
+struct Tracked {
+    seen: BTreeSet<String>,
+    tasks: Vec<(String, bool)>,
+    recoveries: Vec<i64>,
+}
+
+impl Tracked {
+    fn filed(&self) -> usize {
+        self.tasks.len()
+    }
+
+    fn open(&self) -> usize {
+        self.tasks.iter().filter(|(_, open)| *open).count()
+    }
+
+    /// One new delivery, as almanac would handle it: a duplicate does nothing, a finding files, and
+    /// a recovery closes every open task its outage filed.
+    fn deliver(&mut self, id: String, payload: &Value, minute: i64) {
+        if !self.seen.insert(id) {
+            return;
+        }
+        let outage = payload["outage"].as_str().unwrap().to_string();
+        if payload["kind"] == "recovered" {
+            self.recoveries.push(minute);
+            for task in self.tasks.iter_mut().filter(|(o, _)| *o == outage) {
+                task.1 = false;
+            }
+        } else {
+            self.tasks.push((outage, true));
+        }
+    }
+}
+
 /// Replays `minutes` of a host whose one check follows `truth`, with the collector writing every
 /// 5 minutes as `checks/collect` does and a scan every 15, and returns how many tasks filed.
 fn tasks_filed(minutes: i64, truth: impl Fn(i64) -> Truth) -> usize {
+    replay(minutes, truth, &[]).filed()
+}
+
+/// The replay behind `tasks_filed`, with almanac restarting, and so forgetting its episodes, at
+/// each minute in `restarts`.
+fn replay(minutes: i64, truth: impl Fn(i64) -> Truth, restarts: &[i64]) -> Tracked {
     let start = datetime!(2026-11-11 08:00 UTC);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mac.json");
     let rfc = |t: OffsetDateTime| t.format(&Rfc3339).unwrap();
     let mut last: Option<(i64, OffsetDateTime)> = None;
     let mut episodes = Episodes::default();
-    let mut filed = BTreeSet::new();
+    let mut tracked = Tracked::default();
     for m in 0..minutes {
         let now = start + Duration::minutes(m);
+        if restarts.contains(&m) {
+            episodes = Episodes::default();
+        }
         if m % 5 == 0 {
             match truth(m) {
                 Truth::Status(status) => {
@@ -329,12 +373,12 @@ fn tasks_filed(minutes: i64, truth: impl Fn(i64) -> Truth) -> usize {
         }
         if m % 15 == 7 && m > 15 {
             let previous = Some(now - Duration::minutes(15));
-            for (id, _) in scan_findings(&hosts(), dir.path(), now, previous, &mut episodes) {
-                filed.insert(id);
+            for (id, payload) in scan_findings(&hosts(), dir.path(), now, previous, &mut episodes) {
+                tracked.deliver(id, &payload, m);
             }
         }
     }
-    filed.len()
+    tracked
 }
 
 #[test]
@@ -437,4 +481,191 @@ fn a_collector_that_stops_twice_in_a_day_files_twice() {
         }
     };
     assert_eq!(tasks_filed(480, truth), 2);
+}
+
+fn outage(from: i64, to: i64) -> impl Fn(i64) -> Truth {
+    move |m| Truth::Status(if (from..to).contains(&m) { 2 } else { 0 })
+}
+
+#[test]
+fn a_check_ok_for_over_the_hold_closes_its_task_once() {
+    let tracked = replay(300, outage(60, 110), &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 0));
+    assert_eq!(
+        tracked.recoveries.len(),
+        1,
+        "one recovery, however many scans see it"
+    );
+    assert!(tracked.recoveries[0] > 110 + 60, "{:?}", tracked.recoveries);
+}
+
+#[test]
+fn a_check_ok_for_under_the_hold_stays_open() {
+    let tracked = replay(165, outage(60, 110), &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 1));
+}
+
+#[test]
+fn a_flapping_check_closes_only_once_it_settles() {
+    let flapping = |m| {
+        Truth::Status(if (30..300).contains(&m) && m % 40 < 30 {
+            2
+        } else {
+            0
+        })
+    };
+    let settling = replay(300, flapping, &[]);
+    assert_eq!((settling.filed(), settling.open()), (1, 1));
+    let settled = replay(480, flapping, &[]);
+    assert_eq!((settled.filed(), settled.open()), (1, 0));
+}
+
+#[test]
+fn a_recovery_after_a_restart_still_closes() {
+    let tracked = replay(300, outage(60, 110), &[150]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 0));
+}
+
+#[test]
+fn a_break_after_a_close_files_a_new_task() {
+    let twice = |m| {
+        Truth::Status(if (60..110).contains(&m) || m >= 200 {
+            2
+        } else {
+            0
+        })
+    };
+    let tracked = replay(260, twice, &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (2, 1));
+}
+
+#[test]
+fn two_outages_in_a_day_each_close() {
+    let tracked = replay(
+        600,
+        |m| {
+            Truth::Status(if (60..110).contains(&m) || (240..300).contains(&m) {
+                2
+            } else {
+                0
+            })
+        },
+        &[],
+    );
+    assert_eq!(
+        (tracked.filed(), tracked.open(), tracked.recoveries.len()),
+        (2, 0, 2)
+    );
+}
+
+#[test]
+fn a_stale_report_is_not_closed_by_a_fresh_one() {
+    let silent = |m| {
+        if (60..120).contains(&m) {
+            Truth::Silent
+        } else {
+            Truth::Status(0)
+        }
+    };
+    let tracked = replay(480, silent, &[]);
+    assert_eq!((tracked.filed(), tracked.open()), (1, 1));
+}
+
+#[test]
+fn a_recovered_event_resolves_what_its_outage_filed() {
+    let healthy = CRITICAL
+        .replace("\"status\": 2", "\"status\": 0")
+        .replace("2026-11-10T14:50:00Z", "2026-11-10T13:30:00Z");
+    let dir = dir_with(&[("mac.json", &healthy)]);
+    let found = scan(dir.path());
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "mac/gh-auth/ok/2026-11-10T13:30Z");
+    let event = HostFinding::from_json(&found[0].1).unwrap();
+    let effects = policy(&facts(&event));
+    let Effect::Resolve {
+        target,
+        item,
+        evidence,
+    } = &effects[0]
+    else {
+        panic!("expected Resolve, got {effects:?}");
+    };
+    assert_eq!(target.to_string(), "task:brined-almanac");
+    assert_eq!(
+        item,
+        &Item::Filed {
+            key: "mac.gh-auth".to_string()
+        }
+    );
+    assert_eq!(
+        evidence.to_string(),
+        "host-state: gh-auth ok on mac since 2026-11-10 13:30Z"
+    );
+}
+
+#[test]
+fn a_finding_and_its_recovery_share_one_run_key() {
+    let filed = first_event();
+    assert_eq!(filed["outage"], "mac.gh-auth");
+}
+
+fn report(generated: &str, status: i64, since: &str) -> String {
+    json!({
+        "host": "mac",
+        "generated_at": generated,
+        "interval_seconds": 300,
+        "checks": [{"name": "c", "status": status, "since": since, "output": ""}],
+    })
+    .to_string()
+}
+
+fn kinds_at(dir: &Path, now: OffsetDateTime, episodes: &mut Episodes) -> Vec<String> {
+    let previous = Some(now - Duration::minutes(15));
+    scan_findings(&hosts(), dir, now, previous, episodes)
+        .into_iter()
+        .map(|(_, payload)| payload["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_lagging_copy_holds_the_recovery_until_the_last_broken_scan_is_an_hour_old() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mac.json");
+    let mut episodes = Episodes::default();
+    let at = |hh: u8, mm: u8| {
+        datetime!(2026-11-11 00:00 UTC) + Duration::minutes(i64::from(hh) * 60 + i64::from(mm))
+    };
+    std::fs::write(
+        &path,
+        report("2026-11-11T13:35:00Z", 2, "2026-11-11T12:00:00Z"),
+    )
+    .unwrap();
+    assert_eq!(kinds_at(dir.path(), at(14, 0), &mut episodes), ["check"]);
+    std::fs::write(
+        &path,
+        report("2026-11-11T14:40:00Z", 0, "2026-11-11T13:40:00Z"),
+    )
+    .unwrap();
+    assert_eq!(
+        kinds_at(dir.path(), at(14, 45), &mut episodes),
+        Vec::<String>::new(),
+        "ok for over an hour, but the 14:00 scan saw it broken, so a break now would continue that outage"
+    );
+    std::fs::write(
+        &path,
+        report("2026-11-11T15:00:00Z", 0, "2026-11-11T13:40:00Z"),
+    )
+    .unwrap();
+    assert_eq!(
+        kinds_at(dir.path(), at(15, 5), &mut episodes),
+        ["recovered"]
+    );
+}
+
+#[test]
+fn a_recovery_that_is_not_ok_is_malformed() {
+    let mut payload = first_event();
+    payload["kind"] = json!("recovered");
+    let err = HostFinding::from_json(&payload).unwrap_err();
+    assert_eq!(err.pointer, "/status");
 }

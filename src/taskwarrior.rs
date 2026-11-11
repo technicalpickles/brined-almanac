@@ -221,6 +221,9 @@ impl Tracker for Taskwarrior {
         evidence: &'a str,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         Box::pin(async move {
+            if matches!(item, Resolving::Filed(keys) if keys.is_empty()) {
+                return Ok(());
+            }
             let closing = Closing {
                 key: key.to_string(),
                 tasks: closes(target, item)?,

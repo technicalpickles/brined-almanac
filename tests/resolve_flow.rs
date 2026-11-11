@@ -1,4 +1,5 @@
-//! A `Resolve` of filed work through almanac's runtime, the router and a real taskwarrior replica.
+//! host-state's recovery close through almanac's runtime, the router and a real taskwarrior
+//! replica, from reports to completed tasks.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -6,60 +7,18 @@ use std::sync::Arc;
 use almanac::prelude::*;
 use almanac::runtime::{Envelope, Origin, Runtime};
 use almanac::store::MemoryStore;
+use brined_almanac::host_state::{Episodes, Hosts};
 use brined_almanac::providers::LogTracker;
 use brined_almanac::routing::Router;
 use brined_almanac::taskwarrior::{KEY_ATTR, Taskwarrior, TaskwarriorConfig};
-use brined_almanac::workflows::host_state::HostFinding;
+use brined_almanac::workflows::host_state::{HostState, scan_findings};
 use serde_json::json;
 use taskchampion::ServerConfig;
+use time::macros::datetime;
+use time::{Duration, OffsetDateTime};
 
-clean! {
-    pub struct Seen { pub target: Slug, pub subject: Slug, pub check: Slug, pub ok: bool }
-}
-
-/// host-state's shape with a recovery close: a failing check files, the same outage back to ok
-/// closes what was filed for it.
-#[workflow(on = HostFinding, key = "{subject}", intent = "x", may = [File, Resolve], runs_per_hour = 9, decide = file_or_close)]
-async fn closes_on_recovery(_cx: &Cx, event: &HostFinding) -> Result<Seen, Halt> {
-    let target: Slug = format!("task:{}", event.project).parse().unwrap();
-    Ok(Seen {
-        target,
-        subject: event.subject.clone(),
-        check: event.check.clone().unwrap(),
-        ok: event.status.as_ref().is_some_and(|s| s.to_string() == "ok"),
-    })
-}
-
-fn file_or_close(seen: &Seen) -> Vec<Effect> {
-    if seen.ok {
-        vec![Effect::Resolve {
-            target: seen.target.clone(),
-            item: Item::Filed {
-                key: seen.subject.to_string(),
-            },
-            evidence: title!("{} is ok again", seen.check),
-        }]
-    } else {
-        vec![Effect::File {
-            title: title!("{} is critical", seen.check),
-            target: seen.target.clone(),
-            body: Untrusted::new(String::new()),
-        }]
-    }
-}
-
-fn finding(delivery: &str, subject: &str, status: &str) -> Envelope {
-    Envelope {
-        origin: Origin::Webhook,
-        source: "host-state".into(),
-        delivery_id: delivery.into(),
-        depth: 0,
-        kind: "host.state.finding".into(),
-        payload: json!({
-            "kind": "check", "project": "homelab", "subject": subject, "host": "box",
-            "check": "timer-sync", "status": status, "since": "2026-11-11T12:29Z", "body": "",
-        }),
-    }
+fn hosts() -> Hosts {
+    Hosts::parse("[[host]]\nname = \"box\"\nproject = \"homelab\"\n").unwrap()
 }
 
 fn taskwarrior(dir: &Path, name: &str) -> Taskwarrior {
@@ -71,23 +30,62 @@ fn taskwarrior(dir: &Path, name: &str) -> Taskwarrior {
     })
 }
 
+fn report(now: OffsetDateTime, checks: serde_json::Value) -> String {
+    let rfc = |t: OffsetDateTime| {
+        t.format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    };
+    json!({"host": "box", "generated_at": rfc(now), "interval_seconds": 300, "checks": checks})
+        .to_string()
+}
+
 #[tokio::test]
-async fn a_recovered_outage_completes_the_task_filed_for_it_and_no_other() {
+async fn a_recovered_check_completes_its_task_and_leaves_another_checks_open() {
     let dir = tempfile::tempdir().unwrap();
+    let reports = dir.path().join("reports");
+    std::fs::create_dir(&reports).unwrap();
     let tracker: Arc<dyn Tracker> =
         Arc::new(Router::new(LogTracker, taskwarrior(dir.path(), "almanac")));
     let rt = Runtime::new(
-        vec![Box::new(ClosesOnRecovery)],
+        vec![Box::new(HostState)],
         Providers::new().provide::<dyn Tracker>(tracker),
     )
     .in_mode(Mode::Live)
     .with_store(Arc::new(MemoryStore::default()));
-    for envelope in [
-        finding("d1", "box.timer-sync.2026-11-11T12:29Z", "critical"),
-        finding("d2", "box.timer-sync.2026-11-09T08:00Z", "critical"),
-        finding("d3", "box.timer-sync.2026-11-11T12:29Z", "ok"),
-    ] {
-        rt.ingest(envelope).await.unwrap();
+    let start = datetime!(2026-11-11 12:00 UTC);
+    let broke = "2026-11-11T11:00:00Z";
+    let healed = "2026-11-11T12:30:00Z";
+    let mut episodes = Episodes::default();
+    let scans = [
+        (
+            start,
+            json!([
+                {"name": "timer", "status": 2, "since": broke, "output": "failed"},
+                {"name": "site", "status": 2, "since": broke, "output": "503"},
+            ]),
+        ),
+        (
+            start + Duration::minutes(105),
+            json!([
+                {"name": "timer", "status": 0, "since": healed, "output": ""},
+                {"name": "site", "status": 2, "since": broke, "output": "503"},
+            ]),
+        ),
+    ];
+    for (now, checks) in scans {
+        std::fs::write(reports.join("box.json"), report(now, checks)).unwrap();
+        let previous = Some(now - Duration::minutes(15));
+        for (id, payload) in scan_findings(&hosts(), &reports, now, previous, &mut episodes) {
+            let envelope = Envelope {
+                origin: Origin::Scan,
+                source: "host-state".into(),
+                delivery_id: id,
+                depth: 0,
+                kind: "host.state.finding".into(),
+                payload,
+            };
+            rt.ingest(envelope).await.unwrap();
+        }
         rt.drain().await.unwrap();
         for delivery in rt.deliver().await.unwrap() {
             assert_eq!(delivery.error, None, "{}", delivery.key);
@@ -96,15 +94,15 @@ async fn a_recovered_outage_completes_the_task_filed_for_it_and_no_other() {
     let mac = taskwarrior(dir.path(), "mac");
     mac.sync().await.unwrap();
     let tasks = mac.tasks().await.unwrap();
-    let mut statuses: Vec<_> = tasks
-        .iter()
-        .map(|t| (t.get(KEY_ATTR).unwrap(), t.get("status").unwrap()))
-        .collect();
-    statuses.sort();
-    assert_eq!(statuses.len(), 2, "{statuses:?}");
-    assert_eq!(
-        statuses.iter().map(|(_, s)| *s).collect::<Vec<_>>(),
-        ["completed", "pending"],
-        "the first outage's task closes, the older outage's stays open: {statuses:?}"
-    );
+    let status_of = |check: &str| {
+        let task = tasks
+            .iter()
+            .find(|t| t.get("description").is_some_and(|d| d.contains(check)))
+            .unwrap_or_else(|| panic!("no task for {check}"));
+        assert!(task.get(KEY_ATTR).is_some());
+        task.get("status").unwrap().to_string()
+    };
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(status_of("timer"), "completed");
+    assert_eq!(status_of("site"), "pending");
 }

@@ -336,3 +336,14 @@ async fn a_name_that_is_not_a_uuid_is_refused_before_anything_is_written() {
     assert!(error.0.contains("not a task UUID"), "{}", error.0);
     assert!(!dir.path().join("server").exists());
 }
+
+#[tokio::test]
+async fn resolving_nothing_filed_never_reaches_the_server() {
+    let dir = TempDir::new().unwrap();
+    let container = open(dir.path(), "container");
+    container
+        .resolve("run-3:0", &target(), &Resolving::Filed(vec![]), "ok")
+        .await
+        .unwrap();
+    assert!(!dir.path().join("server").exists());
+}

@@ -389,6 +389,19 @@ pub fn is_old_report(read: &Read, now: OffsetDateTime) -> bool {
     matches!(read, Read::Report(report) if age(report.generated_at, now) > STALE_AFTER)
 }
 
+/// The checks in a current report that have been ok for longer than `RECOVERY_HOLD`, so a break
+/// now would start a new outage rather than continue a closed one. An old report proves nothing.
+pub fn recovered(read: &Read, now: OffsetDateTime) -> Vec<&CheckResult> {
+    match read {
+        Read::Report(report) if !is_old_report(read, now) => report
+            .checks
+            .iter()
+            .filter(|check| check.status == Status::Ok && age(check.since, now) > RECOVERY_HOLD)
+            .collect(),
+        _ => vec![],
+    }
+}
+
 /// The findings that are due now, for a caller with no memory of earlier scans.
 pub fn findings(
     host: &Host,
@@ -473,5 +486,14 @@ impl Episodes {
             episode.last_seen = now;
             *since = episode.start;
         }
+    }
+
+    /// Whether an outage of `check` is still held, so a break now would continue it.
+    pub fn holds(&self, host: &str, check: &str, now: OffsetDateTime) -> bool {
+        ["warning", "broken"].iter().any(|group| {
+            self.0
+                .get(&format!("{host}/{check}/{group}"))
+                .is_some_and(|episode| now - episode.last_seen <= RECOVERY_HOLD)
+        })
     }
 }
