@@ -186,7 +186,7 @@ fn a_critical_check_files_after_ten_minutes() {
     let found = fresh(Status::Critical, datetime!(2026-11-10 14:50 UTC));
     assert_eq!(found.len(), 1);
     assert!(matches!(found[0], Finding::Check { .. }));
-    assert_eq!(found[0].key(), "mac/gh-auth/2026-11-10");
+    assert_eq!(found[0].key(), "mac/gh-auth/2026-11-10T14:50Z");
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn unknown_files_like_critical() {
 fn a_warning_files_after_a_day() {
     let found = fresh(Status::Warning, datetime!(2026-11-09 15:00 UTC));
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].key(), "mac/gh-auth/2026-11-09");
+    assert_eq!(found[0].key(), "mac/gh-auth/2026-11-09T15:00Z");
 }
 
 #[test]
@@ -228,8 +228,8 @@ fn a_long_outage_keeps_one_key() {
         true,
     );
     let late = fresh(Status::Critical, since);
-    assert_eq!(early[0].key(), "mac/gh-auth/2026-11-08");
-    assert_eq!(late[0].key(), "mac/gh-auth/2026-11-08");
+    assert_eq!(early[0].key(), "mac/gh-auth/2026-11-08T23:00Z");
+    assert_eq!(late[0].key(), "mac/gh-auth/2026-11-08T23:00Z");
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn a_stale_report_files_stale_and_no_checks() {
         found[0],
         Finding::Stale { since: Some(s), .. } if s == generated
     ));
-    assert_eq!(found[0].key(), "mac/stale/2026-11-10");
+    assert_eq!(found[0].key(), "mac/stale/2026-11-10T14:29Z");
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn an_invalid_report_is_stale_with_the_error() {
     let found = findings(&mac(), &read, NOW, true);
     assert_eq!(found.len(), 1);
     assert!(matches!(found[0], Finding::Stale { .. }));
-    assert_eq!(found[0].key(), "mac/stale/2026-11-10");
+    assert_eq!(found[0].key(), "mac/stale/2026-11-10T14:00Z");
     assert!(found[0].body().contains('x'));
 }
 

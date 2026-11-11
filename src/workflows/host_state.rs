@@ -5,40 +5,27 @@ use almanac::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
-use time::macros::format_description;
 
-use crate::host_state::{Finding, Hosts, findings, is_old_report, read, scan_gap_is_trusted};
+use crate::host_state::{
+    Episodes, Finding, Hosts, findings, is_old_report, iso_minute, read, scan_gap_is_trusted,
+};
 use crate::routing::Project;
 
-/// The directory `HOST_STATE_REPORTS` names, or none when it is unset or empty, and when this
-/// process last scanned. Always provided, because almanac checks a scan's providers at startup.
+/// The directory `HOST_STATE_REPORTS` names, or none when it is unset or empty, plus when this
+/// process last scanned and the outages it saw. Always provided, because almanac checks a scan's
+/// providers at startup.
 pub struct HostReports {
     pub dir: Option<PathBuf>,
-    previous_scan: Mutex<Option<OffsetDateTime>>,
+    memory: Mutex<(Option<OffsetDateTime>, Episodes)>,
 }
 
 impl HostReports {
     pub fn new(dir: Option<PathBuf>) -> Self {
         Self {
             dir,
-            previous_scan: Mutex::new(None),
+            memory: Mutex::new((None, Episodes::default())),
         }
     }
-
-    /// Records `now` as the latest scan and returns the one before it.
-    fn swap_previous_scan(&self, now: OffsetDateTime) -> Option<OffsetDateTime> {
-        let mut previous = self
-            .previous_scan
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        previous.replace(now)
-    }
-}
-
-fn minute(t: OffsetDateTime) -> String {
-    t.to_offset(time::UtcOffset::UTC)
-        .format(format_description!("[year]-[month]-[day]T[hour]:[minute]Z"))
-        .expect("a time always formats")
 }
 
 fn status_name(status: crate::host_state::Status) -> String {
@@ -52,6 +39,7 @@ pub fn scan_findings(
     dir: &Path,
     now: OffsetDateTime,
     previous: Option<OffsetDateTime>,
+    episodes: &mut Episodes,
 ) -> Vec<(String, Value)> {
     let trusted = scan_gap_is_trusted(previous, now);
     let mut out = vec![];
@@ -66,12 +54,12 @@ pub fn scan_findings(
                 Some(previous) if previous > now => {
                     format!(
                         "the previous scan at {} is later than now",
-                        minute(previous)
+                        iso_minute(previous)
                     )
                 }
                 Some(previous) => format!(
                     "the previous scan was at {}, so the host likely slept",
-                    minute(previous)
+                    iso_minute(previous)
                 ),
             };
             eprintln!(
@@ -79,7 +67,9 @@ pub fn scan_findings(
                 host.name
             );
         }
-        for finding in findings(host, &result, now, trusted) {
+        let mut found = findings(host, &result, now, trusted);
+        episodes.continue_outages(&mut found, now);
+        for finding in found {
             let (kind, check, status, since) = match &finding {
                 Finding::Check {
                     check,
@@ -90,9 +80,9 @@ pub fn scan_findings(
                     "check",
                     Some(check.clone()),
                     Some(status_name(*status)),
-                    Some(minute(*since)),
+                    Some(iso_minute(*since)),
                 ),
-                Finding::Stale { since, .. } => ("stale", None, None, since.map(minute)),
+                Finding::Stale { since, .. } => ("stale", None, None, since.map(iso_minute)),
             };
             let payload = json!({
                 "kind": kind,
@@ -181,13 +171,18 @@ impl Event for HostFinding {
 pub async fn scan(scanner: &Scanner) -> Result<Vec<Scanned<HostFinding>>, StepError> {
     let now = OffsetDateTime::now_utc();
     let reports = scanner.get::<HostReports>()?;
-    let previous = reports.swap_previous_scan(now);
+    let mut memory = reports
+        .memory
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (previous_scan, episodes) = &mut *memory;
+    let previous = previous_scan.replace(now);
     let Some(dir) = &reports.dir else {
         eprintln!("host-state: HOST_STATE_REPORTS is not set, skipping");
         return Ok(vec![]);
     };
     let hosts = scanner.get::<Hosts>()?;
-    Ok(scan_findings(&hosts, dir, now, previous)
+    Ok(scan_findings(&hosts, dir, now, previous, episodes)
         .into_iter()
         .map(|(delivery_id, payload)| Scanned::new(delivery_id, payload))
         .collect())

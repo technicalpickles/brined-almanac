@@ -15,6 +15,9 @@ pub const STALE_AFTER: Duration = Duration::minutes(30);
 /// waiting on launchd's next collector run. It must stay above the scan interval
 /// (`ALMANAC_SCAN_INTERVAL_MINUTES`, 15 by default), or an old report never files.
 pub const WAKE_GAP: Duration = Duration::minutes(20);
+/// A finding that comes back within this long of the last scan that saw it continues the same
+/// outage, so a flapping check or an unreadable report rewritten every run files one task.
+pub const RECOVERY_HOLD: Duration = Duration::hours(1);
 
 const MAX_OUTPUT_BYTES: usize = 500;
 
@@ -255,10 +258,11 @@ pub enum Finding {
     },
 }
 
-fn utc_date(t: OffsetDateTime) -> String {
+/// `2026-11-10T14:50Z`, the form of a delivery ID and of the event's `since`.
+pub fn iso_minute(t: OffsetDateTime) -> String {
     t.to_offset(time::UtcOffset::UTC)
-        .format(format_description!("[year]-[month]-[day]"))
-        .expect("a date always formats")
+        .format(format_description!("[year]-[month]-[day]T[hour]:[minute]Z"))
+        .expect("a time always formats")
 }
 
 fn utc_minute(t: OffsetDateTime) -> String {
@@ -272,11 +276,31 @@ impl Finding {
         match self {
             Finding::Check {
                 host, check, since, ..
-            } => format!("{host}/{check}/{}", utc_date(*since)),
+            } => format!("{host}/{check}/{}", iso_minute(*since)),
             Finding::Stale { host, since, .. } => match since {
-                Some(since) => format!("{host}/stale/{}", utc_date(*since)),
+                Some(since) => format!("{host}/stale/{}", iso_minute(*since)),
                 None => format!("{host}/stale/missing"),
             },
+        }
+    }
+
+    /// What stays the same across one outage, whatever its `since`.
+    fn episode(&self) -> String {
+        match self {
+            Finding::Check {
+                host,
+                check,
+                status,
+                ..
+            } => format!("{host}/{check}/{}", status.name()),
+            Finding::Stale { host, .. } => format!("{host}/stale"),
+        }
+    }
+
+    fn since_mut(&mut self) -> Option<&mut OffsetDateTime> {
+        match self {
+            Finding::Check { since, .. } => Some(since),
+            Finding::Stale { since, .. } => since.as_mut(),
         }
     }
 
@@ -387,5 +411,36 @@ pub fn findings(
                 output: check.output.clone(),
             })
             .collect(),
+    }
+}
+
+#[derive(Debug)]
+struct Episode {
+    start: OffsetDateTime,
+    last_seen: OffsetDateTime,
+}
+
+/// The outages recent scans saw, so that a finding back within `RECOVERY_HOLD` keeps its first
+/// `since`, and with it its key. It lives in memory, so a restart mid-flap files once more.
+#[derive(Debug, Default)]
+pub struct Episodes(std::collections::HashMap<String, Episode>);
+
+impl Episodes {
+    /// Rewrites each finding's `since` to the start of the outage it continues.
+    pub fn continue_outages(&mut self, findings: &mut [Finding], now: OffsetDateTime) {
+        self.0
+            .retain(|_, episode| now - episode.last_seen <= RECOVERY_HOLD);
+        for finding in findings {
+            let id = finding.episode();
+            let Some(since) = finding.since_mut() else {
+                continue;
+            };
+            let episode = self.0.entry(id).or_insert(Episode {
+                start: *since,
+                last_seen: now,
+            });
+            episode.last_seen = now;
+            *since = episode.start;
+        }
     }
 }
