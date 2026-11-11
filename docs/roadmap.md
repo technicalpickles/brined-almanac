@@ -24,10 +24,12 @@ A workflow can file a finding that no pull request closes. Every "next" workflow
 - An `almanac_key` user-defined attribute on each task, holding its delivery key. The tracker checks its replica for the key before filing, so a rerun or a lost store doesn't file the same finding twice. The close effect and the daily list of closes find tasks by the same key. My `.taskrc` defines the attribute through dotfiles
 - Tier declarations, done in [`tiers.toml`](../tiers.toml) and [`src/tiers.rs`](../src/tiers.rs), with `local/tiers.toml` for private repositories nothing public names ([workflows.md](workflows.md) "Repository tiers"). security-alerts is the first workflow that reads them. [Designed 2026-11-08](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md)
 - security-alerts, for deployed, active, and maintained repositories: a task when an alert is still open past its severity's window. [Designed 2026-11-08](superpowers/specs/2026-11-08-tiers-and-security-alerts-design.md)
-- Checks in the Nagios plugin convention for units that should be running and for site status, collected into each host's host-state report over pull. [Designed 2026-11-10](superpowers/specs/2026-11-10-picklelab-host-state-design.md) for picklelab
+- Checks in the Nagios plugin convention for units that should be running and for site status, collected into each host's host-state report over pull. Done for picklelab 2026-11-11 ([the design](superpowers/specs/2026-11-10-picklelab-host-state-design.md) records what was measured)
 - The WordPress droplet on the tailnet, with a fenced key for its report
-- service-down, reading those reports
-- A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08. [Designed 2026-11-10](superpowers/specs/2026-11-10-host-state-design.md) for the Mac, with the report and workflow shape service-down and picklelab reuse
+- service-down, reading those reports. Folded into host-state on 2026-11-11, which already files every check a host reports ([workflows.md](workflows.md) "service-down")
+- A dead-man's-switch check, "age of last successful run", for the scheduled jobs on picklelab and the Mac, almanac's own puller and daemon included. Silent failures were the top pick when the pain points were ranked on 2026-11-08. Done for the Mac 2026-11-10 and for picklelab's timers 2026-11-11 ([the design](superpowers/specs/2026-11-10-host-state-design.md))
+
+**Where it stands, 2026-11-11.** Everything above is live except the WordPress droplet. security-alerts has been filing since 2026-11-09, and host-state files for the Mac and picklelab. The droplet is what finishes M1.
 
 **Done when** every overdue security alert on those repositories is on a task for its repository, a stopped unit, a site that stops returning 200, or a scheduled job past its maximum age becomes a task within an hour, and running any scan again files nothing new.
 
