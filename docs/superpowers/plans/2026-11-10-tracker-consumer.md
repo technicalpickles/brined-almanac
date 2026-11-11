@@ -18,7 +18,7 @@ Unaddressed  (one per Bugsink issue that should have a GitHub issue)
   generation: count of `regressed` + `reopened` turning points in its history
   service, tool, class: from the issue's tags
   count: digested_event_count
-  first_seen, last_seen: earliest and latest event timestamp, from `/events/?issue={id}` (the issue's own are ingest time)
+  first_seen, last_seen: earliest and latest event timestamp, from `/events/?issue={id}` (the issue's own are ingest time). When retention has evicted every event, fall back to the issue's own ingest times (added in #24)
   surfaces: tag values with counts
   sessions: number of distinct `session` tag values
   reason: calculated_value (transcript text, Untrusted)

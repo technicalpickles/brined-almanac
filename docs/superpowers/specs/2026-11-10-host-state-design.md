@@ -86,13 +86,21 @@ Also read on 2026-11-10, with no credential involved: all four prod
 containers reported healthy through `docker ps`, and `.last-pull` was 414
 seconds old.
 
+After the deploy on 2026-11-10:
+
+- `docker ps` answers under launchd. A `launchctl kickstart` at 20:01:05Z
+  wrote `STACK OK` and `PULLER OK` and exited 0.
+- The puller-stop test. The puller stopped at 20:10:00Z. stack-health went
+  critical at 20:11:32Z and filed at 20:28:16Z, 18 minutes after the stop.
+  puller-age went critical at 20:31:33Z and filed at 20:43:17Z, 33 minutes
+  after the stop and about 42 after the last pull. A live rescan found 28,
+  queued 0, and left 28 unchanged. Both checks were OK again at 20:46:34Z,
+  with a new `since`.
+
 Still not measured:
 
 - Whether a scan right after the Mac wakes sees a stale report before launchd
   reruns the collector.
-- Whether `docker ps` answers when launchd runs it. Docker asks the broker for
-  nothing, so this is expected to work, and `prod-wiring` confirms it on the
-  real agent.
 
 ## Shape
 
