@@ -152,5 +152,11 @@ run_pull
 check "two sessions p" 1 "$(lines "$TRANSCRIPTS/agent-main-p.jsonl")"
 check "two sessions q" 1 "$(lines "$TRANSCRIPTS/agent-main-q.jsonl")"
 
+# 10. report fetch skipped without REPORT_KEY, transcript pass unaffected
+echo '{"sessions":[]}' >"$TMP/sessions.json"
+run_pull
+check "no report key exit" 0 "$rc"
+check "no report key stderr" 1 "$(grep -c 'fetch-report: REPORT_KEY is empty, skipping' "$TMP/stderr")"
+
 [ "$fails" -eq 0 ] || { echo "$fails failed"; exit 1; }
 echo "all passed"

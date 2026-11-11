@@ -1,6 +1,6 @@
 FROM alpine:3
 RUN apk add --no-cache bash jq openssh-client \
     && adduser -D -u 10002 puller
-COPY pull.sh /usr/local/bin/pull.sh
+COPY pull.sh fetch-report.sh /usr/local/bin/
 USER puller
 ENTRYPOINT ["/usr/local/bin/pull.sh"]
