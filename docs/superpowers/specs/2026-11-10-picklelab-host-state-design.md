@@ -229,6 +229,30 @@ Each a small pull request that ends in a check. Deploys wait for Josh.
   `scripts/image-smoke`, then deploy.
 - `real-thing`: the `docker-prune.timer` test above.
 
+## What was measured
+
+After the deploy on 2026-11-11 (picklehome `eeb9a4a`, brined-almanac
+`b0f36d2`):
+
+- The first report on picklelab had 20 checks: the 19 discovery found on
+  2026-11-10, plus `timer-host-state` for the collector's own timer. All five
+  sites answered 2xx.
+- `timer-nikke-sync` was critical in that first report. That was a real
+  failure: the 12:02Z sync died on a blablalink API error. The first scan after
+  the deploy filed it as task `53db253c-f69a-4b17-a302-af513f116a8b`.
+- The fence test with the 1Password key printed the report both with no
+  command and with `id`. The key line carries `restrict`, so it allows no
+  forwarding.
+- `real-thing`: `docker-prune.timer` stopped at 14:49:20Z. The check went
+  critical at 14:50:53Z, and the 15:03:55Z run filed task
+  `dabac98e-6752-408d-ba1a-14406fc2b5ab`. That was 14m35s after the stop. The
+  15:04:00Z scan counted the still-critical nikke-sync check as unchanged, so
+  a rescan files nothing new. The timer started again at 15:09:40Z, and the
+  15:11:05Z report showed the check OK.
+- `backfill --dry-run` lists already-filed host-state findings as queued, the
+  same way it lists already-filed Bugsink findings. It does not show what
+  the store would count as unchanged, so read a live scan's counts instead.
+
 ## Not in this slice
 
 - The WordPress droplet. It joins the tailnet first.
