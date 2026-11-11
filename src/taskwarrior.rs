@@ -58,8 +58,21 @@ struct Delivery {
     pull: Option<u64>,
 }
 
+/// Tasks to close, already checked on the caller side.
+struct Closing {
+    key: String,
+    tasks: Closes,
+    evidence: String,
+}
+
+enum Closes {
+    One(Uuid),
+    Filed(Vec<String>),
+}
+
 enum Request {
     Deliver(Delivery, oneshot::Sender<Result<(), StepError>>),
+    Resolve(Closing, oneshot::Sender<Result<(), StepError>>),
     Sync(oneshot::Sender<Result<(), StepError>>),
     Tasks(oneshot::Sender<Result<Vec<TaskData>, StepError>>),
     #[cfg(test)]
@@ -160,6 +173,24 @@ impl Taskwarrior {
     }
 }
 
+/// Which tasks `item` names. A named task is a UUID, since that is the only name a task keeps.
+fn closes(target: &Slug, item: &Resolving) -> Result<Closes, StepError> {
+    match Project::from_target(target) {
+        Some(parsed) => parsed.map_err(StepError)?,
+        None => return Err(StepError(format!("{target} is not a task: target"))),
+    };
+    match item {
+        Resolving::Filed(keys) => Ok(Closes::Filed(keys.clone())),
+        Resolving::Named(name) => Uuid::parse_str(&name.to_string())
+            .map(Closes::One)
+            .map_err(|_| {
+                StepError(format!(
+                    "`{name}` is not a task UUID, so there is no task in {target} to close; name a task by its full UUID"
+                ))
+            }),
+    }
+}
+
 impl Tracker for Taskwarrior {
     fn file<'a>(
         &'a self,
@@ -180,6 +211,23 @@ impl Tracker for Taskwarrior {
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         Box::pin(self.deliver(key, target, question, body, true, pull))
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        item: &'a Resolving,
+        evidence: &'a str,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        Box::pin(async move {
+            let closing = Closing {
+                key: key.to_string(),
+                tasks: closes(target, item)?,
+                evidence: evidence.to_string(),
+            };
+            self.request(|reply| Request::Resolve(closing, reply)).await
+        })
     }
 }
 
@@ -204,6 +252,7 @@ fn run(
         while let Some(request) = inbox.recv().await {
             let panicked = match request {
                 Request::Deliver(delivery, reply) => answer(worker.deliver(delivery), reply).await,
+                Request::Resolve(closing, reply) => answer(worker.resolve(closing), reply).await,
                 Request::Sync(reply) => answer(worker.sync(), reply).await,
                 Request::Tasks(reply) => answer(worker.tasks(), reply).await,
                 #[cfg(test)]
@@ -280,6 +329,71 @@ impl Worker {
             .commit_operations(ops)
             .await
             .map_err(|e| step(e, "could not commit the taskwarrior task"))?;
+        sync(replica, server).await
+    }
+
+    /// Completes each open task `closing` names, annotated with the evidence. A task already
+    /// completed or deleted is left alone, so a retry changes nothing.
+    async fn resolve(&mut self, closing: Closing) -> Result<(), StepError> {
+        let replica = open_replica(&mut self.replica, &self.replica_dir).await?;
+        let server = open_server(&mut self.server, &mut self.server_config).await?;
+        sync(replica, server).await?;
+        let unreadable = |e| step(e, "could not read the taskwarrior replica");
+        let uuids = match &closing.tasks {
+            Closes::One(uuid) => vec![*uuid],
+            Closes::Filed(keys) => {
+                let known = replica.all_task_data().await.map_err(unreadable)?;
+                let filed = |task: &TaskData| {
+                    task.get(KEY_ATTR)
+                        .is_some_and(|key| keys.iter().any(|k| k == key))
+                };
+                known
+                    .iter()
+                    .filter(|(_, task)| filed(task))
+                    .map(|(uuid, _)| *uuid)
+                    .collect()
+            }
+        };
+        let failed = |e| step(e, "could not close the taskwarrior task");
+        let mut ops = Operations::new();
+        for uuid in uuids {
+            let Some(mut task) = replica.get_task(uuid).await.map_err(unreadable)? else {
+                return Err(StepError(format!(
+                    "no task has UUID {uuid}, so there is nothing to close; check the UUID the evidence named"
+                )));
+            };
+            if matches!(task.get_status(), Status::Completed | Status::Deleted) {
+                continue;
+            }
+            let now = Utc::now();
+            // Annotations are keyed by their second, so one in the same second as the filing
+            // would replace it.
+            let mut entry = now;
+            while task
+                .get_annotations()
+                .any(|a| a.entry.timestamp() == entry.timestamp())
+            {
+                entry += taskchampion::chrono::Duration::seconds(1);
+            }
+            task.add_annotation(
+                Annotation {
+                    entry,
+                    description: format!("almanac resolved {}\n{}", closing.key, closing.evidence),
+                },
+                &mut ops,
+            )
+            .map_err(failed)?;
+            task.set_status(Status::Completed, &mut ops)
+                .map_err(failed)?;
+            task.set_modified(now, &mut ops).map_err(failed)?;
+        }
+        if ops.is_empty() {
+            return Ok(());
+        }
+        replica
+            .commit_operations(ops)
+            .await
+            .map_err(|e| step(e, "could not commit the closed taskwarrior task"))?;
         sync(replica, server).await
     }
 
