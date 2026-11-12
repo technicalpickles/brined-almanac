@@ -6,8 +6,12 @@
 // environment: the Rust side through its binary, or a recording of what that printed, and the
 // Go side through Ivy's runtime in this process, with the models the binary runs. What is
 // compared is what the Rust simulate prints: how the event was taken, and each run's workflow,
-// result, effects and recorded statuses. A File's body is left out, because Rust prints it as
-// Untrusted(..).
+// result, reason, effects, denied effects and recorded statuses, with runs in workflow order.
+//
+// Two things are not compared. A File's body, because Rust prints it as Untrusted(..), so a
+// field that reaches only the body cannot show a difference here. And Rust's `why`, because it
+// is a fixed sentence per ingest, so the ingest already carries it: a parse failure is
+// rejected and an event no workflow takes is unrouted.
 package compare
 
 import (
@@ -31,6 +35,9 @@ type Run struct {
 	// Result is ran, stopped, failed or budget-tripped.
 	Result  string   `json:"result"`
 	Effects []Effect `json:"effects,omitempty"`
+	// Denied are the kinds of the effects the run was not allowed, such as file, or
+	// attest pending.
+	Denied []string `json:"denied,omitempty"`
 	// Recorded is where each effect is in delivery, such as would-apply.
 	Recorded []string `json:"recorded,omitempty"`
 	// Reason is why a run stopped, or the error it failed with.
@@ -113,9 +120,17 @@ type Report struct {
 	Disagreements int `json:"disagreements"`
 }
 
-// Compare is the case's two sides, and every difference between them.
+// Compare is the case's two sides, and every difference between them. Runs are put in
+// workflow order first, since neither side promises the order an event's runs settle in.
 func Compare(c Case, rust, golang Side) Compared {
+	rust, golang = inWorkflowOrder(rust), inWorkflowOrder(golang)
 	return Compared{Case: c.Name, Differences: differences(rust, golang), Rust: rust, Go: golang}
+}
+
+func inWorkflowOrder(s Side) Side {
+	s.Runs = slices.Clone(s.Runs)
+	slices.SortStableFunc(s.Runs, func(a, b Run) int { return strings.Compare(a.Workflow, b.Workflow) })
+	return s
 }
 
 // Tally is the cases in a report, counting those that disagree.
@@ -147,6 +162,7 @@ func differences(rust, golang Side) []string {
 		differ(at+"workflow", r.Workflow, g.Workflow)
 		differ(at+"result", r.Result, g.Result)
 		differ(at+"reason", r.Reason, g.Reason)
+		differ(at+"denied", strings.Join(r.Denied, ", "), strings.Join(g.Denied, ", "))
 		differ(at+"recorded", strings.Join(r.Recorded, ", "), strings.Join(g.Recorded, ", "))
 		if !slices.Equal(r.Effects, g.Effects) {
 			out = append(out, fmt.Sprintf("%seffects: rust %s, go %s", at, effectsOf(r.Effects), effectsOf(g.Effects)))
@@ -203,9 +219,9 @@ func runsOf(runs []Run) string {
 	}
 	parts := make([]string, len(runs))
 	for i, run := range runs {
-		parts[i] = fmt.Sprintf("%s %s", run.Workflow, run.Result)
+		parts[i] = fmt.Sprintf("%q %s", run.Workflow, run.Result)
 		if run.Reason != "" {
-			parts[i] += fmt.Sprintf(" (%s)", run.Reason)
+			parts[i] += fmt.Sprintf(" (%q)", run.Reason)
 		}
 		if len(run.Effects) > 0 {
 			parts[i] += " " + effectsOf(run.Effects)

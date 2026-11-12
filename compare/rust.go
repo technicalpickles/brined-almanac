@@ -32,12 +32,42 @@ func (r Rust) Side(ctx context.Context, c Case) (Side, error) {
 	if err != nil {
 		return Side{}, err
 	}
+	side, err := parseSimulate(text)
+	if err != nil {
+		return Side{}, err
+	}
 	if r.Record {
+		if err := refuseUnrouting(c, side); err != nil {
+			return Side{}, err
+		}
 		if err := os.WriteFile(c.Recording(), text, 0o644); err != nil {
 			return Side{}, fmt.Errorf("recording %s: %w", c.Name, err)
 		}
 	}
-	return parseSimulate(text)
+	return side, nil
+}
+
+// unrouted is the ingest of an event no workflow takes.
+const unrouted = "unrouted"
+
+// refuseUnrouting stops a recording that a binary without c's workflow would make: one that
+// turns a case the old recording routed into unrouted. That is a stale or wrong binary far more
+// often than a change to Rust, and recording it would make the comparison agree on nothing.
+func refuseUnrouting(c Case, now Side) error {
+	if now.Ingest != unrouted {
+		return nil
+	}
+	text, err := os.ReadFile(c.Recording())
+	if err != nil {
+		return nil
+	}
+	was, err := parseSimulate(text)
+	if err != nil || was.Ingest == unrouted {
+		return nil
+	}
+	return fmt.Errorf("not recording %s: the Rust binary leaves it unrouted, but its recording has it %s, "+
+		"so the binary is likely stale or not brined-almanac; build it from main, or delete %s to record anyway",
+		c.Name, was.Ingest, c.Recording())
 }
 
 // simulate runs `BIN --format json simulate KIND FILE --dry-run` with nothing in its
@@ -97,6 +127,9 @@ func parseOutcome(line string) (Run, error) {
 	for _, e := range outcome.fields["effects"].items {
 		run.Effects = append(run.Effects, Effect{Kind: kebab(e.name), Title: titleOf(e), Target: e.fields["target"].str()})
 	}
+	for _, d := range outcome.fields["denied"].items {
+		run.Denied = append(run.Denied, denied(kebab(d.fields["kind"].str()), kebab(d.fields["attests"].str())))
+	}
 	if statuses, ok := strings.CutPrefix(strings.TrimSpace(rest), "recorded as "); ok {
 		list, _, err := parseDebug(statuses)
 		if err != nil {
@@ -107,6 +140,15 @@ func parseOutcome(line string) (Run, error) {
 		}
 	}
 	return run, nil
+}
+
+// denied is a denied effect as both sides can say it: its kind, and an Attest's state. Rust
+// writes no state as None, and Go as an empty one.
+func denied(kind, attests string) string {
+	if attests == "" || attests == "none" {
+		return kind
+	}
+	return kind + " " + attests
 }
 
 // titleOf is a File's title or an Ask's question.

@@ -39,6 +39,13 @@ func Command(models []model.Workflow) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "compare [--fixtures DIR] [--rust BIN [--record]]",
 		Short: "Send each recorded event through the Go and Rust workflows and print where they disagree.",
+		Long: `Send each recorded event through the Go and Rust workflows and print where they disagree.
+
+Each side's ingest and runs are compared: workflow, result, reason, effects with their titles and
+targets, denied effects, and recorded statuses. A filed body is not compared, because Rust prints it
+only as Untrusted(..). A case whose name starts with body-only differs from another case only in
+fields that reach the body, so it shows the event still parses and files the same task, and nothing
+about the body itself.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if record && binary == "" {

@@ -79,6 +79,13 @@ func (g Golang) Side(ctx context.Context, c Case) (Side, error) {
 		for _, e := range o.Effects {
 			run.Effects = append(run.Effects, effectOf(e))
 		}
+		for _, d := range o.Denied {
+			state := ""
+			if d.Attests != 0 {
+				state = kebab(d.Attests.String())
+			}
+			run.Denied = append(run.Denied, denied(kebab(d.Kind.String()), state))
+		}
 		if o.Result == runtime.Ran {
 			entries, err := rt.EffectsOf(ctx, o.RunID)
 			if err != nil {

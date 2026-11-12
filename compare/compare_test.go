@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +22,8 @@ import (
 )
 
 var models = []model.Workflow{hoststate.Model, securityalerts.Model, bugsinkissues.Model}
+
+var update = flag.Bool("update", false, "rewrite testdata/compare.golden from the committed fixtures")
 
 // recorded is what the Rust `--format json simulate` prints, for a recording.
 func recorded(t *testing.T, ingest string, outcomes ...string) []byte {
@@ -166,7 +169,7 @@ func TestAnEventOnlyOneSideRefusesShowsWhatTheOtherRan(t *testing.T) {
 		t.Fatalf("%v: %s", err, out)
 	}
 	got := report.Cases[0].Differences
-	if report.Disagreements != 1 || len(got) != 2 || got[0] != `ingest: rust "rejected", go "queued"` || !strings.HasPrefix(got[1], "runs: rust (no run), go host_state failed (") {
+	if report.Disagreements != 1 || len(got) != 2 || got[0] != `ingest: rust "rejected", go "queued"` || !strings.HasPrefix(got[1], `runs: rust (no run), go "host_state" failed (`) {
 		t.Errorf("%+v", report)
 	}
 }
@@ -177,9 +180,11 @@ func TestRecordNeedsARustBinary(t *testing.T) {
 	}
 }
 
-// TestTheCommittedFixturesAllHaveRecordings runs the comparison as `brined-almanac compare`
-// does, so a case added without its recording fails here and not in front of a person.
-func TestTheCommittedFixturesAllHaveRecordings(t *testing.T) {
+// TestTheCommittedFixturesCompareAsPinned runs the comparison as `brined-almanac compare` does
+// and holds its whole report to testdata/compare.golden, so a case added without its recording,
+// and any disagreement that appears or goes away, fails here. After a change that means to move
+// the report, rerun with -update and read the diff.
+func TestTheCommittedFixturesCompareAsPinned(t *testing.T) {
 	cases, err := compare.Cases("fixtures")
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +201,100 @@ func TestTheCommittedFixturesAllHaveRecordings(t *testing.T) {
 	for _, c := range cases {
 		kinds[c.Kind] = true
 	}
-	if len(report.Cases) != len(cases) || len(kinds) != 3 {
-		t.Errorf("%d cases over %v", len(report.Cases), kinds)
+	if len(kinds) != 3 {
+		t.Errorf("cases over %v", kinds)
+	}
+	got := compare.Render(report) + "\n"
+	const golden = "testdata/compare.golden"
+	if *update {
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Errorf("the report is not %s (rerun with -update if the change is meant):\n%s", golden, got)
+	}
+}
+
+func TestDeniedEffectsAreReadAndCompared(t *testing.T) {
+	side := rustSide(t, recorded(t, "Queued",
+		`Ran { run_id: "run-1", workflow: "host-state", effects: [], denied: [ActionSummary { kind: File, attests: None }, ActionSummary { kind: Attest, attests: Some(Pending) }] } recorded as []`))
+	if want := []string{"file", "attest pending"}; !reflect.DeepEqual(side.Runs[0].Denied, want) {
+		t.Errorf("%+v", side.Runs[0])
+	}
+	golang := side
+	golang.Runs = []compare.Run{side.Runs[0]}
+	golang.Runs[0].Denied = []string{"file"}
+	got := compare.Compare(compare.Case{Name: "x"}, side, golang).Differences
+	if len(got) != 1 || got[0] != `run 1 denied: rust "file, attest pending", go "file"` {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestAParseFailureAndAnUnroutedEventDisagree(t *testing.T) {
+	got := compare.Compare(compare.Case{Name: "x"}, compare.Side{Ingest: "rejected"}, compare.Side{Ingest: "unrouted"}).Differences
+	if len(got) != 1 || got[0] != `ingest: rust "rejected", go "unrouted"` {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestRunsAreComparedInWorkflowOrder(t *testing.T) {
+	a := compare.Run{Workflow: "a", Result: "ran"}
+	b := compare.Run{Workflow: "b", Result: "stopped", Reason: "nothing to do"}
+	got := compare.Compare(compare.Case{Name: "x"}, compare.Side{Ingest: "queued", Runs: []compare.Run{b, a}}, compare.Side{Ingest: "queued", Runs: []compare.Run{a, b}})
+	if len(got.Differences) != 0 {
+		t.Errorf("%q", got.Differences)
+	}
+}
+
+func TestARunsReasonAndWorkflowAreQuoted(t *testing.T) {
+	got := compare.Compare(compare.Case{Name: "x"},
+		compare.Side{Ingest: "queued"},
+		compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: "w\x1b[2J", Result: "failed", Reason: "bad\nDISAGREE  forged"}}}).Differences
+	if len(got) != 1 || got[0] != `runs: rust (no run), go "w\x1b[2J" failed ("bad\nDISAGREE  forged")` {
+		t.Errorf("%q", got)
+	}
+}
+
+// fakeRust is a Rust binary that prints recording whatever it is asked.
+func fakeRust(t *testing.T, recording []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out.json")
+	if err := os.WriteFile(out, recording, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "brined-almanac")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat '"+out+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+func TestRecordRefusesToTurnARoutedCaseUnrouted(t *testing.T) {
+	was := staleFiled(t, "host-state", "host-state: no report from mac")
+	_, c := oneCase(t, "host.state.finding", stale, was)
+	_, err := compare.Rust{Binary: fakeRust(t, recorded(t, "Unrouted")), Record: true}.Side(context.Background(), c)
+	if err == nil || !strings.Contains(err.Error(), "leaves it unrouted, but its recording has it queued") || !strings.Contains(err.Error(), "stale") {
+		t.Errorf("%v", err)
+	}
+	if now, _ := os.ReadFile(c.Recording()); !bytes.Equal(now, was) {
+		t.Errorf("the recording changed to %s", now)
+	}
+}
+
+func TestRecordWritesWhatTheBinaryPrinted(t *testing.T) {
+	_, c := oneCase(t, "host.state.finding", stale, recorded(t, "Queued"))
+	now := staleFiled(t, "host-state", "host-state: no report from mac")
+	side, err := compare.Rust{Binary: fakeRust(t, now), Record: true}.Side(context.Background(), c)
+	if err != nil || side.Ingest != "queued" {
+		t.Fatalf("%v %+v", err, side)
+	}
+	if got, _ := os.ReadFile(c.Recording()); !bytes.Equal(got, now) {
+		t.Errorf("recorded %s", got)
 	}
 }
