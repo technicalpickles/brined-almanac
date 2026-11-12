@@ -61,6 +61,12 @@ Found by importing `go-rewrite` at `86122f2` from outside its module. Running `h
 - **Error text.** Messages that came from the OS or the decoder differ in wording, with the same prefixes.
 - **The `reveal` imports in `bugsink` and `wiring`** (the printing tracker), which `hostilevet` flags until the boundary question above is settled. `securityalerts/plain.go` is the same kind of finding, for a different reason (see "Hostile text cannot go from a scan into an event").
 
+## Carried changes
+
+Changes to steading-ai/almanac that brined runs before upstream has them, on a fork or through a `replace`. Each entry says what it does, why, how it was proved, and where its upstream pull request stands. Drop an entry when upstream takes the equivalent.
+
+None yet.
+
 ## Touch points
 
 | brined piece | Plugs into | Notes |

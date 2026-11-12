@@ -80,7 +80,7 @@ Josh has write access to steading-ai/almanac, so the limits that sit in the libr
 3. **`github.Retrying` reaching a second call, a default config path, and a read-only default.** Smaller, and each is a field or an option.
 4. **Unique outbox keys** ([#34](https://github.com/steading-ai/almanac/issues/34)). This one is the maintainer's design, so offer a patch only if she asks for one.
 
-The lane works in a scratch clone of steading-ai/almanac, not in this repo, with one branch per patch, based on `go-rewrite` since that is the code brined imports. For each it writes the patch, the tests that upstream's own suite requires, and a pull request body in Josh's voice, then stops. Pushing a branch or opening the pull request is Josh's call, one patch at a time, and the agent never does either. When one is merged, brined moves its pin and deletes the workaround.
+The lane works in a clone of steading-ai/almanac (or a fork), one branch per patch, based on `go-rewrite` since that is the code brined imports. Each patch is proved by running it: brined points at the clone through a `replace` on a throwaway branch, and the patch has to clear `compare`, `hostilevet` and the tests, with the before and after output kept. That evidence goes in the pull request body. The lane also writes the tests upstream's own suite requires and the body in Josh's voice, then stops. Carrying a proven patch in brined while its pull request is open is fine, and is recorded in `docs/go-touch-points.md`. Pushing a branch to steading-ai/almanac or opening the pull request is Josh's call, one patch at a time, and the agent does neither. When one is merged, brined moves its pin and drops the `replace`.
 
 ### divergences
 

@@ -27,7 +27,7 @@ Out of scope: `puller/`, `checks/` and `scripts/` are shell and stay shell. `tie
 
 ## Upstream
 
-Ivy's Go library (`ivy/almanac`, branch `go-rewrite`) has no tagged release. brined's `go.mod` pins Ivy's own `go-rewrite` commit `86122f2` as a pseudo-version, with no `replace` and no local changes on top.
+Ivy's Go library (`ivy/almanac`, branch `go-rewrite`) has no tagged release. brined's `go.mod` pins Ivy's own `go-rewrite` commit `86122f2` as a pseudo-version, with no `replace` and nothing carried on top today. That is the default, not a rule: a change can be carried on a fork or through a `replace` to try it and prove it by running it (ADR 0001), and is then listed under "Carried changes" in `go-touch-points.md`.
 
 - **`Resolve` effect.** `effect.Tracker` has `File` and `Ask` only. Rust `main` does not use a tracker `Resolve` either (it pins `b8bdefa`), so nothing here waits on it. A Go version exists on a local, unpushed `brined-go` branch of `ivy/almanac`, shelved until `Resolve` lands in Rust.
 - **Open:** whether the engine package is meant to be imported from outside the module.
