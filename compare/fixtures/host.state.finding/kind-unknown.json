@@ -1,0 +1,10 @@
+{
+  "kind": "weird",
+  "project": "brined-almanac",
+  "subject": "mac.gh-auth.2026-11-10T14:50Z",
+  "host": "mac",
+  "check": "gh-auth",
+  "status": "critical",
+  "since": "2026-11-10T14:50Z",
+  "body": "gh auth status: You are not logged into any GitHub hosts"
+}

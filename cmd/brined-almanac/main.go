@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/ivy/almanac/app"
@@ -20,10 +21,14 @@ import (
 	"github.com/technicalpickles/brined-almanac/brine/bugsinkissues"
 	"github.com/technicalpickles/brined-almanac/brine/hoststate"
 	"github.com/technicalpickles/brined-almanac/brine/securityalerts"
+	"github.com/technicalpickles/brined-almanac/compare"
 	"github.com/technicalpickles/brined-almanac/cutover"
 	"github.com/technicalpickles/brined-almanac/taskwarrior"
 	"github.com/technicalpickles/brined-almanac/wiring"
 )
+
+// models are the workflows the binary runs, and the ones compare sends each recorded event to.
+var models = []model.Workflow{hoststate.Model, securityalerts.Model, bugsinkissues.Model}
 
 func main() {
 	if _, set := os.LookupEnv("ALMANAC_READ_ONLY"); !set {
@@ -32,7 +37,7 @@ func main() {
 	app.Almanac{
 		Name:       "brined-almanac",
 		Vocabulary: brine.Vocabulary,
-		Models:     []model.Workflow{hoststate.Model, securityalerts.Model, bugsinkissues.Model},
+		Models:     models,
 		Setup: func(_ context.Context, s app.Setting) (*providers.Set, error) {
 			return wiring.Providers(os.LookupEnv, s.Switches)
 		},
@@ -40,6 +45,7 @@ func main() {
 			{Name: "sync-check", Short: "Pull the TaskChampion server's history into a throwaway replica, to prove the sync settings.", Run: syncCheck},
 			{Name: "cutover", Args: "[--apply]", Short: "Print the plan for resolving history in Bugsink, or carry it out with --apply.", Run: runCutover, Flags: cutoverFlags},
 		},
+		Commands: func() []*cobra.Command { return []*cobra.Command{compare.Command(models)} },
 	}.Main()
 }
 

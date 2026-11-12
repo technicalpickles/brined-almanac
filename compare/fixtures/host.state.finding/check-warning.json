@@ -1,0 +1,10 @@
+{
+  "kind": "check",
+  "project": "brined-almanac",
+  "subject": "mac.disk.2026-11-10T14:50Z",
+  "host": "mac",
+  "check": "disk",
+  "status": "warning",
+  "since": "2026-11-10T14:50Z",
+  "body": "disk: 91% used"
+}

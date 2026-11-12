@@ -1,0 +1,45 @@
+DISAGREE  bugsink.issue.unaddressed/body-only-empty-surfaces
+          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+DISAGREE  bugsink.issue.unaddressed/body-only-ingest-dated
+          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+agree     bugsink.issue.unaddressed/count-not-a-number: rejected
+DISAGREE  bugsink.issue.unaddressed/first
+          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+DISAGREE  bugsink.issue.unaddressed/no-surfaces
+          ingest: rust "rejected", go "queued"
+          runs: rust (no run), go "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to "technicalpickles/brineworks"]
+DISAGREE  bugsink.issue.unaddressed/other-service
+          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+DISAGREE  bugsink.issue.unaddressed/regressed
+          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+DISAGREE  host.state.finding/check-critical
+          run 1 workflow: rust "host-state", go "host_state"
+DISAGREE  host.state.finding/check-dotted-project
+          run 1 workflow: rust "host-state", go "host_state"
+DISAGREE  host.state.finding/check-warning
+          run 1 workflow: rust "host-state", go "host_state"
+agree     host.state.finding/check-without-status: rejected
+agree     host.state.finding/kind-unknown: rejected
+DISAGREE  host.state.finding/project-not-taskwarrior
+          ingest: rust "rejected", go "queued"
+          runs: rust (no run), go "host_state" failed ("host_state, step \"filing\": project \"Bad\" has a segment outside [a-z0-9_-]: \"Bad\"")
+DISAGREE  host.state.finding/since-without-date
+          ingest: rust "rejected", go "queued"
+          runs: rust (no run), go "host_state" failed ("host_state, step \"filing\": since's date: not a slug")
+DISAGREE  host.state.finding/stale-never
+          run 1 workflow: rust "host-state", go "host_state"
+DISAGREE  host.state.finding/stale-since
+          run 1 workflow: rust "host-state", go "host_state"
+DISAGREE  security.alert.finding/coverage
+          run 1 workflow: rust "security-alerts", go "security_alerts"
+agree     security.alert.finding/kind-unknown: rejected
+DISAGREE  security.alert.finding/overdue-every-severity
+          run 1 workflow: rust "security-alerts", go "security_alerts"
+DISAGREE  security.alert.finding/overdue-secrets-only
+          run 1 workflow: rust "security-alerts", go "security_alerts"
+DISAGREE  security.alert.finding/overdue
+          run 1 workflow: rust "security-alerts", go "security_alerts"
+DISAGREE  security.alert.finding/project-not-taskwarrior
+          ingest: rust "rejected", go "queued"
+          runs: rust (no run), go "security_alerts" failed ("security_alerts, step \"filing\": project \"Bad\" has a segment outside [a-z0-9_-]: \"Bad\"")
+18 of 22 case(s) disagree
