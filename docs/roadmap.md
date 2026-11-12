@@ -95,7 +95,7 @@ Work a burst left unfinished keeps going on capacity I'm not using.
 
 Threads on public repositories get answered between bursts. The GitHub App from M4 already exists.
 
-- github-notifications, a source that reads my GitHub notifications for both workflows below. It needs only a classic token, not the M4 App, so it can ship ahead of M4
+- github-notifications, a source that reads my GitHub notifications for both workflows below. It needs only a classic token scoped to `notifications`, so it can ship ahead of M4 for public repositories, and private ones follow once the M4 App can read them
 - oss-maintained, for outside issues and pull requests on maintained-tier repositories
 - oss-contributions, triggered by notifications on the issues and pull requests I opened on other people's projects, with a slower scan of them as the backstop
 - A convention that a workaround names its upstream issue in a comment

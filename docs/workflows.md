@@ -180,7 +180,9 @@ Each host declares its transport. picklelab is the first pull host: the puller f
   - A notification only says where to look. The workflow that takes it reads the issue or pull request's current state before it reports anything, the same way upstream treats a webhook.
   - A thread from an organization outside my own accounts is dropped. The token is never authorized for the work organization's SSO, so its threads shouldn't arrive at all, and the drop is the backstop.
 - **Model:** none.
-- **Needs:** a classic personal access token with the `notifications` scope, plus `repo` to see threads on private repositories. The notifications endpoints only accept classic tokens, not fine-grained tokens or GitHub App tokens, so the M4 App can't stand in for it. It gets its own variable, the way security-alerts has `GITHUB_ALERTS_TOKEN`, and nothing else uses it.
+- **Needs:** two credentials, split the way [Octobox](https://github.com/octobox/octobox/blob/main/docs/INSTALLATION.md#running-octobox-as-a-github-app) splits them. Decided 2026-11-12.
+  - The inbox is read with a classic personal access token that has only the `notifications` scope. The notifications endpoints accept classic tokens and OAuth app tokens, which are the same kind, and nothing else: a GitHub App or fine-grained token has no inbox to read. It gets its own variable, the way security-alerts has `GITHUB_ALERTS_TOKEN`, and nothing else uses it.
+  - A thread's current state on a public repository is read with the same token, since any token reads public data. On a private repository it comes from the M4 GitHub App, which is installed on the maintained tier. So the token never needs `repo`, the scope that would let it write to every repository I own. A thread on a private repository the App isn't installed on, like someone else's, is dropped, because nothing can read its state and the OSS workflows are about public projects.
 
 ### oss-maintained
 
