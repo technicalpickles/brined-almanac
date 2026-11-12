@@ -1,37 +1,23 @@
-DISAGREE  bugsink.issue.unaddressed/body-only-empty-surfaces
-          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
-DISAGREE  bugsink.issue.unaddressed/body-only-ingest-dated
-          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+agree     bugsink.issue.unaddressed/body-only-empty-surfaces: queued, "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to "technicalpickles/brineworks"]
+agree     bugsink.issue.unaddressed/body-only-ingest-dated: queued, "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to "technicalpickles/brineworks"]
 agree     bugsink.issue.unaddressed/count-not-a-number: rejected
-DISAGREE  bugsink.issue.unaddressed/first
-          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
+agree     bugsink.issue.unaddressed/first: queued, "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to "technicalpickles/brineworks"]
 agree     bugsink.issue.unaddressed/no-surfaces: rejected
-DISAGREE  bugsink.issue.unaddressed/other-service
-          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
-DISAGREE  bugsink.issue.unaddressed/regressed
-          run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
-DISAGREE  host.state.finding/check-critical
-          run 1 workflow: rust "host-state", go "host_state"
-DISAGREE  host.state.finding/check-dotted-project
-          run 1 workflow: rust "host-state", go "host_state"
-DISAGREE  host.state.finding/check-warning
-          run 1 workflow: rust "host-state", go "host_state"
+agree     bugsink.issue.unaddressed/other-service: queued, "bugsink_issues" ran [file "Brent: pickleclaw/exec mcp-timeout (14 events)" to "technicalpickles/pickleclaw"]
+agree     bugsink.issue.unaddressed/regressed: queued, "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout regressed (14 events)" to "technicalpickles/brineworks"]
+agree     host.state.finding/check-critical: queued, "host_state" ran [file "host-state: gh-auth critical on mac since 2026-11-10 14:50Z" to "task:brined-almanac"]
+agree     host.state.finding/check-dotted-project: queued, "host_state" ran [file "host-state: gh-auth critical on picklelab since 2026-11-10 14:50Z" to "task:home.lab"]
+agree     host.state.finding/check-warning: queued, "host_state" ran [file "host-state: disk warning on mac since 2026-11-10 14:50Z" to "task:brined-almanac"]
 agree     host.state.finding/check-without-status: rejected
 agree     host.state.finding/kind-unknown: rejected
 agree     host.state.finding/project-not-taskwarrior: rejected
 agree     host.state.finding/since-without-date: rejected
-DISAGREE  host.state.finding/stale-never
-          run 1 workflow: rust "host-state", go "host_state"
-DISAGREE  host.state.finding/stale-since
-          run 1 workflow: rust "host-state", go "host_state"
-DISAGREE  security.alert.finding/coverage
-          run 1 workflow: rust "security-alerts", go "security_alerts"
+agree     host.state.finding/stale-never: queued, "host_state" ran [file "host-state: no report from mac" to "task:brined-almanac"]
+agree     host.state.finding/stale-since: queued, "host_state" ran [file "host-state: no report from mac since 2026-11-10 14:29Z" to "task:brined-almanac"]
+agree     security.alert.finding/coverage: queued, "security_alerts" ran [file "security-alerts: alerts are off on 2 repositories" to "task:brined-almanac"]
 agree     security.alert.finding/kind-unknown: rejected
-DISAGREE  security.alert.finding/overdue-every-severity
-          run 1 workflow: rust "security-alerts", go "security_alerts"
-DISAGREE  security.alert.finding/overdue-secrets-only
-          run 1 workflow: rust "security-alerts", go "security_alerts"
-DISAGREE  security.alert.finding/overdue
-          run 1 workflow: rust "security-alerts", go "security_alerts"
+agree     security.alert.finding/overdue-every-severity: queued, "security_alerts" ran [file "security-alerts: 21 overdue on technicalpickles/dotfiles (1 critical, 2 high, 3 medium, 5 unknown, 4 low, 6 secret)" to "task:dotfiles"]
+agree     security.alert.finding/overdue-secrets-only: queued, "security_alerts" ran [file "security-alerts: 2 overdue on technicalpickles/dotfiles (2 secret)" to "task:dotfiles"]
+agree     security.alert.finding/overdue: queued, "security_alerts" ran [file "security-alerts: 3 overdue on technicalpickles/dotfiles (2 high, 1 medium)" to "task:dotfiles"]
 agree     security.alert.finding/project-not-taskwarrior: rejected
-14 of 22 case(s) disagree
+0 of 22 case(s) disagree
