@@ -17,7 +17,7 @@ Sizes are Rust lines in `src/` and `tests/` at `ea999b3`.
 | 6 | `bugsink` | 260 / 332 | classes, transcript | `reveal` boundary (see go-touch-points.md) | done |
 | 7 | `cutover` | 630 / 314 | bugsink, bugsink_api | none | done |
 | 8 | `taskwarrior` | 469 / 243 | providers, routing | No Go TaskChampion. Decided: shell out to `task` | |
-| 9 | `resolve_on_close` | 70 / 192 | cutover | none. It resolves or mutes the Bugsink issue through the Bugsink API, not an almanac effect | |
+| 9 | `resolve_on_close` | 70 / 192 | cutover | none. It resolves or mutes the Bugsink issue through the Bugsink API, not an almanac effect | done |
 | 10 | workflow `host_state` | 308 / 440 | host_state, routing | Go engine as a module | |
 | 11 | workflow `security_alerts` | 704 / 565 | routing, tiers | Go engine, GitHub alerts client | |
 | 12 | workflow `bugsink_issues` | 349 / 802 | bugsink, cutover, classes, resolve_on_close | Go engine as a module | |
