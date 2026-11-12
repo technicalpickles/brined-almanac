@@ -13,3 +13,8 @@ var ClassesTOML []byte
 //
 //go:embed tiers.toml
 var TiersTOML []byte
+
+// HostsTOML is hosts.toml, the hosts whose state reports the scan reads.
+//
+//go:embed hosts.toml
+var HostsTOML []byte
