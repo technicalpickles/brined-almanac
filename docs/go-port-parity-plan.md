@@ -112,37 +112,106 @@ Nothing here schedules a cutover. This section records what a cutover onto a fre
 
 ### Procedure
 
-1. **Stop Rust and let it drain.** On Rust's database, both counts must be 0:
+`.scratch/cutover-proof.sh` (not committed, since `.scratch` is ignored) runs every SQL statement and pipe below against two throwaway Postgres 17 containers. Rust's schema comes from the pinned crate's migrations, and Go's from the Go binary's own `check`. Its checks are named after the step slugs below. It never touches prod, and it runs neither side's backfill, which needs prod's tokens, so it stands in for the two dry runs with hand-inserted rows.
 
-   ```sql
-   SELECT count(*) FROM pending WHERE almanac = 'brined-almanac';
-   SELECT count(*) FROM outbox WHERE almanac = 'brined-almanac' AND status = 'pending';
-   ```
+Rust stays live through steps 1 and 2, so a failed gate leaves prod running. The shell helpers name the containers. Rust's prod database is not published to the host ([ADR 0002](adrs/0002-own-ports-and-database-for-the-go-port.md)), so every command goes through `docker exec`. `brined-almanac-prod-db-1` is the container the runbook uses. `brined-almanac-go-prod-db-1` is inferred from ADR 0002's project name `brined-almanac-go-prod`, and no such stack exists yet, so use whatever container Go's prod database ends up in.
 
-   Never run Rust and Go live at once. Each would file what the other filed. `failed` outbox rows were never filed, and they stay unfiled, as under Rust.
-2. **Move Go's `run_seq` past Rust's**, before Go's first live run. Read `SELECT last_value FROM run_seq;` on Rust, then on Go:
+```sh
+rustdb() { docker exec -i brined-almanac-prod-db-1 psql -X -q -v ON_ERROR_STOP=1 -U almanac almanac "$@"; }
+godb() { docker exec -i brined-almanac-go-prod-db-1 psql -X -q -v ON_ERROR_STOP=1 -U brined_almanac_go brined_almanac_go "$@"; }
+# copy_seen FROM TO: Rust's live seen rows into a Go store. The same command is the first run and every rerun.
+copy_seen() {
+  (set -o pipefail
+   "$1" -c "\copy (SELECT almanac, source, delivery_id, seen_at FROM seen WHERE almanac = 'brined-almanac') TO STDOUT CSV" |
+     "$2" -c "CREATE TEMP TABLE seen_in (LIKE seen)" \
+          -c "\copy seen_in FROM STDIN CSV" \
+          -c "INSERT INTO seen SELECT * FROM seen_in ON CONFLICT DO NOTHING")
+}
+```
 
-   ```sql
-   SELECT setval('run_seq', GREATEST(<rust last_value> + 1000, (SELECT last_value FROM run_seq)));
-   ```
-
-   `GREATEST` makes a rerun safe. This avoids the #34 drop at cutover. It does not cover a later restore from a dump, which still needs #34.
-3. **Copy Rust's `seen` rows into the Go store.** The two `seen` tables match column for column (`almanac`, `source`, `delivery_id`, `seen_at`), with no workflow column (read from both migrations).
+1. **Create Go's schema** (`go-schema`). Go has no migrate verb. A verb that opens the store with `DATABASE_URL` set runs goose first (`open` in `app/verbs.go:142` of the pinned `ivy/almanac`), and `check` is the one that does nothing else. Run `brined-almanac check` with `DATABASE_URL` pointed at the Go store and `ALMANAC_CONFIG=almanac.go.toml`. It prints `brined-almanac: ok, 3 workflow(s), read-only dry-run, ...`, creates the tables, and leaves `run_seq` at `last_value = 1`, `is_called = false` (measured). Step 4's `SELECT last_value FROM run_seq` needs this table. Until Go has an image, a Linux build mounted into any container on the database's network works, which is what the proof does:
 
    ```sh
-   # On Rust's database
-   \copy (SELECT almanac, source, delivery_id, seen_at FROM seen WHERE almanac = 'brined-almanac') TO 'seen.csv' CSV
-   # On Go's database
-   \copy seen FROM 'seen.csv' CSV
+   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o .scratch/brined-almanac ./cmd/brined-almanac
+   docker run --rm --network <go db network> --entrypoint /w/.scratch/brined-almanac -v "$PWD:/w:ro" \
+     -e DATABASE_URL=postgres://brined_almanac_go@<go db host>:5432/brined_almanac_go \
+     -e ALMANAC_CONFIG=/w/almanac.go.toml postgres:17-alpine check
    ```
 
-   On a rerun, load into a temp table and insert with `ON CONFLICT DO NOTHING`, since `seen` has a primary key. No `runs`, `outbox`, `ledger`, `pending` or `tripped` row crosses over, so this is still a fresh store, and no workflow name crosses.
-4. **Keep the Bugsink cursor.** `BUGSINK_CURSOR` is a file, not the store. Mount the same volume or copy the file. A missing cursor resends history. Bugsink drops a repeated event id, and both sides derive it the same way, so this wastes work but should not duplicate, as long as Bugsink still keeps the old events (inferred).
-5. **Gate on a dry-run backfill against a seeded copy.** Seed a throwaway Go store as in steps 2 and 3, and also copy the `seen` rows under `brined-almanac.dry-run` so the dry-run scope sees them. Run `backfill --dry-run` with printing trackers, as in the runbook's "Preview a backfill on a copy". It prints `found`, `queued` and `unchanged`. `queued` must equal what a Rust preview queues at the same moment, usually 0. A non-zero difference means a delivery-id format diverged. Do not cut over until it matches.
+2. **Gate on a dry-run backfill of both sides, on copies** (`dry-run-gate`). Make the Rust copy as in the runbook's "Preview a backfill on a copy" (`ba-preview-db`, a `pg_dump` of prod). Make the Go copy on the same network, give it Go's schema as in step 1, and seed its live `seen` from the Rust copy, not from prod, so both copies start from the same rows:
+
+   ```sh
+   docker run -d --name ba-preview-go-db --network ba-preview -e POSTGRES_USER=brined_almanac_go -e POSTGRES_DB=brined_almanac_go -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17-alpine
+   until docker exec ba-preview-go-db pg_isready -U brined_almanac_go -q; do sleep 1; done
+   # step 1's check, with DATABASE_URL=postgres://brined_almanac_go@ba-preview-go-db:5432/brined_almanac_go
+   rustcopy() { docker exec -i ba-preview-db psql -X -q -v ON_ERROR_STOP=1 -U almanac almanac "$@"; }
+   gocopy() { docker exec -i ba-preview-go-db psql -X -q -v ON_ERROR_STOP=1 -U brined_almanac_go brined_almanac_go "$@"; }
+   copy_seen rustcopy gocopy
+   ```
+
+   Then give both copies the same dry-run scope. A dry run reads and writes `seen` under `brined-almanac.dry-run`, and the Rust copy already holds dry-run rows from earlier previews that the Go copy lacks. This replaces that scope with the live rows on each copy, and running it twice changes nothing:
+
+   ```sh
+   for db in rustcopy gocopy; do
+     "$db" <<'SQL'
+   BEGIN;
+   DELETE FROM seen WHERE almanac = 'brined-almanac.dry-run';
+   INSERT INTO seen (almanac, source, delivery_id, seen_at)
+   SELECT 'brined-almanac.dry-run', source, delivery_id, seen_at FROM seen WHERE almanac = 'brined-almanac';
+   COMMIT;
+   SQL
+   done
+   ```
+
+   Run `backfill --dry-run` against each copy with the runbook preview's tokens and mounts, Rust's image against `ba-preview-db` and the Go binary against `ba-preview-go-db`. Each prints `found`, `queued` and `unchanged`. `queued` counts every finding whose delivery id was not in `seen` (`runtime.rs:740-756` of the pinned crate), so the two `queued` must be equal. Then list what each side queued and compare. The diff must be empty:
+
+   ```sh
+   q="SELECT source, delivery_id FROM seen WHERE almanac = 'brined-almanac.dry-run' EXCEPT SELECT source, delivery_id FROM seen WHERE almanac = 'brined-almanac' ORDER BY 1, 2"
+   diff <(rustcopy -At -c "$q") <(gocopy -At -c "$q") && echo "same ids queued"
+   ```
+
+   A line in the diff is a delivery id one side derives and the other does not. Do not go on until it is empty. The two lists need not be empty themselves. Prod's daemon keeps an outage's first `since` in memory (`Episodes`, `src/host_state.rs:454-476`), and a fresh backfill process has no episodes, so a host that is stale right now gets a new delivery id on both sides (read from code). Remove the copies with the runbook's cleanup and `docker rm -f ba-preview-go-db`.
+
+3. **Stop Rust and drain it** (`drain`). Stop it with the `stop almanac` command from the runbook's "First deploy" step 4. On Rust's database, all three counts must be 0:
+
+   ```sh
+   rustdb -At -c "SELECT count(*) FROM pending WHERE almanac = 'brined-almanac'"
+   rustdb -At -c "SELECT count(*) FROM outbox WHERE almanac = 'brined-almanac' AND status = 'pending'"
+   rustdb -At -c "SELECT count(*) FROM runs WHERE almanac = 'brined-almanac' AND status = 'running'"
+   ```
+
+   Each one is work Rust has admitted and not finished. A clean stop finishes the run in flight and starts no new one (`runtime.rs:250-251`, `stop_claiming` at `runtime.rs:781-784`), so `pending` and pending `outbox` rows can be left after a clean stop. A `running` run means Rust died mid-run, for example when `docker compose stop` gave up after its 10-second default (`compose.prod.yaml` sets no `stop_grace_period`). That run's `seen` row is written and its `pending` row is gone, so the first two counts read 0. Rust's startup requeues it (`recover` at `app.rs:196`, `recover_tx` at `store/postgres.rs:321-350`). After cutover Rust never starts again, and the copied `seen` row makes Go treat the redelivery as a duplicate, so the finding is dropped silently. The proof's `drain` checks show the first two counts at 0 on such a run and the third at 1 (measured).
+
+   If any count is not 0, start Rust with step 6's `start almanac` command from the runbook's "First deploy". Its startup requeues any running run, and its workers claim the pending rows and deliver the outbox. Watch the three counts while it runs. When all three read 0, stop it again and recheck. Repeat until they read 0 after a stop.
+
+   Never run Rust and Go live at once. Each would file what the other filed. A `failed` outbox row usually filed nothing, and it stays as it was under Rust. A taskwarrior delivery is the exception. Rust commits the task to its local replica before the final sync (`Worker::deliver`, `src/taskwarrior.rs:264-284`), so a failed sync can leave the task in the replica in Rust's `taskchampion` volume, and it reaches the server only if that replica syncs again (read from code).
+
+4. **Move Go's `run_seq` past Rust's** (`run-seq`), before Go's first live run:
+
+   ```sh
+   L=$(rustdb -At -c "SELECT last_value FROM run_seq")
+   godb -At -c "SELECT setval('run_seq', GREATEST($L + 1000, (SELECT last_value FROM run_seq)))"
+   ```
+
+   `GREATEST` makes a rerun safe and never moves Go's sequence back. The proof sets Rust to 41 and gets 1041 on Go twice, then 1042 from Go's next `nextval`, and leaves a Go sequence already at 5000 at 5000. With `GREATEST` removed, that last check fails (measured). This avoids the #34 drop at cutover. It does not cover a later restore from a dump, which still needs #34.
+
+5. **Copy Rust's `seen` rows into the Go store** (`copy-seen`). The two `seen` tables match column for column (`almanac`, `source`, `delivery_id`, `seen_at`), with no workflow column (read from both migrations). One command does the first copy and every rerun, through a pipe, so no file is left on either container:
+
+   ```sh
+   copy_seen rustdb godb
+   q="SELECT source, delivery_id, seen_at FROM seen WHERE almanac = 'brined-almanac' ORDER BY 1, 2"
+   diff <(rustdb -At -c "$q") <(godb -At -c "$q") && echo "seen copied"
+   ```
+
+   Run the check before Go starts, since Go adds rows from then on. In the proof, an id with commas, double quotes and a backslash, and one with a newline, arrive byte-identical. A rerun adds nothing, and a row added to Rust between runs arrives on the next one. Without `ON CONFLICT DO NOTHING` the rerun fails on `seen_pkey` (all measured). No `runs`, `outbox`, `ledger`, `pending` or `tripped` row crosses over, so this is still a fresh store, and no workflow name crosses.
+
+6. **Keep the Bugsink cursor.** `BUGSINK_CURSOR` is a file, not the store. Mount the same volume or copy the file. A missing cursor resends history. Bugsink drops a repeated event id, and both sides derive it the same way, so this wastes work but should not duplicate, as long as Bugsink still keeps the old events (inferred).
+
+7. **Start Go live.** Rust stays stopped.
 
 ### Read-only queries Josh runs for the sizes
 
-These need prod data. They size the risk and do not change anything. The gate in step 5 gives the exact number. The SQL is meant for a copy of prod's database.
+These need prod data. They size the risk and do not change anything. The gate in step 2 gives the exact number. The SQL is meant for a copy of prod's database.
 
 ```sh
 # Open almanac tasks per project: what an empty store would duplicate for host_state and security_alerts
