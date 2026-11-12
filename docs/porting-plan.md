@@ -20,7 +20,7 @@ Sizes are Rust lines in `src/` and `tests/` at `ea999b3`.
 | 9 | `resolve_on_close` | 70 / 192 | cutover | none. It resolves or mutes the Bugsink issue through the Bugsink API, not an almanac effect | done |
 | 10 | workflow `host_state` | 308 / 440 | host_state, routing | Go engine as a module | done, as a checked model in `brine/hoststate`. Two parse-time refusals moved to the filing observer (see go-touch-points.md) |
 | 11 | workflow `security_alerts` | 704 / 565 | routing, tiers | Go engine, GitHub alerts client | |
-| 12 | workflow `bugsink_issues` | 349 / 802 | bugsink, cutover, classes, resolve_on_close | Go engine as a module | |
+| 12 | workflow `bugsink_issues` | 349 / 802 | bugsink, cutover, classes, resolve_on_close | Go engine as a module | done, as a checked model in `brine/bugsinkissues`, with its scan and `settle_closed` in `brine`. Checked against the Rust tests through Ivy's runtime and a recording tracker. Not matched: a missing `surfaces` parses as empty, and the `bugsink:` in the key is a constant event field (see go-touch-points.md). Providers `Transcripts`, `BugsinkClient` and `BugsinkReader` are defined but not yet built from the environment, which is row 13 |
 | 13 | `providers` and `main` | 465 + 61 / 231 + 98 | everything | all of the above | |
 
 Out of scope: `puller/`, `checks/` and `scripts/` are shell and stay shell. `almanac.toml`, `tiers.toml`, `hosts.toml` and `classes.toml` are shared by both implementations.

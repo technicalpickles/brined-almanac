@@ -3,7 +3,6 @@ package hoststate_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ivy/almanac/agent"
 	"github.com/ivy/almanac/check"
-	"github.com/ivy/almanac/cooled"
 	"github.com/ivy/almanac/effect"
 	"github.com/ivy/almanac/engine"
 	"github.com/ivy/almanac/hostile"
@@ -23,31 +20,8 @@ import (
 	"github.com/technicalpickles/brined-almanac/brine"
 	"github.com/technicalpickles/brined-almanac/brine/hoststate"
 	rules "github.com/technicalpickles/brined-almanac/hoststate"
+	"github.com/technicalpickles/brined-almanac/internal/walktest"
 )
-
-// walking is a workflow.Cx for one walk of the model outside a runtime. host_state only
-// observes and decides, so everything else is refused.
-type walking struct{}
-
-func (walking) Record(ctx context.Context, _ string, read func(context.Context) (json.RawMessage, error)) (json.RawMessage, error) {
-	return read(ctx)
-}
-func (walking) Attempts(context.Context) (workflow.Attempts, error) { return workflow.Attempts{}, nil }
-func (walking) Age(context.Context, time.Duration, func(context.Context) (cooled.Published, error)) (cooled.Age, cooled.Cooled, error) {
-	return 0, cooled.Cooled{}, errors.New("host_state measures nothing")
-}
-func (walking) Hold(context.Context, string, hostile.Slug, hostile.Sha) error {
-	return errors.New("host_state holds nothing")
-}
-func (walking) Screen(context.Context, string, hostile.Of[string], float64) error {
-	return errors.New("host_state screens nothing")
-}
-func (walking) Agent(context.Context, agent.Call) (hostile.Of[json.RawMessage], error) {
-	return hostile.Of[json.RawMessage]{}, errors.New("host_state calls no agent")
-}
-func (walking) Provider(need providers.Requirement) (any, error) {
-	return nil, errors.New("host_state reads no provider in a run: " + need.Name())
-}
 
 var now = time.Date(2026, 11, 10, 15, 0, 0, 0, time.UTC)
 
@@ -92,7 +66,7 @@ func walk(t *testing.T, payload json.RawMessage) (engine.Ended, effect.File) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ended, err := w.Walk(context.Background(), walking{}, payload)
+	ended, err := w.Walk(context.Background(), walktest.Cx{}, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +190,7 @@ func TestARunWhoseFilingIsRefusedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Walk(context.Background(), walking{}, raw); err == nil {
+	if _, err := w.Walk(context.Background(), walktest.Cx{}, raw); err == nil {
 		t.Fatal("the run filed a finding whose since does not split")
 	}
 }
