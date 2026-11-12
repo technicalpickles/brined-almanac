@@ -257,3 +257,21 @@ func TestASyncCheckAgainstAnUnreachableServerFails(t *testing.T) {
 		t.Fatal("a sync check against a file should fail")
 	}
 }
+
+// KNOWN FAILING, pins steading-ai/almanac#34 and brined-almanac#43. The library keys an effect
+// "{run_id}:{i}" from the run_seq sequence, so a store reset or restore reissues "run-1:0" for a
+// different finding. The tracker then sees a task already carrying that key and drops the new
+// finding without an error. Passes once keys stay unique for the life of the tracker.
+func TestAReusedKeyForADifferentFindingIsStillFiled(t *testing.T) {
+	dir := t.TempDir()
+	container, mac := open(t, dir, "container"), open(t, dir, "mac")
+	file(t, container, "run-1:0", "Alerts open on picklehome", "first database, first finding")
+	file(t, container, "run-1:0", "Disk full on picklehome", "fresh database after a reset, a different finding")
+	titles := []string{}
+	for _, task := range synced(t, mac) {
+		titles = append(titles, task.Description)
+	}
+	if !slices.Contains(titles, "Disk full on picklehome") {
+		t.Fatalf("the second finding never reached the replica, tasks: %q", titles)
+	}
+}
