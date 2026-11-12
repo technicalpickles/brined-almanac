@@ -7,7 +7,7 @@ DISAGREE  bugsink.issue.unaddressed/first
           run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
 DISAGREE  bugsink.issue.unaddressed/no-surfaces
           ingest: rust "rejected", go "queued"
-          runs: rust (no run), go "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to technicalpickles/brineworks]
+          runs: rust (no run), go "bugsink_issues" ran [file "Brent: brineworks/triage_apply mcp-timeout (14 events)" to "technicalpickles/brineworks"]
 DISAGREE  bugsink.issue.unaddressed/other-service
           run 1 workflow: rust "bugsink-issues", go "bugsink_issues"
 DISAGREE  bugsink.issue.unaddressed/regressed

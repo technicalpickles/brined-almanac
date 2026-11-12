@@ -16,17 +16,17 @@ const DefaultFixtures = "compare/fixtures"
 
 // All compares every case, Rust side first.
 func All(ctx context.Context, cases []Case, rust Rust, golang Golang) (Report, error) {
+	rusts, err := rust.Sides(ctx, cases)
+	if err != nil {
+		return Report{}, err
+	}
 	var compared []Compared
-	for _, c := range cases {
-		r, err := rust.Side(ctx, c)
-		if err != nil {
-			return Report{}, err
-		}
+	for i, c := range cases {
 		g, err := golang.Side(ctx, c)
 		if err != nil {
 			return Report{}, fmt.Errorf("the Go side failed on %s: %w", c.Name, err)
 		}
-		compared = append(compared, Compare(c, r, g))
+		compared = append(compared, Compare(c, rusts[i], g))
 	}
 	return Tally(compared), nil
 }

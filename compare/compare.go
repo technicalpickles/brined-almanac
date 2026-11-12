@@ -55,7 +55,7 @@ func (e Effect) String() string {
 	if e.Title == "" && e.Target == "" {
 		return e.Kind
 	}
-	return fmt.Sprintf("%s %q to %s", e.Kind, e.Title, e.Target)
+	return fmt.Sprintf("%s %q to %q", e.Kind, e.Title, e.Target)
 }
 
 // Case is one recorded event: a payload of a kind. Its kind is the name of the directory it is
@@ -122,6 +122,8 @@ type Report struct {
 
 // Compare is the case's two sides, and every difference between them. Runs are put in
 // workflow order first, since neither side promises the order an event's runs settle in.
+// The order reads '-' as '_', because Rust names workflows with hyphens and Go with
+// underscores, and the two sort on opposite sides of the digits.
 func Compare(c Case, rust, golang Side) Compared {
 	rust, golang = inWorkflowOrder(rust), inWorkflowOrder(golang)
 	return Compared{Case: c.Name, Differences: differences(rust, golang), Rust: rust, Go: golang}
@@ -129,9 +131,11 @@ func Compare(c Case, rust, golang Side) Compared {
 
 func inWorkflowOrder(s Side) Side {
 	s.Runs = slices.Clone(s.Runs)
-	slices.SortStableFunc(s.Runs, func(a, b Run) int { return strings.Compare(a.Workflow, b.Workflow) })
+	slices.SortStableFunc(s.Runs, func(a, b Run) int { return strings.Compare(sortKey(a), sortKey(b)) })
 	return s
 }
+
+func sortKey(r Run) string { return strings.ReplaceAll(r.Workflow, "-", "_") }
 
 // Tally is the cases in a report, counting those that disagree.
 func Tally(cases []Compared) Report {

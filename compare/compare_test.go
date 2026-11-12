@@ -52,10 +52,19 @@ func oneCase(t *testing.T, kind, payload string, recording []byte) (string, comp
 	return dir, compare.Case{Name: kind + "/one", Kind: kind, Path: path}
 }
 
+// sideOf is what r made of the one case c.
+func sideOf(r compare.Rust, c compare.Case) (compare.Side, error) {
+	sides, err := r.Sides(context.Background(), []compare.Case{c})
+	if err != nil {
+		return compare.Side{}, err
+	}
+	return sides[0], nil
+}
+
 func rustSide(t *testing.T, recording []byte) compare.Side {
 	t.Helper()
 	_, c := oneCase(t, "x.y", "{}", recording)
-	side, err := compare.Rust{}.Side(context.Background(), c)
+	side, err := sideOf(compare.Rust{}, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +104,7 @@ func TestARustRunThatEndedEarlyIsReadWithItsReason(t *testing.T) {
 func TestARecordingThatIsNotRustsOutputIsAnError(t *testing.T) {
 	for _, bad := range [][]byte{[]byte("not json"), recorded(t, "Queued", `Ran { run_id: "run-1", workflow: "unfinished`)} {
 		_, c := oneCase(t, "x.y", "{}", bad)
-		if _, err := (compare.Rust{}).Side(context.Background(), c); err == nil {
+		if _, err := sideOf(compare.Rust{}, c); err == nil {
 			t.Errorf("%s read", bad)
 		}
 	}
@@ -106,7 +115,7 @@ func TestAMissingRecordingSaysHowToMakeOne(t *testing.T) {
 	if err := os.Remove(strings.TrimSuffix(c.Path, ".json") + ".rust.json"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := compare.Rust{}.Side(context.Background(), c)
+	_, err := sideOf(compare.Rust{}, c)
 	if err == nil || !strings.Contains(err.Error(), "--rust BIN --record") {
 		t.Errorf("%v", err)
 	}
@@ -149,7 +158,7 @@ func TestEachDifferenceIsListedAndExitsNonZero(t *testing.T) {
 	for _, line := range []string{
 		"DISAGREE  host.state.finding/one",
 		`run 1 workflow: rust "host-state", go "host_state"`,
-		`run 1 effects: rust [file "host-state: no report from the mac" to task:brined-almanac], go [file "host-state: no report from mac" to task:brined-almanac]`,
+		`run 1 effects: rust [file "host-state: no report from the mac" to "task:brined-almanac"], go [file "host-state: no report from mac" to "task:brined-almanac"]`,
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("no %q in\n%s", line, out)
@@ -278,7 +287,7 @@ func fakeRust(t *testing.T, recording []byte) string {
 func TestRecordRefusesToTurnARoutedCaseUnrouted(t *testing.T) {
 	was := staleFiled(t, "host-state", "host-state: no report from mac")
 	_, c := oneCase(t, "host.state.finding", stale, was)
-	_, err := compare.Rust{Binary: fakeRust(t, recorded(t, "Unrouted")), Record: true}.Side(context.Background(), c)
+	_, err := sideOf(compare.Rust{Binary: fakeRust(t, recorded(t, "Unrouted")), Record: true}, c)
 	if err == nil || !strings.Contains(err.Error(), "leaves it unrouted, but its recording has it queued") || !strings.Contains(err.Error(), "stale") {
 		t.Errorf("%v", err)
 	}
@@ -290,11 +299,59 @@ func TestRecordRefusesToTurnARoutedCaseUnrouted(t *testing.T) {
 func TestRecordWritesWhatTheBinaryPrinted(t *testing.T) {
 	_, c := oneCase(t, "host.state.finding", stale, recorded(t, "Queued"))
 	now := staleFiled(t, "host-state", "host-state: no report from mac")
-	side, err := compare.Rust{Binary: fakeRust(t, now), Record: true}.Side(context.Background(), c)
+	side, err := sideOf(compare.Rust{Binary: fakeRust(t, now), Record: true}, c)
 	if err != nil || side.Ingest != "queued" {
 		t.Fatalf("%v %+v", err, side)
 	}
 	if got, _ := os.ReadFile(c.Recording()); !bytes.Equal(got, now) {
 		t.Errorf("recorded %s", got)
+	}
+}
+
+func TestHyphenAndUnderscoreNamesPairUpAcrossTheDigits(t *testing.T) {
+	rust := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: "a-b", Result: "ran"}, {Workflow: "a0", Result: "stopped", Reason: "nothing to do"}}}
+	golang := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: "a0", Result: "stopped", Reason: "nothing to do"}, {Workflow: "a_b", Result: "ran"}}}
+	got := compare.Compare(compare.Case{Name: "x"}, rust, golang).Differences
+	if len(got) != 1 || got[0] != `run 2 workflow: rust "a-b", go "a_b"` {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestAnEffectsTargetIsQuoted(t *testing.T) {
+	file := compare.Effect{Kind: "file", Title: "t", Target: "task:x\nDISAGREE  forged"}
+	got := compare.Compare(compare.Case{Name: "x"},
+		compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: "w", Result: "ran"}}},
+		compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: "w", Result: "ran", Effects: []compare.Effect{file}}}}).Differences
+	if len(got) != 1 || got[0] != `run 1 effects: rust (none), go [file "t" to "task:x\nDISAGREE  forged"]` {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestARefusedRecordWritesNoRecording(t *testing.T) {
+	dir := t.TempDir()
+	kind := filepath.Join(dir, "host.state.finding")
+	if err := os.MkdirAll(kind, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	was := map[string][]byte{
+		"a.rust.json": []byte(`{"simulate": "Unrouted", "outcomes": []}`),
+		"b.rust.json": staleFiled(t, "host-state", "host-state: no report from mac"),
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(kind, name+".json"), []byte(stale), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(kind, name+".rust.json"), was[name+".rust.json"], 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := run(t, "compare", "--fixtures", dir, "--rust", fakeRust(t, recorded(t, "Unrouted")), "--record")
+	if err == nil || !strings.Contains(err.Error(), "not recording host.state.finding/b") {
+		t.Errorf("%v", err)
+	}
+	for name, text := range was {
+		if now, _ := os.ReadFile(filepath.Join(kind, name)); !bytes.Equal(now, text) {
+			t.Errorf("%s changed to %s", name, now)
+		}
 	}
 }

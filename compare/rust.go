@@ -19,32 +19,47 @@ type Rust struct {
 	Record bool
 }
 
-// Side is what the Rust side made of c.
-func (r Rust) Side(ctx context.Context, c Case) (Side, error) {
-	if r.Binary == "" {
-		text, err := os.ReadFile(c.Recording())
+// Sides is what the Rust side made of each case. Recording writes nothing until every case has
+// run and none is refused, so a refusal leaves every recording as it was.
+func (r Rust) Sides(ctx context.Context, cases []Case) ([]Side, error) {
+	sides := make([]Side, len(cases))
+	texts := make([][]byte, len(cases))
+	for i, c := range cases {
+		text, err := r.output(ctx, c)
 		if err != nil {
-			return Side{}, fmt.Errorf("no recording of the Rust binary for %s (run compare --rust BIN --record): %w", c.Name, err)
+			return nil, err
 		}
-		return parseSimulate(text)
+		if sides[i], err = parseSimulate(text); err != nil {
+			return nil, err
+		}
+		texts[i] = text
 	}
-	text, err := r.simulate(ctx, c)
+	if !r.Record {
+		return sides, nil
+	}
+	for i, c := range cases {
+		if err := refuseUnrouting(c, sides[i]); err != nil {
+			return nil, err
+		}
+	}
+	for i, c := range cases {
+		if err := os.WriteFile(c.Recording(), texts[i], 0o644); err != nil {
+			return nil, fmt.Errorf("recording %s: %w", c.Name, err)
+		}
+	}
+	return sides, nil
+}
+
+// output is what the binary prints for c, or with no binary, its recording.
+func (r Rust) output(ctx context.Context, c Case) ([]byte, error) {
+	if r.Binary != "" {
+		return r.simulate(ctx, c)
+	}
+	text, err := os.ReadFile(c.Recording())
 	if err != nil {
-		return Side{}, err
+		return nil, fmt.Errorf("no recording of the Rust binary for %s (run compare --rust BIN --record): %w", c.Name, err)
 	}
-	side, err := parseSimulate(text)
-	if err != nil {
-		return Side{}, err
-	}
-	if r.Record {
-		if err := refuseUnrouting(c, side); err != nil {
-			return Side{}, err
-		}
-		if err := os.WriteFile(c.Recording(), text, 0o644); err != nil {
-			return Side{}, fmt.Errorf("recording %s: %w", c.Name, err)
-		}
-	}
-	return side, nil
+	return text, nil
 }
 
 // unrouted is the ingest of an event no workflow takes.
