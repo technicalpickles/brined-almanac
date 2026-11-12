@@ -4,12 +4,12 @@ Goal: be able to say "the Go port does what Rust does" with evidence, or know ex
 
 Start point: `go-port` at `c85ba45`, where `compare` showed 18 of 22 cases disagreeing (14 on the workflow name alone, 4 parse gaps) and compared no bodies.
 
-Status at `go-port` `f66e2f5`:
+Status at `go-port` `5c30769`:
 
 - `compare` compares filed bodies and tracker keys (`body-parity`, [#57](https://github.com/technicalpickles/brined-almanac/pull/57)). On every case where both sides file, key and body agree.
 - Every disagreement is listed in `docs/divergences.md`, and a test fails on an unlisted one (`divergences`, [#56](https://github.com/technicalpickles/brined-almanac/pull/56), hardened in [#58](https://github.com/technicalpickles/brined-almanac/pull/58)).
 - The 4 parse gaps are closed. brined's parsers refuse at parse what Rust's refuse ([#59](https://github.com/technicalpickles/brined-almanac/pull/59)).
-- 14 of 22 cases still disagree, all on the workflow name. Go keeps underscores. A separate PR makes `compare` read `-` and `_` as equal in the workflow field.
+- `compare` is 0 of 22. The 14 workflow-name disagreements are accepted and normalised: `acceptedWorkflowRenames` maps exactly the three Rust names to Go's underscore names ([#60](https://github.com/technicalpickles/brined-almanac/pull/60)). `docs/divergences.md` has no open entry.
 - Scans, write paths, the store and live traffic are not compared yet.
 
 ## What "parity" means here
@@ -79,7 +79,7 @@ Needs Josh to create the throwaway repo, since creating one is not something an 
 
 1. Keys: [#34](https://github.com/steading-ai/almanac/issues/34) repeats outbox keys after a reset or restore, and the Go side shares it (`BRINED_PIN_OUTBOX_KEY=1`). Track the upstream fix, and flip the gated test to run by default when it lands.
 2. Budgets: the Go models declare `PerHour(1000)` like Rust. Confirm the budget trips at the same count and recovers the same way, restart included.
-3. Names: answered. The workflow name is its own column in `pending`, `runs`, `tripped` and `ledger`, not the scope, and no tracker dedupes on it. A cutover onto a fresh Go store copies only `seen`, which has no workflow column, so underscores cost nothing at cutover (read from code). See "Cutover onto a fresh Go store" below.
+3. Names: answered. The workflow name is part of the key in `runs` (`one_active_run_per_key` is on `(almanac, workflow, key)`), `pending` (primary key `(almanac, workflow, key)`) and `tripped` (primary key `(almanac, workflow)`), and `ledger` has a `workflow` column. `seen` has no workflow column. No tracker dedupes on the name. A cutover onto a fresh Go store copies only `seen` and moves `run_seq` with `setval`, so no name crosses and underscores cost nothing at cutover (read from code). `compare` treats the three names as equal ([#60](https://github.com/technicalpickles/brined-almanac/pull/60)). See "Cutover onto a fresh Go store" below.
 
 Still open in this lane: item 1 beyond cutover (a restore from a dump still reissues keys) and item 2.
 
@@ -87,8 +87,8 @@ Still open in this lane: item 1 beyond cutover (a restore from a dump still reis
 
 Josh has write access to steading-ai/almanac, so the limits that sit in the library are patches, not requests. Candidates, in the order they unblock the most:
 
-1. **Hyphenated workflow names.** The checker accepts `^[a-z][a-z0-9_]*$` (`check/check.go:88`). Allowing `-` clears 14 of the 18 `compare` disagreements. Check first whether anything keys on the name in a way that makes `-` unsafe (store scopes, metric or file names). Done. The hazard audit found nothing unsafe, provided fact names keep the old rule, and with the patch `compare` went from 18 to 4 of 22 (measured on a throwaway branch). Filed as [steading-ai/almanac#36](https://github.com/steading-ai/almanac/pull/36). Josh chose not to carry it.
-2. **An extensible `hostilevet` boundary list.** The list in `tools/hostilevet/taint/boundary.go` is hardcoded to `patch` and `github`. A flag or a module-owned list would clear three of the six findings.
+1. **Hyphenated workflow names.** The checker accepts `^[a-z][a-z0-9_]*$` (`check/check.go:88`). Allowing `-` would clear the 14 workflow-name disagreements (of 18 at the time). Check first whether anything keys on the name in a way that makes `-` unsafe (store scopes, metric or file names). Done. The hazard audit found nothing unsafe, provided fact names keep the old rule, and with the patch `compare` went from 18 to 4 of 22 (measured on a throwaway branch). Filed as [steading-ai/almanac#36](https://github.com/steading-ai/almanac/pull/36). Josh chose not to carry it. Go keeps underscores, and [#60](https://github.com/technicalpickles/brined-almanac/pull/60) normalises the names in `compare`, so `compare` is 0 of 22.
+2. **An extensible `hostilevet` boundary list.** The list in `tools/hostilevet/taint/boundary.go` is hardcoded to `patch` and `github`. A flag or a module-owned list would clear all 4 findings measured on 2026-11-12 (`taskwarrior/taskwarrior.go`, `bugsink/bugsink.go`, `securityalerts/plain.go`, `wiring/trackers.go`), each "only the boundary packages tools/hostilevet lists may import hostile/reveal".
 3. **`github.Retrying` reaching a second call, a default config path, and a read-only default.** Smaller, and each is a field or an option.
 4. **Unique outbox keys** ([#34](https://github.com/steading-ai/almanac/issues/34)). This one is the maintainer's design, so offer a patch only if she asks for one.
 
@@ -98,7 +98,7 @@ The lane works in a clone of steading-ai/almanac (or a fork), one branch per pat
 
 Settle the 4 parse gaps and the name mismatch. For each, one of: fix on our side, send a pull request upstream (Josh has write access to steading-ai/almanac, and issue [#35](https://github.com/steading-ai/almanac/issues/35) already raises the name and boundary asks), or accept. The result is `docs/divergences.md`, which `compare`'s golden file is checked against, so an unlisted difference fails.
 
-Result. `docs/divergences.md` and its test landed in [#56](https://github.com/technicalpickles/brined-almanac/pull/56), and [#58](https://github.com/technicalpickles/brined-almanac/pull/58) hardened the test. The 4 parse gaps were fixed on our side rather than accepted ([#59](https://github.com/technicalpickles/brined-almanac/pull/59)), so their rows left the table. The workflow name is the only remaining entry.
+Result. `docs/divergences.md` and its test landed in [#56](https://github.com/technicalpickles/brined-almanac/pull/56), and [#58](https://github.com/technicalpickles/brined-almanac/pull/58) hardened the test. The 4 parse gaps were fixed on our side rather than accepted ([#59](https://github.com/technicalpickles/brined-almanac/pull/59)), so their rows left the table. The workflow name was the only remaining entry, and [#60](https://github.com/technicalpickles/brined-almanac/pull/60) normalised it inside `compare`, so no entry is open.
 
 ## Cutover onto a fresh Go store
 
@@ -136,7 +136,7 @@ Nothing here schedules a cutover. This section records what a cutover onto a fre
    \copy seen FROM 'seen.csv' CSV
    ```
 
-   On a rerun, load into a temp table and insert with `ON CONFLICT DO NOTHING`, since `seen` has a primary key. No `runs`, `outbox`, `ledger`, `pending` or `tripped` row crosses over, so this is still a fresh store, and the workflow name never crosses.
+   On a rerun, load into a temp table and insert with `ON CONFLICT DO NOTHING`, since `seen` has a primary key. No `runs`, `outbox`, `ledger`, `pending` or `tripped` row crosses over, so this is still a fresh store, and no workflow name crosses.
 4. **Keep the Bugsink cursor.** `BUGSINK_CURSOR` is a file, not the store. Mount the same volume or copy the file. A missing cursor resends history. Bugsink drops a repeated event id, and both sides derive it the same way, so this wastes work but should not duplicate, as long as Bugsink still keeps the old events (inferred).
 5. **Gate on a dry-run backfill against a seeded copy.** Seed a throwaway Go store as in steps 2 and 3, and also copy the `seen` rows under `brined-almanac.dry-run` so the dry-run scope sees them. Run `backfill --dry-run` with printing trackers, as in the runbook's "Preview a backfill on a copy". It prints `found`, `queued` and `unchanged`. `queued` must equal what a Rust preview queues at the same moment, usually 0. A non-zero difference means a delivery-id format diverged. Do not cut over until it matches.
 
@@ -170,7 +170,7 @@ GROUP BY r.workflow;
 
 - **Is the Rust-side body dump allowed?** No longer needed. The `LogTracker` route worked ([#57](https://github.com/technicalpickles/brined-almanac/pull/57)).
 - **Throwaway repo for `write-sandbox`.** Yours to create.
-- **Which differences to accept.** Settled. The 4 parse gaps were fixed, not accepted ([#59](https://github.com/technicalpickles/brined-almanac/pull/59)). The workflow name stays underscored, and `compare` is to treat `-` and `_` as equal there.
+- **Which differences to accept.** Settled. The 4 parse gaps were fixed, not accepted ([#59](https://github.com/technicalpickles/brined-almanac/pull/59)). The workflow name stays underscored, and `compare` treats the three Rust names as the Go ones ([#60](https://github.com/technicalpickles/brined-almanac/pull/60)).
 - **Whether a shadow run should be a real deploy.** It starts as a local process beside prod. Anything that touches the prod stack is yours.
 - **Cutover store.** Decided: a fresh Go store, seeded as in "Cutover onto a fresh Go store". Still yours: running the read-only queries above, and when to cut over.
 

@@ -32,13 +32,13 @@ Ivy's Go library (`ivy/almanac`, branch `go-rewrite`) has no tagged release. bri
 - **`Resolve` effect.** `effect.Tracker` has `File` and `Ask` only. Rust `main` does not use a tracker `Resolve` either (it pins `b8bdefa`), so nothing here waits on it. A Go version exists on a local, unpushed `brined-go` branch of `ivy/almanac`, shelved until `Resolve` lands in Rust.
 - **Open:** whether the engine package is meant to be imported from outside the module.
 
-- **Hyphenated workflow names.** [steading-ai/almanac#36](https://github.com/steading-ai/almanac/pull/36) is open and not carried. Go keeps underscores (see go-touch-points.md).
+- **Hyphenated workflow names.** [steading-ai/almanac#36](https://github.com/steading-ai/almanac/pull/36) is open and not carried. Go keeps underscores, and `compare` maps the three Rust names to them ([#60](https://github.com/technicalpickles/brined-almanac/pull/60), see go-touch-points.md).
 
 Issue [#35](https://github.com/steading-ai/almanac/issues/35) and pull request #36 are open on steading-ai/almanac. Posting a branch, PR or comment there stays the operator's call.
 
 ## Parity status
 
-Each unit above passed its ported Rust tests. Whether the whole binary behaves as Rust's does is tracked in [go-port-parity-plan.md](go-port-parity-plan.md). As of [#59](https://github.com/technicalpickles/brined-almanac/pull/59), `compare` replays 22 recorded events through both sides and compares runs, effects, filed bodies and tracker keys. 14 cases disagree, every one on the workflow name alone (`host-state` against `host_state`), and none on a body or a key. Scans, write paths, the store and live traffic are not compared yet.
+Each unit above passed its ported Rust tests. Whether the whole binary behaves as Rust's does is tracked in [go-port-parity-plan.md](go-port-parity-plan.md). As of [#59](https://github.com/technicalpickles/brined-almanac/pull/59), `compare` replays 22 recorded events through both sides and compares runs, effects, filed bodies and tracker keys. As of [#60](https://github.com/technicalpickles/brined-almanac/pull/60), `compare` reports 0 of 22 disagreeing. It had reported 14, every one on the workflow name alone (`host-state` against `host_state`), and none on a body or a key. It now maps exactly those three Rust names to Go's, with no open entry in `docs/divergences.md`. Scans, write paths, the store and live traffic are not compared yet.
 
 ## Order rationale
 
