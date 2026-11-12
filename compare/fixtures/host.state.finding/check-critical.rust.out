@@ -1,0 +1,3 @@
+FILE key=run-1:0 target=task:brined-almanac title="host-state: gh-auth critical on mac since 2026-11-10 14:50Z"
+gh auth status: You are not logged into any GitHub hosts
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"host-state\", effects: [File { title: Title(\"host-state: gh-auth critical on mac since 2026-11-10 14:50Z\"), target: Slug(\"task:brined-almanac\"), body: Untrusted(..) }], denied: [] } recorded as [Applied]"],"simulate":"Queued","why":null}

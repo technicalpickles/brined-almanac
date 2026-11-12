@@ -1,0 +1,4 @@
+FILE key=run-1:0 target=task:brined-almanac title="security-alerts: alerts are off on 2 repositories"
+Dependabot alerts are off: technicalpickles/example-private
+Secret scanning is off: technicalpickles/example-public
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"security-alerts\", effects: [File { title: Title(\"security-alerts: alerts are off on 2 repositories\"), target: Slug(\"task:brined-almanac\"), body: Untrusted(..) }], denied: [] } recorded as [Applied]"],"simulate":"Queued","why":null}

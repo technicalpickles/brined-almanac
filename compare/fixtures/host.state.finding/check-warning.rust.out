@@ -1,0 +1,3 @@
+FILE key=run-1:0 target=task:brined-almanac title="host-state: disk warning on mac since 2026-11-10 14:50Z"
+disk: 91% used
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"host-state\", effects: [File { title: Title(\"host-state: disk warning on mac since 2026-11-10 14:50Z\"), target: Slug(\"task:brined-almanac\"), body: Untrusted(..) }], denied: [] } recorded as [Applied]"],"simulate":"Queued","why":null}

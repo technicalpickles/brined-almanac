@@ -1,1 +1,0 @@
-{"outcomes":["Ran { run_id: \"run-1\", workflow: \"bugsink-issues\", effects: [File { title: Title(\"Brent: brineworks/triage_apply mcp-timeout regressed (14 events)\"), target: Slug(\"technicalpickles/brineworks\"), body: Untrusted(..) }], denied: [] } recorded as [WouldApply]"],"simulate":"Queued","why":null}
