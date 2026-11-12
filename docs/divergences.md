@@ -21,17 +21,9 @@ One row per difference class and case set. Columns: `id | signature | cases`. Ca
 DV-WORKFLOW-NAME | run 1 workflow: rust "bugsink-issues", go "bugsink_issues" | bugsink.issue.unaddressed/body-only-empty-surfaces, bugsink.issue.unaddressed/body-only-ingest-dated, bugsink.issue.unaddressed/first, bugsink.issue.unaddressed/other-service, bugsink.issue.unaddressed/regressed
 DV-WORKFLOW-NAME | run 1 workflow: rust "host-state", go "host_state" | host.state.finding/check-critical, host.state.finding/check-dotted-project, host.state.finding/check-warning, host.state.finding/stale-never, host.state.finding/stale-since
 DV-WORKFLOW-NAME | run 1 workflow: rust "security-alerts", go "security_alerts" | security.alert.finding/coverage, security.alert.finding/overdue-every-severity, security.alert.finding/overdue-secrets-only, security.alert.finding/overdue
-DV-NO-SURFACES | ingest: rust "rejected", go "queued" | bugsink.issue.unaddressed/no-surfaces
-DV-NO-SURFACES | runs: rust (no run), go "bugsink_issues" ran [file to "technicalpickles/brineworks"] | bugsink.issue.unaddressed/no-surfaces
-DV-HOST-PROJECT | ingest: rust "rejected", go "queued" | host.state.finding/project-not-taskwarrior
-DV-HOST-PROJECT | runs: rust (no run), go "host_state" failed (reason#8f432b35) | host.state.finding/project-not-taskwarrior
-DV-HOST-SINCE | ingest: rust "rejected", go "queued" | host.state.finding/since-without-date
-DV-HOST-SINCE | runs: rust (no run), go "host_state" failed (reason#60bf8cee) | host.state.finding/since-without-date
-DV-SECURITY-PROJECT | ingest: rust "rejected", go "queued" | security.alert.finding/project-not-taskwarrior
-DV-SECURITY-PROJECT | runs: rust (no run), go "security_alerts" failed (reason#b8e48250) | security.alert.finding/project-not-taskwarrior
 ```
 
-Today that is 18 of 22 cases: 14 on the name (rows 1 to 3) and 4 on a parse gap, each of which shows up as two difference lines (the ingest status and the run).
+Today that is 14 of 22 cases, all on the name (rows 1 to 3). The four parse gaps, where Rust refused an event at ingest and Go queued it, are fixed: brined's parsers now refuse a missing or non-list `surfaces`, a project that is not a taskwarrior project, and a `since` that does not split at `T`, as Rust's do.
 
 Each id needs a section below with a `Status:` line and an `Owner:` line. The test checks that too.
 
@@ -46,52 +38,6 @@ Each id needs a section below with a `Status:` line and an `Owner:` line. The te
 - **Proposed resolution:** upstream PR allowing `-` in workflow names (issue [steading-ai/almanac#35](https://github.com/steading-ai/almanac/issues/35) raises it; the `upstream-prs` lane is measuring a fix). If upstream declines, accept and record the store consequence for cutover.
 - **Decision needed from Josh:** upstream PR or accept. If accept, say how a cutover handles names already in the Rust store.
 
-## DV-NO-SURFACES: Go queues an event Rust rejects
-
-- **Status:** open, proposed resolution pending.
-- **Owner:** Josh (decision). Proposed worker: a `go-port` lane for the fix on our side.
-- **Fixture:** `bugsink.issue.unaddressed/no-surfaces`. The event has every field except `surfaces`.
-- **Rust side:** `Unaddressed::parse` reads `/surfaces` with `p.field(...)?` (`src/workflows/bugsink_issues.rs:68`), so a missing field is malformed and the event is rejected at ingest.
-- **Go side:** `Unaddressed.Parse` (`brine/bugsinkissues.go:86`) reads the list with `wire.List` (`brine/bugsinkissues.go:97`). Upstream documents that "a missing list is empty" (`wire/payload.go:78-81`), and `readList` discards whether the pointer was found (`wire/payload.go:132-143`). The event is queued, and the run files an issue with an empty surfaces line.
-- **Effect:** Go would file an issue that Rust refuses. This is the only parse gap where the outputs differ in what gets filed.
-- **Proposed resolution:** fix, do not accept. The parity plan's view is the same. Two routes: reject in our `Parse` when `/surfaces` is absent (needs a way to see the raw pointer, which `wire.Payload` may not expose), or an upstream `wire` helper for a required list. Either route also needs a unit test with an event lacking the field.
-- **Decision needed from Josh:** our side or upstream helper. This one should not be accepted.
-
-## DV-HOST-PROJECT: project name checked at run time, not at ingest (host state)
-
-- **Status:** open, proposed resolution pending.
-- **Owner:** Josh (decision).
-- **Fixture:** `host.state.finding/project-not-taskwarrior`. The `project` field is a valid slug but not a valid taskwarrior project name.
-- **Rust side:** `HostFinding::parse` parses `/project` as a `Project` and returns malformed on failure (`src/workflows/host_state.rs:136-139`). The rule is `Project::from_str` (`src/routing.rs:16-38`). The event is rejected at ingest.
-- **Go side:** deliberately deferred. `HostFinding.Parse` (`brine/hoststate.go:92-108`) only reads a slug, and its comment (`brine/hoststate.go:89-91`) says a parser can refuse only a field whose type fails to decode. The check runs later in `FilingOf` via `routing.ParseProject` (`brine/hoststate.go:140-141`, `routing/project.go:21-40`). The event is queued and the run fails at the `filing` step.
-- **Effect:** nothing is filed on either side. Go leaves a failed run where Rust leaves a rejected event. The rule itself is identical (`routing/project.go` ports `src/routing.rs`).
-- **Proposed resolution:** accept, provided a failed run is harmless in the store (needs a check in the `store-parity` lane). The alternative is a parse-time validation hook upstream, which is a bigger change for no change in what gets filed.
-- **Decision needed from Josh:** accept, or ask for parse-time validation upstream.
-
-## DV-HOST-SINCE: since checked at run time, not at ingest (host state)
-
-- **Status:** open, proposed resolution pending.
-- **Owner:** Josh (decision).
-- **Fixture:** `host.state.finding/since-without-date`. The `since` value splits at `T` but its date part is empty, so it is not a slug.
-- **Rust side:** `HostFinding::parse` runs `split(since)` and returns malformed on `None` (`src/workflows/host_state.rs:154-156`; `split` is `src/workflows/host_state.rs:217-224`). Rejected at ingest.
-- **Go side:** `Parse` only requires `since` on a check finding (`brine/hoststate.go:95-99`). `splitSince` (`brine/hoststate.go:122-136`) runs from `FilingOf` (`brine/hoststate.go:150-155`). The event is queued and the run fails at the `filing` step.
-- **Effect:** same shape as DV-HOST-PROJECT. Nothing is filed on either side.
-- **Proposed resolution:** accept for the same reason, or fix in one move with DV-HOST-PROJECT if upstream gets a parse-time hook.
-- **Decision needed from Josh:** same as DV-HOST-PROJECT. Decide the pair together.
-
-## DV-SECURITY-PROJECT: project name checked at run time, not at ingest (security alerts)
-
-- **Status:** open, proposed resolution pending.
-- **Owner:** Josh (decision).
-- **Fixture:** `security.alert.finding/project-not-taskwarrior`.
-- **Rust side:** `SecurityFinding::parse` parses `/project` as a `Project` (`src/workflows/security_alerts.rs:527-532`). Rejected at ingest.
-- **Go side:** `SecurityFinding.Parse` (`brine/securityalerts.go:86-100`, comment at `brine/securityalerts.go:83-85`) reads a slug. `fileSecurity` runs `routing.ParseProject` (`brine/securityalerts.go:109`), so the run fails at the `filing` step.
-- **Effect:** same as DV-HOST-PROJECT.
-- **Proposed resolution:** accept, decided together with DV-HOST-PROJECT.
-- **Decision needed from Josh:** same as DV-HOST-PROJECT.
-
 ## Open decisions in one place
 
 1. Workflow names: upstream PR (preferred, clears 14 cases) or accept.
-2. `no-surfaces`: fix. Not for acceptance.
-3. The three run-time versus ingest-time project and since checks: accept as one decision, or ask for a parse-time hook upstream.

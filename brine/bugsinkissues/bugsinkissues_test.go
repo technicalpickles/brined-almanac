@@ -241,6 +241,22 @@ func TestAPayloadMissingAFieldIsMalformedAtIt(t *testing.T) {
 	}
 }
 
+// Rust reads /surfaces as a required list, so anything but a list is malformed there, where a
+// plain list read would take it as empty.
+func TestSurfacesThatAreNotAListAreMalformed(t *testing.T) {
+	malformedAt(t, event(t, func(p map[string]any) { delete(p, "surfaces") }), "/surfaces")
+	for _, value := range []any{nil, "x", map[string]any{}} {
+		malformedAt(t, event(t, func(p map[string]any) { p["surfaces"] = value }), "/surfaces")
+	}
+}
+
+func TestAnEmptySurfacesListParses(t *testing.T) {
+	e, err := wire.Parse[brine.Unaddressed](event(t, func(p map[string]any) { p["surfaces"] = []any{} }))
+	if err != nil || len(e.Surfaces) != 0 {
+		t.Fatalf("%+v %v", e, err)
+	}
+}
+
 func TestAPayloadWithAFieldOfTheWrongShapeIsMalformedAtIt(t *testing.T) {
 	malformedAt(t, event(t, func(p map[string]any) { p["service"] = "has a space" }), "/service")
 	malformedAt(t, event(t, func(p map[string]any) { p["count"] = "many" }), "/count")

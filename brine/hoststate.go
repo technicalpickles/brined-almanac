@@ -86,25 +86,58 @@ type HostFinding struct {
 func (HostFinding) Kind() string        { return "host.state.finding" }
 func (HostFinding) AlsoKinds() []string { return nil }
 
-// Parse requires check, status and since on a check finding. That a project is a taskwarrior
-// project and a since splits at T is the filing observer's to refuse: a parser here can only
-// refuse a field whose type fails to decode.
+// Parse requires check, status and since on a check finding, a project that is a taskwarrior
+// project, and a since, when present, that splits at T, as Rust's parse does.
 func (e *HostFinding) Parse(p *wire.Payload) {
 	e.Type = wire.Member[FindingKind](p, "/kind")
 	e.Project = wire.Field[hostile.Slug](p, "/project")
+	_ = wire.Field[taskProject](p, "/project")
 	if e.Type == KindCheck {
 		check := wire.Field[hostile.Slug](p, "/check")
 		status := wire.Field[hostile.Slug](p, "/status")
 		since := wire.Field[hostile.Slug](p, "/since")
+		_ = wire.Field[splitsAtT](p, "/since")
 		e.Check, e.Status, e.Since = &check, &status, &since
 	} else {
 		e.Check = wire.OptionalField[hostile.Slug](p, "/check")
 		e.Status = wire.OptionalField[hostile.Slug](p, "/status")
 		e.Since = wire.OptionalField[hostile.Slug](p, "/since")
+		_ = wire.OptionalField[splitsAtT](p, "/since")
 	}
 	e.Subject = wire.Field[hostile.Slug](p, "/subject")
 	e.Host = wire.Field[hostile.Slug](p, "/host")
 	e.Body = p.Text("/body")
+}
+
+// taskProject decodes only a slug that is a taskwarrior project, so a parser can refuse any
+// other.
+type taskProject bool
+
+func (v *taskProject) UnmarshalJSON(raw []byte) error {
+	var slug hostile.Slug
+	if err := json.Unmarshal(raw, &slug); err != nil {
+		return errors.New("not a slug")
+	}
+	if _, err := routing.ParseProject(slug.String()); err != nil {
+		return errors.New("not a taskwarrior project")
+	}
+	*v = true
+	return nil
+}
+
+// splitsAtT decodes only a slug that splits at T into two slugs, so Parse can refuse any other.
+type splitsAtT bool
+
+func (v *splitsAtT) UnmarshalJSON(raw []byte) error {
+	var slug hostile.Slug
+	if err := json.Unmarshal(raw, &slug); err != nil {
+		return errors.New("not a slug")
+	}
+	if _, err := splitSince(slug); err != nil {
+		return errors.New("does not split at T")
+	}
+	*v = true
+	return nil
 }
 
 // Since is a finding's since split for a title: 2026-11-10 and 14:50Z.

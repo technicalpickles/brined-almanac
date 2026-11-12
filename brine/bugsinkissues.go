@@ -3,6 +3,7 @@ package brine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -94,6 +95,7 @@ func (e *Unaddressed) Parse(p *wire.Payload) {
 	e.FirstSeen = wire.Field[hostile.Slug](p, "/first_seen")
 	e.LastSeen = wire.Field[hostile.Slug](p, "/last_seen")
 	e.IngestDated = wire.Field[bool](p, "/ingest_dated")
+	_ = wire.Field[aList](p, "/surfaces")
 	names := wire.List[hostile.Slug](p, "/surfaces", "/name")
 	counts := wire.List[uint64](p, "/surfaces", "/count")
 	for i := range min(len(names), len(counts)) {
@@ -102,6 +104,20 @@ func (e *Unaddressed) Parse(p *wire.Payload) {
 	e.Sessions = wire.Field[uint64](p, "/sessions")
 	e.Link = wire.Field[hostile.Slug](p, "/link")
 	e.Reason = p.Text("/reason")
+}
+
+// aList decodes only a JSON list, empty or not. [wire.Field] already refuses a missing or null
+// value, so reading /surfaces as an aList refuses anything but a list, as Rust's parse does,
+// where [wire.List] would read it as empty.
+type aList bool
+
+func (l *aList) UnmarshalJSON(raw []byte) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return errors.New("not a list")
+	}
+	*l = true
+	return nil
 }
 
 // IssueFiling is where an unaddressed issue files, and what its issue says.

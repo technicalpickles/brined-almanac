@@ -179,18 +179,23 @@ func TestEachDifferenceIsListedAndExitsNonZero(t *testing.T) {
 }
 
 func TestAnEventOnlyOneSideRefusesShowsWhatTheOtherRan(t *testing.T) {
-	bad := strings.Replace(stale, `"brined-almanac"`, `"Bad"`, 1)
-	dir, _ := oneCase(t, "host.state.finding", bad, recorded(t, "Rejected"))
+	dir, _ := oneCase(t, "host.state.finding", stale, recorded(t, "Rejected"))
 	out, err := run(t, "--format", "json", "compare", "--fixtures", dir)
 	if err == nil {
 		t.Fatal("agreed")
 	}
-	var report compare.Report
+	var report struct {
+		Cases []struct {
+			Differences []string `json:"differences"`
+		} `json:"cases"`
+		Disagreements int `json:"disagreements"`
+	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
 	got := report.Cases[0].Differences
-	if report.Disagreements != 1 || len(got) != 2 || got[0] != `ingest: rust "rejected", go "queued"` || !strings.HasPrefix(got[1], `runs: rust (no run), go "host_state" failed (`) {
+	if report.Disagreements != 1 || len(got) != 2 || got[0] != `ingest: rust "rejected", go "queued"` ||
+		got[1] != `runs: rust (no run), go "host_state" ran [file "host-state: no report from mac" to "task:brined-almanac"]` {
 		t.Errorf("%+v", report)
 	}
 }

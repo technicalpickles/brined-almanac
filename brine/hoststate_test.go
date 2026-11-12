@@ -191,23 +191,32 @@ func TestASinceThatIsNotASlugIsMalformed(t *testing.T) {
 	wantMalformed(t, payload, "/since")
 }
 
-// Rust refuses these at parse, as malformed at /project and /since. A Go parser cannot refuse a
-// field that decodes, so they parse, and the filing observer refuses them.
-func TestAFindingTheFilingCannotPlaceIsRefused(t *testing.T) {
-	cases := map[string]string{"project": "Bad", "since": "T"}
-	for _, since := range []string{"2026-11-10T", "T14:50Z", "2026-11-10"} {
-		cases["since "+since] = since
-	}
-	for name, value := range cases {
+func TestAProjectThatIsASlugButNotATaskProjectIsMalformed(t *testing.T) {
+	for _, kind := range []string{"check", "stale"} {
 		payload := firstEvent(t)
-		payload[strings.Fields(name)[0]] = value
-		event, err := parse(t, payload)
-		if err != nil {
-			t.Fatalf("%s: parse refused it: %v", name, err)
+		payload["kind"] = kind
+		payload["project"] = "Bad"
+		wantMalformed(t, payload, "/project")
+	}
+}
+
+func TestASinceThatDoesNotSplitAtTIsMalformed(t *testing.T) {
+	for _, kind := range []string{"check", "stale"} {
+		for _, since := range []string{"T", "2026-11-10T", "T14:50Z", "2026-11-10"} {
+			payload := firstEvent(t)
+			payload["kind"] = kind
+			payload["since"] = since
+			wantMalformed(t, payload, "/since")
 		}
-		if _, err := brine.FilingOf(event); err == nil {
-			t.Errorf("%s: the filing accepted it", name)
-		}
+	}
+}
+
+func TestAStaleFindingWithoutSinceParses(t *testing.T) {
+	payload := firstEvent(t)
+	payload["kind"] = "stale"
+	delete(payload, "since")
+	if event, err := parse(t, payload); err != nil || event.Since != nil {
+		t.Fatalf("%+v %v", event, err)
 	}
 }
 

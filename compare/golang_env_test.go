@@ -14,13 +14,16 @@ func TestGolangProvidersIgnoreProcessEnv(t *testing.T) {
 		"GITHUB_TOKEN", "GH_TOKEN", "GITHUB_ALERTS_TOKEN",
 		"BUGSINK_DSN", "BUGSINK_API_TOKEN", "BUGSINK_CURSOR", "DATABASE_URL",
 		"BRENT_TRANSCRIPTS", "HOST_STATE_REPORTS", "LOCAL_TIERS", "TASKCHAMPION_SYNC_URL",
+		"TASKCHAMPION_CLIENT_ID", "TASKCHAMPION_ENCRYPTION_SECRET", "TASKCHAMPION_REPLICA_DIR",
 	}
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	for _, name := range leaked {
 		value := "http://dummy:dummy@127.0.0.1:1/1"
 		switch name {
-		case "BRENT_TRANSCRIPTS", "HOST_STATE_REPORTS", "LOCAL_TIERS":
+		case "BRENT_TRANSCRIPTS", "HOST_STATE_REPORTS", "LOCAL_TIERS", "TASKCHAMPION_REPLICA_DIR":
 			value = missing
+		case "TASKCHAMPION_CLIENT_ID":
+			value = "6f0f6d2a-3a55-4a47-9d1c-0d9c3a1b7e01"
 		}
 		t.Setenv(name, value)
 	}
