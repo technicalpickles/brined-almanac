@@ -25,6 +25,7 @@ Each lane gets its own worktree and branch off `go-port` (`go-port-<lane>`), one
 | `write-sandbox` | The write paths do what Rust's do | new `sandbox/`, a runbook | A sandbox target |
 | `store-parity` | Keys, dedupe, budgets and restarts line up | tests, new `compare/store*` | The outbox-key pin |
 | `divergences` | Every accepted gap is written down | new `docs/divergences.md` | The 4 parse gaps and the name |
+| `upstream-prs` | The gaps that only upstream can close get closed | patches prepared in a scratch clone of steading-ai/almanac | The boundary list and workflow names |
 
 ### body-parity
 
@@ -70,9 +71,20 @@ Needs Josh to create the throwaway repo, since creating one is not something an 
 2. Budgets: the Go models declare `PerHour(1000)` like Rust. Confirm the budget trips at the same count and recovers the same way, restart included.
 3. Names: store scopes and budgets key on the workflow name. If hyphens stay disallowed, write down what that does to a cutover.
 
+### upstream-prs
+
+Josh has write access to steading-ai/almanac, so the limits that sit in the library are patches, not requests. Candidates, in the order they unblock the most:
+
+1. **Hyphenated workflow names.** The checker accepts `^[a-z][a-z0-9_]*$` (`check/check.go:88`). Allowing `-` clears 14 of the 18 `compare` disagreements. Check first whether anything keys on the name in a way that makes `-` unsafe (store scopes, metric or file names).
+2. **An extensible `hostilevet` boundary list.** The list in `tools/hostilevet/taint/boundary.go` is hardcoded to `patch` and `github`. A flag or a module-owned list would clear three of the six findings.
+3. **`github.Retrying` reaching a second call, a default config path, and a read-only default.** Smaller, and each is a field or an option.
+4. **Unique outbox keys** ([#34](https://github.com/steading-ai/almanac/issues/34)). This one is the maintainer's design, so offer a patch only if she asks for one.
+
+The lane works in a scratch clone of steading-ai/almanac, not in this repo, with one branch per patch, based on `go-rewrite` since that is the code brined imports. For each it writes the patch, the tests that upstream's own suite requires, and a pull request body in Josh's voice, then stops. Pushing a branch or opening the pull request is Josh's call, one patch at a time, and the agent never does either. When one is merged, brined moves its pin and deletes the workaround.
+
 ### divergences
 
-Settle the 4 parse gaps and the name mismatch. For each, one of: fix on our side, ask upstream (issue [#35](https://github.com/steading-ai/almanac/issues/35) already has the name and boundary asks), or accept. The result is `docs/divergences.md`, which `compare`'s golden file is checked against, so an unlisted difference fails.
+Settle the 4 parse gaps and the name mismatch. For each, one of: fix on our side, send a pull request upstream (Josh has write access to steading-ai/almanac, and issue [#35](https://github.com/steading-ai/almanac/issues/35) already raises the name and boundary asks), or accept. The result is `docs/divergences.md`, which `compare`'s golden file is checked against, so an unlisted difference fails.
 
 ## Decisions for Josh
 
