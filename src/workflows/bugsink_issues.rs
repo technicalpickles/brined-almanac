@@ -74,9 +74,13 @@ impl Event for Unaddressed {
 }
 
 /// An issue wants a GitHub issue when nobody has resolved or muted it and it has as many events
-/// as its class needs.
+/// as its class needs. A class with no threshold never files.
 pub fn unaddressed(issue: &Issue, class: &str) -> bool {
-    !issue.resolved && !issue.muted && issue.count >= class_named(class).threshold
+    !issue.resolved
+        && !issue.muted
+        && class_named(class)
+            .threshold
+            .is_some_and(|needed| issue.count >= needed)
 }
 
 fn scanned(

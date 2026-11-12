@@ -36,15 +36,31 @@ fn issue(count: u64, resolved: bool, muted: bool) -> Issue {
 
 #[test]
 fn an_issue_wants_filing_at_its_class_threshold_and_not_one_below() {
-    for class in CLASSES {
+    for class in CLASSES.iter() {
+        let Some(threshold) = class.threshold else {
+            continue;
+        };
         assert!(
-            unaddressed(&issue(class.threshold, false, false), class.name),
+            unaddressed(&issue(threshold, false, false), class.name),
             "{} at threshold",
             class.name
         );
         assert!(
-            !unaddressed(&issue(class.threshold - 1, false, false), class.name),
+            !unaddressed(&issue(threshold - 1, false, false), class.name),
             "{} one below",
+            class.name
+        );
+    }
+}
+
+#[test]
+fn a_class_with_no_threshold_never_files_however_loud() {
+    let silent: Vec<_> = CLASSES.iter().filter(|c| c.threshold.is_none()).collect();
+    assert!(!silent.is_empty());
+    for class in silent {
+        assert!(
+            !unaddressed(&issue(100_000, false, false), class.name),
+            "{}",
             class.name
         );
     }
