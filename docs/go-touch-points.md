@@ -67,6 +67,7 @@ Found by importing `go-rewrite` at `86122f2` from outside its module. Running `h
 - **Lone-surrogate JSON escapes.** serde_json rejects `\ud800`, Go's decoder accepts it (`transcript`).
 - **Required JSON fields.** serde rejects a response missing a field, Go leaves it zero (`bugsinkapi`).
 - **Error text.** Messages that came from the OS or the decoder differ in wording, with the same prefixes.
+- **The first malformed pointer, when several fields are bad.** Rust's `host_state` decodes `/check`, `/status` and `/since` as optional slugs before it checks presence, so an event missing `/check` with a non-slug `/since` is malformed at `/since` in Rust and at `/check` in Go. Both refuse it. Inferred from reading both parsers, not run. `compare` records only the ingest status, so it cannot see this.
 - **The `reveal` imports in `bugsink` and `wiring`** (the printing tracker), which `hostilevet` flags until the boundary question above is settled. `securityalerts/plain.go` is the same kind of finding, for a different reason (see "Hostile text cannot go from a scan into an event").
 
 ## Carried changes
