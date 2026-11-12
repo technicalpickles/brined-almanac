@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/ivy/almanac/workflow"
 
 	"github.com/technicalpickles/brined-almanac/brine"
+	"github.com/technicalpickles/brined-almanac/routing"
 	"github.com/technicalpickles/brined-almanac/wiring"
 )
 
@@ -24,16 +26,16 @@ type Golang struct {
 	providers *providers.Set
 }
 
-// readOnly is how the binary runs until cutover: a dry run that refuses every write.
-var readOnly = runtime.Switches{Mode: effect.DryRun, ReadOnly: true}
+// live is how the Rust side is run: ALMANAC_MODE=live, and in Go, ALMANAC_READ_ONLY=0.
+var live = runtime.Switches{Mode: effect.Live}
 
-// noEnv is an empty environment, as the Rust side is given.
+// noEnv is an empty environment. The Rust side is given only PATH and the mode.
 func noEnv(string) (string, bool) { return "", false }
 
 // NewGolang makes the models runnable, as the binary does when it starts, with the providers
 // the binary builds from an empty environment.
 func NewGolang(models []model.Workflow) (Golang, error) {
-	set, err := wiring.Providers(noEnv, readOnly)
+	set, err := wiring.Providers(noEnv, live)
 	if err != nil {
 		return Golang{}, err
 	}
@@ -49,13 +51,17 @@ func NewGolang(models []model.Workflow) (Golang, error) {
 }
 
 // Side is what the Go side made of c: a fresh runtime, as a fresh process would have, sent c
-// as simulate sends a file.
+// as simulate sends a file. Its LogTracker prints into a buffer of the case's own, which is the
+// tracker the binary builds with no token on either side of the router.
 func (g Golang) Side(ctx context.Context, c Case) (Side, error) {
 	payload, err := c.Payload()
 	if err != nil {
 		return Side{}, err
 	}
-	rt := runtime.New(g.workflows, g.providers, runtime.Switched(readOnly), runtime.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	var printed bytes.Buffer
+	logs := wiring.LogTracker{Out: &printed}
+	set := providers.Provide[effect.Tracker](g.providers.Clone(), routing.Router{Issues: logs, Tasks: logs})
+	rt := runtime.New(g.workflows, set, runtime.Switched(live), runtime.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	if err := rt.Validate(); err != nil {
 		return Side{}, err
 	}
@@ -74,7 +80,9 @@ func (g Golang) Side(ctx context.Context, c Case) (Side, error) {
 		return Side{}, err
 	}
 	side := Side{Ingest: string(ingest), Runs: []Run{}}
+	var runIDs []string
 	for _, o := range outcomes {
+		runIDs = append(runIDs, o.RunID)
 		run := Run{Workflow: o.Workflow, Result: o.Result.String(), Reason: o.Reason}
 		for _, e := range o.Effects {
 			run.Effects = append(run.Effects, effectOf(e))
@@ -96,6 +104,13 @@ func (g Golang) Side(ctx context.Context, c Case) (Side, error) {
 			}
 		}
 		side.Runs = append(side.Runs, run)
+	}
+	filings, err := parseFilings(printed.String())
+	if err != nil {
+		return Side{}, fmt.Errorf("the Go LogTracker %w", err)
+	}
+	if err := fileUnder(side.Runs, runIDs, filings); err != nil {
+		return Side{}, fmt.Errorf("the Go LogTracker %w", err)
 	}
 	return side, nil
 }

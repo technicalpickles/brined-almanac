@@ -2,16 +2,18 @@
 // brined-almanac and sets what each made of them side by side. Agreement is the evidence a
 // workflow has ported (docs/adrs/0001-port-to-go-alongside-rust.md).
 //
-// Both sides are driven the way `simulate KIND FILE --dry-run` drives them, with an empty
-// environment: the Rust side through its binary, or a recording of what that printed, and the
-// Go side through Ivy's runtime in this process, with the models the binary runs. What is
-// compared is what the Rust simulate prints: how the event was taken, and each run's workflow,
-// result, reason, effects, denied effects and recorded statuses, with runs in workflow order.
+// Both sides are driven the way a live `simulate KIND FILE` drives them, with ALMANAC_MODE=live
+// and nothing else in the environment: no token and no DATABASE_URL, so every filing goes to a
+// LogTracker that prints it, and the store is in memory. The Rust side runs through its binary,
+// or a recording of what that printed, and the Go side through Ivy's runtime in this process,
+// with the models the binary runs and its LogTracker. What is compared is how the event was
+// taken, each run's workflow, result, reason, effects, denied effects and recorded statuses,
+// with runs in workflow order, and each filing's tracker key and body as the LogTracker printed
+// them. A body carries the event's text, so a difference in one is shown as line numbers and
+// hashes.
 //
-// Two things are not compared. A File's body, because Rust prints it as Untrusted(..), so a
-// field that reaches only the body cannot show a difference here. And Rust's `why`, because it
-// is a fixed sentence per ingest, so the ingest already carries it: a parse failure is
-// rejected and an event no workflow takes is unrouted.
+// Rust's `why` is not compared, because it is a fixed sentence per ingest, so the ingest
+// already carries it: a parse failure is rejected and an event no workflow takes is unrouted.
 package compare
 
 import (
@@ -42,6 +44,8 @@ type Run struct {
 	Recorded []string `json:"recorded,omitempty"`
 	// Reason is why a run stopped, or the error it failed with.
 	Reason string `json:"reason,omitempty"`
+	// Filed is what the run's filings printed, in the order they were filed.
+	Filed []Filed `json:"filed,omitempty"`
 }
 
 // Effect is the part of an effect both sides print.
@@ -67,8 +71,10 @@ type Case struct {
 	Path string `json:"-"`
 }
 
-// recordingSuffix ends the file beside a case that holds what the Rust binary printed for it.
-const recordingSuffix = ".rust.json"
+// recordingSuffix ends the file beside a case that holds what the Rust binary printed for it:
+// its LogTracker's filings, then simulate's JSON on the last line. It is not .json, so Cases
+// never reads a recording as an event.
+const recordingSuffix = ".rust.out"
 
 // Cases are the events under dir, one directory per kind, in name order.
 func Cases(dir string) ([]Case, error) {
@@ -78,9 +84,6 @@ func Cases(dir string) ([]Case, error) {
 	}
 	var out []Case
 	for _, path := range paths {
-		if strings.HasSuffix(path, recordingSuffix) {
-			continue
-		}
 		kind := filepath.Base(filepath.Dir(path))
 		out = append(out, Case{Name: kind + "/" + strings.TrimSuffix(filepath.Base(path), ".json"), Kind: kind, Path: path})
 	}
@@ -170,6 +173,18 @@ func differences(rust, golang Side) []string {
 		differ(at+"recorded", strings.Join(r.Recorded, ", "), strings.Join(g.Recorded, ", "))
 		if !slices.Equal(r.Effects, g.Effects) {
 			out = append(out, fmt.Sprintf("%seffects: rust %s, go %s", at, effectsOf(r.Effects), effectsOf(g.Effects)))
+		}
+		if len(r.Filed) != len(g.Filed) {
+			out = append(out, fmt.Sprintf("%sfiled: rust %d, go %d", at, len(r.Filed), len(g.Filed)))
+			continue
+		}
+		for j := range r.Filed {
+			rf, gf := r.Filed[j], g.Filed[j]
+			filing := fmt.Sprintf("%sfiling %d ", at, j+1)
+			differ(filing+"key", rf.Key, gf.Key)
+			if !slices.Equal(rf.Body, gf.Body) {
+				out = append(out, filing+"body: "+bodyDifference(rf.Body, gf.Body))
+			}
 		}
 	}
 	return out

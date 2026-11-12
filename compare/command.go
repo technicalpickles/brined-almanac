@@ -41,11 +41,12 @@ func Command(models []model.Workflow) *cobra.Command {
 		Short: "Send each recorded event through the Go and Rust workflows and print where they disagree.",
 		Long: `Send each recorded event through the Go and Rust workflows and print where they disagree.
 
-Each side's ingest and runs are compared: workflow, result, reason, effects with their titles and
-targets, denied effects, and recorded statuses. A filed body is not compared, because Rust prints it
-only as Untrusted(..). A case whose name starts with body-only differs from another case only in
-fields that reach the body, so it shows the event still parses and files the same task, and nothing
-about the body itself.`,
+Both sides run live with no token and no DATABASE_URL, so each filing goes to a LogTracker that
+prints it. Each side's ingest and runs are compared: workflow, result, reason, effects with their
+titles and targets, denied effects, recorded statuses, and each filing's tracker key and body. A
+body is shown only as the numbers of the lines that differ and a hash of each side, never its text.
+A case whose name starts with body-only differs from another case only in fields that reach the
+body, so only the body comparison can tell it apart.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if record && binary == "" {

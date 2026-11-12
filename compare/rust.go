@@ -85,11 +85,13 @@ func refuseUnrouting(c Case, now Side) error {
 		c.Name, was.Ingest, c.Recording())
 }
 
-// simulate runs `BIN --format json simulate KIND FILE --dry-run` with nothing in its
-// environment but PATH, so it reaches nothing and reads only the shared config files.
+// simulate runs `BIN --format json simulate KIND FILE` live, with nothing in its environment but
+// PATH and ALMANAC_MODE=live. With no token and no DATABASE_URL, the binary files through its
+// LogTracker into an in-memory store, so it reaches nothing, reads only the shared config files,
+// and prints each body it would file.
 func (r Rust) simulate(ctx context.Context, c Case) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, r.Binary, "--format", "json", "simulate", c.Kind, c.Path, "--dry-run")
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	cmd := exec.CommandContext(ctx, r.Binary, "--format", "json", "simulate", c.Kind, c.Path)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "ALMANAC_MODE=live"}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -98,34 +100,52 @@ func (r Rust) simulate(ctx context.Context, c Case) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// simulated is what the Rust `--format json simulate` prints: the ingest as its {:?}, and each
-// outcome as its {:?}, followed for a run by " recorded as [Status, ...]".
+// simulated is what the Rust `--format json simulate` prints on its last line: the ingest as its
+// {:?}, and each outcome as its {:?}, followed for a run by " recorded as [Status, ...]".
 type simulated struct {
 	Simulate string   `json:"simulate"`
 	Outcomes []string `json:"outcomes"`
 }
 
+// parseSimulate reads what the Rust binary printed: its LogTracker's filings, then simulate's
+// JSON on the last line.
 func parseSimulate(text []byte) (Side, error) {
+	printed, last := "", strings.TrimSuffix(string(text), "\n")
+	if at := strings.LastIndexByte(last, '\n'); at >= 0 {
+		printed, last = last[:at+1], last[at+1:]
+	}
 	var s simulated
-	if err := json.Unmarshal(text, &s); err != nil {
-		return Side{}, fmt.Errorf("the Rust output is not simulate's JSON: %w", err)
+	if err := json.Unmarshal([]byte(last), &s); err != nil {
+		return Side{}, fmt.Errorf("the Rust output does not end in simulate's JSON: %w", err)
 	}
 	side := Side{Ingest: kebab(s.Simulate), Runs: []Run{}}
+	var runIDs []string
 	for _, line := range s.Outcomes {
-		run, err := parseOutcome(line)
+		run, id, err := parseOutcome(line)
 		if err != nil {
 			return Side{}, err
 		}
 		side.Runs = append(side.Runs, run)
+		runIDs = append(runIDs, id)
+	}
+	filings, err := parseFilings(printed)
+	if err != nil {
+		return Side{}, fmt.Errorf("the Rust binary %w", err)
+	}
+	if err := fileUnder(side.Runs, runIDs, filings); err != nil {
+		return Side{}, fmt.Errorf("the Rust binary %w", err)
 	}
 	return side, nil
 }
 
-func parseOutcome(line string) (Run, error) {
+// parseOutcome is the run an outcome line describes, and its run id, empty for an outcome with
+// no run.
+func parseOutcome(line string) (Run, string, error) {
 	outcome, rest, err := parseDebug(line)
 	if err != nil {
-		return Run{}, err
+		return Run{}, "", err
 	}
+	runID := outcome.fields["run_id"].str()
 	run := Run{Result: kebab(outcome.name), Workflow: outcome.fields["workflow"].str()}
 	switch outcome.name {
 	case "Stopped":
@@ -148,13 +168,13 @@ func parseOutcome(line string) (Run, error) {
 	if statuses, ok := strings.CutPrefix(strings.TrimSpace(rest), "recorded as "); ok {
 		list, _, err := parseDebug(statuses)
 		if err != nil {
-			return Run{}, err
+			return Run{}, "", err
 		}
 		for _, status := range list.items {
 			run.Recorded = append(run.Recorded, kebab(status.name))
 		}
 	}
-	return run, nil
+	return run, runID, nil
 }
 
 // denied is a denied effect as both sides can say it: its kind, and an Attest's state. Rust
