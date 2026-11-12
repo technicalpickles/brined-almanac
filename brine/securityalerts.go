@@ -80,12 +80,12 @@ type SecurityFinding struct {
 func (SecurityFinding) Kind() string        { return "security.alert.finding" }
 func (SecurityFinding) AlsoKinds() []string { return nil }
 
-// Parse refuses a kind that is neither overdue nor coverage. That a project is a taskwarrior
-// project is the filing observer's to refuse: a parser here can only refuse a field whose type
-// fails to decode.
+// Parse refuses a kind that is neither overdue nor coverage, and a project that is not a
+// taskwarrior project, as Rust's parse does.
 func (e *SecurityFinding) Parse(p *wire.Payload) {
 	e.Type = wire.Member[AlertKind](p, "/kind")
 	e.Project = wire.Field[hostile.Slug](p, "/project")
+	_ = wire.Field[taskProject](p, "/project")
 	e.Subject = wire.Field[hostile.Slug](p, "/subject")
 	e.Critical = wire.Field[uint64](p, "/critical")
 	e.High = wire.Field[uint64](p, "/high")

@@ -302,18 +302,10 @@ func TestAPayloadMissingAFieldIsMalformedAtIt(t *testing.T) {
 	}
 }
 
-func TestAProjectThatIsASlugButNotATaskProjectParsesAndFailsTheRun(t *testing.T) {
-	bad := overdueEvent(t, func(p map[string]any) { p["project"] = "Bad..Name" })
-	if _, err := wire.Parse[brine.SecurityFinding](bad); err != nil {
-		t.Fatalf("it is malformed in Rust, and parses here: %v", err)
-	}
-	w, err := securityalerts.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Walk(context.Background(), walktest.Cx{}, bad); err == nil {
-		t.Fatal("the run filed to a project that does not exist")
-	}
+func TestAProjectThatIsASlugButNotATaskProjectIsMalformed(t *testing.T) {
+	bad := func(p map[string]any) { p["project"] = "Bad..Name" }
+	malformedAt(t, overdueEvent(t, bad), "/project")
+	malformedAt(t, coverageEvent(t, bad), "/project")
 }
 
 func TestAPayloadReadsBackAsTheEventItWas(t *testing.T) {
