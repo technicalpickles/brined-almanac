@@ -16,6 +16,12 @@ static SERVER_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"'serverName': '([^']+)'").expect("serverName regex"));
 static TOOL_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"'toolName': '([^']+)'").expect("toolName regex"));
+static FENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?s)<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*Source:[^\n]*\n---\n(.*?)\n?<<<END_EXTERNAL_UNTRUSTED_CONTENT",
+    )
+    .expect("fence regex")
+});
 static SURFACE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^agent-[^-]+-([a-z]+)").expect("surface regex"));
 
@@ -98,6 +104,28 @@ impl At {
 /// a question about it (`narrow`) or a bounded excerpt (`excerpt`).
 pub struct Sample(String);
 
+/// The error itself, without OpenClaw's wrapping: the `error` of a JSON object, or else the text
+/// blocks of its `result.content`, then whatever is inside an untrusted-content fence. The
+/// fence's preamble is boilerplate that would otherwise be classified and quoted in place of the
+/// error, and JSON escapes the quotes a pattern looks for.
+fn unwrap(raw: &str) -> String {
+    let error = match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Object(fields)) => match &fields.get("error") {
+            Some(Value::String(error)) => error.clone(),
+            _ => fields
+                .get("result")
+                .map(content_text)
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| raw.to_string()),
+        },
+        _ => raw.to_string(),
+    };
+    match FENCE.captures(&error) {
+        Some(inside) => inside[1].to_string(),
+        None => error,
+    }
+}
+
 impl fmt::Debug for Sample {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Sample(..)")
@@ -115,15 +143,10 @@ impl Sample {
         Excerpt(self.0.chars().take(Self::MAX).collect())
     }
 
-    /// The one line that says why: the `error` of a JSON object, the line after a `Command
-    /// failed:` header, or else the first line with text. At most 200 characters.
+    /// The one line that says why: the line after a `Command failed:` header, or else the first
+    /// line with text. At most 200 characters.
     pub fn reason(&self) -> Excerpt {
-        let parsed = serde_json::from_str::<Value>(&self.0).ok();
-        let text = match parsed.as_ref().and_then(|v| v["error"].as_str()) {
-            Some(error) => error,
-            None => &self.0,
-        };
-        let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+        let mut lines = self.0.lines().map(str::trim).filter(|l| !l.is_empty());
         let line = match (lines.next(), lines.next()) {
             (Some(first), Some(second)) if first.starts_with("Command failed:") => second,
             (Some(first), _) => first,
@@ -231,7 +254,7 @@ pub fn read(dir: &Path) -> Result<Read, ReadError> {
                 session: session.clone(),
                 service: slug(&service),
                 tool: slug(&tool),
-                text: Sample(text),
+                text: Sample(unwrap(&text)),
             });
         }
     }

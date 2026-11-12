@@ -2,46 +2,53 @@ use std::sync::LazyLock;
 
 use almanac::prelude::*;
 use regex::RegexSet;
+use serde::Deserialize;
 
+/// One row of `classes.toml`.
 pub struct Class {
     pub name: &'static str,
     pattern: Option<&'static str>,
-    pub threshold: u64,
+    /// Events an issue needs before it files. `None` never files.
+    pub threshold: Option<u64>,
+    pub why: &'static str,
 }
 
-/// First matching row wins. `other` is last and has no pattern.
-pub static CLASSES: &[Class] = &[
-    Class {
-        name: "mcp-timeout",
-        pattern: Some("MCP error -32001"),
-        threshold: 1,
-    },
-    Class {
-        name: "pg-too-many-clients",
-        pattern: Some("too many clients already"),
-        threshold: 1,
-    },
-    Class {
-        name: "approval-timeout",
-        pattern: Some("Approval timed out"),
-        threshold: 3,
-    },
-    Class {
-        name: "unknown-tool-id",
-        pattern: Some("Unknown tool id"),
-        threshold: 5,
-    },
-    Class {
-        name: "arg-validation",
-        pattern: Some("validation error|Validation failed|Missing required argument"),
-        threshold: 5,
-    },
-    Class {
-        name: "other",
-        pattern: None,
-        threshold: 3,
-    },
-];
+impl Class {
+    pub fn has_pattern(&self) -> bool {
+        self.pattern.is_some()
+    }
+}
+
+#[derive(Deserialize)]
+struct Row {
+    name: String,
+    pattern: Option<String>,
+    threshold: Option<u64>,
+    why: String,
+}
+
+#[derive(Deserialize)]
+struct Table {
+    class: Vec<Row>,
+}
+
+/// First matching row wins. `other` is last and has no pattern. The strings are leaked once, so
+/// the rows live as long as the process like the rest of the table.
+pub static CLASSES: LazyLock<Vec<Class>> = LazyLock::new(|| {
+    let table: Table =
+        toml::from_str(include_str!("../classes.toml")).expect("classes.toml parses");
+    let keep = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+    table
+        .class
+        .into_iter()
+        .map(|row| Class {
+            name: keep(row.name),
+            pattern: row.pattern.map(keep),
+            threshold: row.threshold,
+            why: keep(row.why),
+        })
+        .collect()
+});
 
 /// Maps a `RegexSet` index back to its row, since `other` has no pattern in the set.
 static MATCHER: LazyLock<(RegexSet, Vec<&'static Class>)> = LazyLock::new(|| {

@@ -1,0 +1,103 @@
+# Failure classes, in match order: the first row whose pattern matches the unwrapped error text
+# wins, so a specific row must sit above a general one. Read by src/classes.rs and by
+# .claude/skills/almanac-work/scripts/tool-calls.py.
+#
+# A class is the third part of the Bugsink fingerprint [service, tool, class]. Renaming or
+# reordering a row re-keys history into new Bugsink issues.
+#
+# pattern: a case-sensitive regex in the common subset of Rust `regex` and Python `re`.
+# threshold: events an issue needs before it files a GitHub issue. Left out, the class never
+#   files, though Bugsink still records it.
+# why: what the class means for whoever reads a report filed under it.
+
+[[class]]
+name = "queued-skip"
+pattern = 'Skipped due to queued user message'
+why = "A message from a person arrived mid-turn and OpenClaw skipped the rest of the turn's calls, which is correct."
+
+[[class]]
+name = "mcp-timeout"
+pattern = 'MCP error -32001'
+threshold = 1
+why = "The MCP server did not answer in time."
+
+[[class]]
+name = "mcp-disconnected"
+pattern = 'bundle-mcp server "[^"]+" is not connected'
+threshold = 3
+why = "OpenClaw had no live connection to the MCP server when the call ran."
+
+[[class]]
+name = "pg-too-many-clients"
+pattern = 'too many clients already'
+threshold = 1
+why = "Postgres refused a connection because every slot was taken."
+
+[[class]]
+name = "approval-timeout"
+pattern = 'Approval timed out|Approval card expired'
+threshold = 3
+why = "An approval card went unanswered. The blocked result is by design, so a spike means nobody was looking."
+
+[[class]]
+name = "approval-unavailable"
+pattern = 'Plugin approval unavailable|no approval route'
+threshold = 3
+why = "The surface has no way to show an approval card, so a gated tool cannot run there."
+
+[[class]]
+name = "rate-limit"
+pattern = 'rateLimitExceeded|Quota exceeded'
+threshold = 3
+why = "Google refused the call for quota. Gmail reports it as an HttpError 403, not a 429."
+
+[[class]]
+name = "unknown-tool-id"
+pattern = 'Unknown tool id'
+threshold = 5
+why = "The model called a tool id that does not exist."
+
+[[class]]
+name = "arg-validation"
+pattern = 'validation error|Validation failed|Missing required argument|Invalid arguments for tool "|invalid cron\.(add|update) params|unknown flag|unexpected argument|accepts at most one|cannot be used with'
+threshold = 5
+why = "The model sent arguments the tool's schema or CLI rejected, so a tool description is probably unclear."
+
+[[class]]
+name = "model-error"
+pattern = 'Could not find the exact text|Could not find edits\[\d+\]|Failed to find expected lines|Failed to find context|Invalid patch hunk|The first line of the patch must be|Found \d+ occurrences|Tool \S+ not found|File not found:|EACCES|: not found|Command not found|elevated is not available'
+threshold = 10
+why = "The model missed on an OpenClaw built-in with stale text, a guessed path or an unexposed tool. Descriptions or config can still fix some, so it files, later."
+
+[[class]]
+name = "timeout"
+pattern = 'timed out after \d+|request timed out'
+threshold = 3
+why = "A call outlived its time limit. MCP and approval timeouts match earlier rows."
+
+[[class]]
+name = "ssrf-blocked"
+pattern = 'Blocked: resolves to private'
+why = "web_fetch refused a private address, by design."
+
+[[class]]
+name = "upstream-http"
+pattern = 'Web fetch failed \(\d+\)'
+threshold = 10
+why = "The site answered web_fetch with an HTTP error, such as a 403 from a bot wall."
+
+[[class]]
+name = "extract-empty"
+pattern = 'Web fetch extraction failed'
+why = "web_fetch got a page with no readable text, typically one that needs JavaScript."
+
+[[class]]
+name = "provider-error"
+pattern = 'provider_error'
+threshold = 3
+why = "A search provider failed, such as quota or an outage."
+
+[[class]]
+name = "other"
+threshold = 3
+why = "Everything else."
