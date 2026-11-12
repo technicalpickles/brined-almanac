@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -118,22 +119,33 @@ func pause(ctx context.Context, d time.Duration) error {
 }
 
 // rateLimitWait is how long a refusal asks to wait, if it is a rate limit at all: a 429, or a
-// 403 that carries Retry-After or says no requests remain.
+// 403 that carries Retry-After, even an empty one, or says no requests remain. An empty or
+// unreadable Retry-After falls through to X-RateLimit-Reset, as Rust's rate_limit_wait does.
 func rateLimitWait(response *http.Response) (time.Duration, bool) {
 	header := response.Header
 	retryAfter := header.Get("Retry-After")
+	_, hasRetryAfter := header["Retry-After"]
 	remaining, err := strconv.ParseUint(header.Get("X-RateLimit-Remaining"), 10, 64)
 	exhausted := err == nil && remaining == 0
 	limited := response.StatusCode == http.StatusTooManyRequests ||
-		(response.StatusCode == http.StatusForbidden && (retryAfter != "" || exhausted))
+		(response.StatusCode == http.StatusForbidden && (hasRetryAfter || exhausted))
 	if !limited {
 		return 0, false
 	}
 	if seconds, err := strconv.ParseUint(retryAfter, 10, 64); err == nil {
-		return time.Duration(seconds) * time.Second, true
+		return secondsToWait(seconds), true
 	}
 	reset, _ := strconv.ParseInt(header.Get("X-RateLimit-Reset"), 10, 64)
-	return time.Duration(max(reset-time.Now().Unix(), 1)) * time.Second, true
+	return secondsToWait(uint64(max(reset-time.Now().Unix(), 1))), true
+}
+
+// secondsToWait is n seconds as a Duration, held at the longest Duration there is so a huge
+// header cannot wrap around to a negative wait that reads as no wait at all.
+func secondsToWait(n uint64) time.Duration {
+	if n > uint64(math.MaxInt64/time.Second) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(n) * time.Second
 }
 
 func failed(repo string, err error) error {

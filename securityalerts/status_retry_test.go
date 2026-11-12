@@ -175,16 +175,56 @@ func TestStatusReportsARateLimitOnTheLastAttempt(t *testing.T) {
 }
 
 func TestStatusStopsWaitingWhenTheContextEnds(t *testing.T) {
-	origin, _ := scripted(t, answer{status: 429, headers: map[string]string{"Retry-After": "30"}})
+	origin, count := scripted(t, answer{status: 429, headers: map[string]string{"Retry-After": "30"}})
 	c := quick(origin, github.Retry{Attempts: 5, Backoff: time.Millisecond, LongestWait: time.Minute})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
 	err := c.Status(ctx, switchPath)
+	took := time.Since(start)
 
-	if err == nil || time.Since(start) > 5*time.Second {
-		t.Errorf("%v after %v", err, time.Since(start))
+	var reported *diag.Error
+	if !errors.As(err, &reported) || reported.Code != diag.ForgeUnreachable {
+		t.Fatalf("a wait cut short by the context is unreachable, not rate limited: %v", err)
+	}
+	if took > 5*time.Second {
+		t.Errorf("the 30 second Retry-After should not be sat through: %v", took)
+	}
+	if count() != 1 {
+		t.Errorf("requests %d", count())
+	}
+}
+
+func TestAHugeRetryAfterIsReportedAsTooLongNotWrappedToNoWait(t *testing.T) {
+	for _, seconds := range []string{"9223372036", "9223372037", "18446744073709551615"} {
+		t.Run(seconds, func(t *testing.T) {
+			origin, count := scripted(t, answer{status: 429, headers: map[string]string{"Retry-After": seconds}}, answer{status: 204})
+			c := quick(origin, github.Retry{Attempts: 5, Backoff: time.Millisecond, LongestWait: time.Minute})
+
+			err := c.Status(context.Background(), switchPath)
+
+			var reported *diag.Error
+			if !errors.As(err, &reported) || reported.Code != diag.ForgeRateLimited {
+				t.Fatalf("%v", err)
+			}
+			if count() != 1 {
+				t.Errorf("requests %d", count())
+			}
+		})
+	}
+}
+
+func TestAnEmptyRetryAfterOnA403StillCountsAsARateLimit(t *testing.T) {
+	reset := strconv.FormatInt(time.Now().Add(time.Second).Unix(), 10)
+	origin, count := scripted(t, answer{status: 403, headers: map[string]string{"Retry-After": "", "X-RateLimit-Reset": reset}}, answer{status: 204})
+	c := quick(origin, github.Retry{Attempts: 5, Backoff: time.Millisecond, LongestWait: time.Minute})
+
+	if err := c.Status(context.Background(), switchPath); err != nil {
+		t.Fatalf("a 403 that carries Retry-After, even empty, is waited out like Rust's contains_key: %v", err)
+	}
+	if count() != 2 {
+		t.Errorf("requests %d", count())
 	}
 }
 
@@ -263,5 +303,10 @@ func TestStatusTriesAgainAfterAConnectionDropsMidAnswer(t *testing.T) {
 
 	if err := c.Status(context.Background(), switchPath); err != nil {
 		t.Fatalf("a dropped connection is tried again: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if served != 2 {
+		t.Errorf("the dropped request and its retry should both reach the server, got %d", served)
 	}
 }

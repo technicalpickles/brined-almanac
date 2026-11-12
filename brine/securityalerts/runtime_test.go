@@ -89,6 +89,8 @@ func providersFor(t *testing.T, api *fakeapi.Api, client bool) *providers.Set {
 	alerts := brine.AlertsClient{}
 	if client {
 		alerts.Client = rules.NewClient(api.Origin, "alerts-token", github.Retrying(github.Retry{Attempts: 1}))
+		// Status has its own retry that the option does not reach, so switch it off here too.
+		alerts.Client.Retry = github.Retry{Attempts: 1}
 	}
 	providers.Provide(set, alerts)
 	return set
