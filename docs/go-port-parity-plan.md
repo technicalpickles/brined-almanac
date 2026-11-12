@@ -114,7 +114,7 @@ Nothing here schedules a cutover. This section records what a cutover onto a fre
 
 `.scratch/cutover-proof.sh` (not committed, since `.scratch` is ignored) runs every SQL statement and pipe below against two throwaway Postgres 17 containers. Rust's schema comes from the pinned crate's migrations, and Go's from the Go binary's own `check`. Its checks are named after the step slugs below. It never touches prod, and it runs neither side's backfill, which needs prod's tokens, so it stands in for the two dry runs with hand-inserted rows.
 
-Rust stays live through steps 1 and 2, so a failed gate leaves prod running. The shell helpers name the containers. Rust's prod database is not published to the host ([ADR 0002](adrs/0002-own-ports-and-database-for-the-go-port.md)), so every command goes through `docker exec`. `brined-almanac-prod-db-1` is the container the runbook uses. `brined-almanac-go-prod-db-1` is inferred from ADR 0002's project name `brined-almanac-go-prod`, and no such stack exists yet, so use whatever container Go's prod database ends up in.
+Rust stays live through steps 1 and 2, so a failed gate leaves prod running. Step 7 is the point of no return. Before it, roll back by starting Rust again with the runbook's `start almanac` and dropping the Go database. After it, Go files work that Rust's `seen` does not hold, so starting Rust again would file it a second time, and this plan has no rollback for that. The shell helpers name the containers. Rust's prod database is not published to the host ([ADR 0002](adrs/0002-own-ports-and-database-for-the-go-port.md)), so every command goes through `docker exec`. `brined-almanac-prod-db-1` is the container the runbook uses. `brined-almanac-go-prod-db-1` is inferred from ADR 0002's project name `brined-almanac-go-prod`, and no such stack exists yet, so use whatever container Go's prod database ends up in.
 
 ```sh
 rustdb() { docker exec -i brined-almanac-prod-db-1 psql -X -q -v ON_ERROR_STOP=1 -U almanac almanac "$@"; }
@@ -184,6 +184,8 @@ copy_seen() {
 
    If any count is not 0, start Rust with step 6's `start almanac` command from the runbook's "First deploy". Its startup requeues any running run, and its workers claim the pending rows and deliver the outbox. Watch the three counts while it runs. When all three read 0, stop it again and recheck. Repeat until they read 0 after a stop.
 
+   A tripped workflow never drains. Its `pending` rows wait for the trip to clear, so the first count stays above 0 however long Rust runs. Check with `rustdb -At -c "SELECT workflow FROM tripped WHERE almanac = 'brined-almanac'"`. If a row comes back, stop the cutover and decide what to do about the trip first. Do not delete the `pending` rows, since that drops the work they hold.
+
    Never run Rust and Go live at once. Each would file what the other filed. A `failed` outbox row usually filed nothing, and it stays as it was under Rust. A taskwarrior delivery is the exception. Rust commits the task to its local replica before the final sync (`Worker::deliver`, `src/taskwarrior.rs:264-284`), so a failed sync can leave the task in the replica in Rust's `taskchampion` volume, and it reaches the server only if that replica syncs again (read from code).
 
 4. **Move Go's `run_seq` past Rust's** (`run-seq`), before Go's first live run:
@@ -207,7 +209,7 @@ copy_seen() {
 
 6. **Keep the Bugsink cursor.** `BUGSINK_CURSOR` is a file, not the store. Mount the same volume or copy the file. A missing cursor resends history. Bugsink drops a repeated event id, and both sides derive it the same way, so this wastes work but should not duplicate, as long as Bugsink still keeps the old events (inferred).
 
-7. **Start Go live.** Rust stays stopped.
+7. **Start Go live.** This is the point of no return. Rust stays stopped. Go defaults to a read-only dry run (porting-plan row 13, [ADR 0002](adrs/0002-own-ports-and-database-for-the-go-port.md)), so start it with `ALMANAC_MODE=live` and `ALMANAC_READ_ONLY=0`, with `DATABASE_URL` pointed at the Go store and `ALMANAC_CONFIG=almanac.go.toml`. No Go prod stack exists yet, so the command depends on the stack Go's prod ends up in.
 
 ### Read-only queries Josh runs for the sizes
 
