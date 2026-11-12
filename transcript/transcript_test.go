@@ -294,14 +294,18 @@ func TestOtherExtensionsAreIgnoredAndAnEmptyDirIsEmpty(t *testing.T) {
 	}
 }
 
+// printed formats value the way a stray log line or error would. It takes any so the test can
+// hand fmt a sample on purpose: that is the thing under test.
+func printed(verb string, value any) string { return fmt.Sprintf(verb, value) }
+
 func TestASampleNeverPrintsItsText(t *testing.T) {
 	result := readOne(t, mcp("brineworks", "triage_apply"))
 	only(t, result)
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
-		if strings.Contains(fmt.Sprintf(verb, result), defaultErrMsg) {
+		if strings.Contains(printed(verb, result), defaultErrMsg) {
 			t.Errorf("%s printed the text", verb)
 		}
-		if strings.Contains(fmt.Sprintf(verb, result.Errors[0].Text), defaultErrMsg) {
+		if strings.Contains(printed(verb, result.Errors[0].Text), defaultErrMsg) {
 			t.Errorf("%s printed the text of the sample", verb)
 		}
 	}
