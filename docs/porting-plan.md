@@ -7,10 +7,10 @@ Sizes are Rust lines in `src/` and `tests/` at `ea999b3`.
 | # | Unit | Rust src / tests | Depends on | Blocker | Status |
 |---|---|---|---|---|---|
 | 0 | `classes` | 86 / 203 | none | none | done |
-| 1 | `routing` | 191 / 98 | none | none | |
+| 1 | `routing` | 191 / 98 | none | `Router` waits for the Go effect package | `Project` done |
 | 2 | `bugsink_api` | 134 / 250 | none | none | |
 | 3 | `transcript` | 355 / 364 | none | Go `hostile` type for untrusted text | |
-| 4 | `tiers` | 111 / 157 | routing | none | |
+| 4 | `tiers` | 111 / 157 | routing | none | done |
 | 5 | `host_state` (rules) | 477 / 407 | routing | none | |
 | 6 | `bugsink` | 260 / 332 | classes, transcript | hostile type | |
 | 7 | `cutover` | 630 / 314 | bugsink, bugsink_api | none | |

@@ -8,3 +8,8 @@ import _ "embed"
 //
 //go:embed classes.toml
 var ClassesTOML []byte
+
+// TiersTOML is tiers.toml, the public repository tiers.
+//
+//go:embed tiers.toml
+var TiersTOML []byte
