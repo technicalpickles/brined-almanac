@@ -5,7 +5,7 @@ Parity contract item 1 ([go-port-parity-plan.md](go-port-parity-plan.md)) says `
 - A difference in the golden file that no row covers fails the test.
 - A row that matches no difference in the golden file fails the test, so a fixed divergence has to leave this file.
 
-Every resolution below is **proposed**. Accepting a divergence, or choosing between our side and upstream, is Josh's call. Nothing here is accepted yet. Until Josh decides, the rows stand as "known and explained", which is what keeps `compare` honest.
+The open block below is empty. The one difference `compare` used to report, the workflow names, was accepted by Josh and is normalised away inside `compare` (see the last section), so it has no row. If a divergence returns, it gets a row, a section with a `Status:` line and an `Owner:` line, and stands as "known and explained" until Josh accepts it or chooses our side or upstream. That is what keeps `compare` honest.
 
 Fixture text is not quoted here. The gaps are described by structure, and the fixtures are named so you can open them under `compare/fixtures/`.
 
@@ -24,6 +24,8 @@ No rows are open. Each id needs a section below with a `Status:` line and an `Ow
 
 ## Accepted and normalised in compare: workflow names
 
-Rust names the workflows `host-state`, `bugsink-issues` and `security-alerts`. Go names them `host_state`, `bugsink_issues` and `security_alerts`. Josh decided to keep the Go underscore names. A cutover uses a fresh Go store seeded from Rust, and a tracker finds its item by the outbox key alone (the GitHub `<!-- almanac:{key} -->` marker, the taskwarrior `almanac_key` UDA), so the workflow name never crosses over.
+Rust names the workflows `host-state`, `bugsink-issues` and `security-alerts`. Go names them `host_state`, `bugsink_issues` and `security_alerts`. Josh decided to keep the Go underscore names. The Rust hyphenation is read from source, not inferred: the pinned `almanac` crate's macro builds the label with `name.to_string().replace('_', "-")` (`crates/macros/src/lib.rs:571` at rev `b8bdefa`).
+
+The planned cutover is described in [PR #61](https://github.com/technicalpickles/brined-almanac/pull/61), which is not merged yet, so this is the plan and not something done. It copies only Rust's `seen` rows, which have no workflow column, and moves `run_seq` past Rust's with `setval`. It does not copy run rows. The workflow name is its own column in the Go store (`runs.workflow`, `pending.workflow`), and the one-active-run index is on `(almanac, workflow, key)` (`store/postgres/migrations/00001_store.sql:49` in the pinned Go almanac module), so copied run rows would bring the hyphenated names across as distinct keys. A tracker finds its item by the outbox key alone (the GitHub `<!-- almanac:{key} -->` marker, the taskwarrior `almanac_key` UDA), so the name does not matter to the trackers.
 
 `compare` therefore treats those three pairs as the same workflow. The pairs live in the table `acceptedWorkflowRenames` in `compare/compare.go`. It is an explicit table, not a `-` to `_` rewrite, so a fourth workflow or any other rename still shows as a difference. Because it is normalised away, it has no row in the machine-readable block.

@@ -163,13 +163,14 @@ func TestSidesThatMatchAgreeAndExitZero(t *testing.T) {
 }
 
 func TestEachDifferenceIsListedAndExitsNonZero(t *testing.T) {
-	dir, _ := oneCase(t, "host.state.finding", stale, staleFiled(t, "host-state", "host-state: no report from the mac"))
+	dir, _ := oneCase(t, "host.state.finding", stale, staleFiled(t, "hoststate", "host-state: no report from the mac"))
 	out, err := run(t, "compare", "--fixtures", dir)
 	if err == nil || !strings.Contains(err.Error(), "1 of 1 case(s) disagree") {
 		t.Errorf("err %v", err)
 	}
 	for _, line := range []string{
 		"DISAGREE  host.state.finding/one",
+		`run 1 workflow: rust "hoststate", go "host_state"`,
 		`run 1 effects: rust [file "host-state: no report from the mac" to "task:brined-almanac"], go [file "host-state: no report from mac" to "task:brined-almanac"]`,
 	} {
 		if !strings.Contains(out, line) {
