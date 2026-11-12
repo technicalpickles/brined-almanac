@@ -15,7 +15,7 @@ Hostnames and repo names are fine, since [picklehome](https://github.com/technic
 
 ## How the guardrails work
 
-Nobody has to remember the rules, because hooks check them. A pre-commit hook runs gitleaks over the staged diff and `scripts/check-forbidden` over the staged files, and pre-push runs both over the whole repo. The forbidden check reads regex patterns from `.forbidden-patterns`, which are safe to commit, and private literal strings from `local/forbidden-strings`, which is gitignored because a denylist of private strings would publish them. On a fresh clone that file doesn't exist, so the script says the literal check is off until you create it. A worktree that `wt switch --create` makes gets a symlink to the main checkout's copy, and to its `local/tiers.toml`, from the `pre-start` hook in `.config/wt.toml` (`scripts/link-local`). GitHub push protection is on server-side as a last backstop.
+Nobody has to remember the rules, because hooks check them. A pre-commit hook runs gitleaks over the staged diff and `scripts/check-forbidden` over the staged files, and pre-push runs both over the whole repo. The forbidden check reads regex patterns from `.forbidden-patterns`, which are safe to commit, and private literal strings from `local/forbidden-strings`, which is gitignored because a denylist of private strings would publish them. A worktree has no `local/` of its own, so the script reads the main checkout's copy, which it finds through git. On a fresh clone that file doesn't exist anywhere, so the script says the literal check is off until you create it. GitHub push protection is on server-side as a last backstop.
 
 Run `mise install && hk install` to arm the hooks, and `mise run check` to run them by hand.
 

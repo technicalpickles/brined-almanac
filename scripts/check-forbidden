@@ -8,7 +8,8 @@ Usage: scripts/check-forbidden [FILE...]
 Fail if any file matches a forbidden pattern or a private literal.
 
   .forbidden-patterns      committed; one extended regex per line, '#' comments
-  local/forbidden-strings  gitignored; one literal string per line
+  local/forbidden-strings  gitignored; one literal string per line. A worktree that has
+                           none reads the main checkout's, found through git.
 
 With no FILE arguments, checks every file from `git ls-files`.
 Paths are relative to the repo root, which the script cd's into.
@@ -35,7 +36,16 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 cd "$repo_root"
 
 patterns_file=.forbidden-patterns
-literals_file=local/forbidden-strings
+literals_path=local/forbidden-strings
+literals_file=$literals_path
+
+# local/ is gitignored, so a linked worktree starts without it. The main checkout is the parent
+# of the common git dir, and its copy is the one to use.
+if [[ ! -f $literals_file ]]; then
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+  main_literals=$(dirname "$common_dir")/$literals_path
+  [[ -f $main_literals ]] && literals_file=$main_literals
+fi
 
 if [[ ! -f $patterns_file ]]; then
   echo "check-forbidden: $patterns_file is missing, restore it from git" >&2
@@ -60,7 +70,7 @@ failed=0
 
 # The pattern and literal files hold the strings by design.
 is_exempt() {
-  [[ $1 == "$patterns_file" || $1 == "$literals_file" ]]
+  [[ $1 == "$patterns_file" || $1 == "$literals_path" ]]
 }
 
 for f in "${files[@]}"; do
