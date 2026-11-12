@@ -1,6 +1,9 @@
 package compare_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -13,16 +16,89 @@ import (
 
 type diffKey struct{ caseName, signature string }
 
+var idLine = regexp.MustCompile(`^DV-[A-Z0-9-]+$`)
+
+const quoted = `"(?:[^"\\]|\\.)*"`
+
 var (
-	runsLine = regexp.MustCompile(`^(runs: rust \(no run\), go "[^"]+" (?:ran|failed))\b`)
-	idLine   = regexp.MustCompile(`^DV-[A-Z0-9-]+$`)
+	runsLine  = regexp.MustCompile(`^runs: rust (.+), go (.+)$`)
+	oneRun    = regexp.MustCompile(`^(` + quoted + `) (ran|failed)(?: \((` + quoted + `)\))?(?: \[((?:[^"\]]|` + quoted + `)*)\])?`)
+	oneEffect = regexp.MustCompile(`^([^ ;"]+)(?: ` + quoted + ` to (` + quoted + `))?`)
 )
 
-// signatureOf reduces a difference line to what a divergence row names. The detail of a runs
-// line holds titles and error text, which stay out of the doc.
+// consume applies one element pattern to a "; "-separated list and requires the whole text to
+// be covered, so a run or an effect cannot hide behind the first one.
+func consume(text string, re *regexp.Regexp, each func(m []string) string) ([]string, bool) {
+	var out []string
+	for {
+		m := re.FindStringSubmatch(text)
+		if m == nil {
+			return nil, false
+		}
+		out = append(out, each(m))
+		text = text[len(m[0]):]
+		if text == "" {
+			return out, true
+		}
+		if !strings.HasPrefix(text, "; ") {
+			return nil, false
+		}
+		text = text[2:]
+	}
+}
+
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// runListSignature keeps every run's workflow and result, a hash of the failure reason (the
+// reason can quote fixture text, so the doc carries only its hash), and every effect as kind
+// and target (a title carries fixture text and stays out).
+func runListSignature(list string) (string, bool) {
+	if list == "(no run)" {
+		return list, true
+	}
+	runs, ok := consume(list, oneRun, func(m []string) string {
+		sig := m[1] + " " + m[2]
+		if m[3] != "" {
+			sig += " (reason#" + shortHash(m[3]) + ")"
+		}
+		if m[4] != "" {
+			effects, ok := consume(m[4], oneEffect, func(e []string) string {
+				if e[2] != "" {
+					return e[1] + " to " + e[2]
+				}
+				return e[1]
+			})
+			if !ok {
+				return "[unparsed effects]"
+			}
+			sig += " [" + strings.Join(effects, "; ") + "]"
+		}
+		return sig
+	})
+	return strings.Join(runs, "; "), ok
+}
+
+// signatureOf reduces a difference line to what a divergence row names. A runs line is kept
+// whole except for text that can carry fixture content (see runListSignature); any other line is
+// already free of it.
 func signatureOf(line string) string {
 	if m := runsLine.FindStringSubmatch(line); m != nil {
-		return m[1]
+		// Both sides may hold ", go " inside a quoted string, so try each split.
+		whole := m[1] + ", go " + m[2]
+		for i := 0; i+5 <= len(whole); i++ {
+			if whole[i:i+5] != ", go " {
+				continue
+			}
+			rust, ok1 := runListSignature(whole[:i])
+			golang, ok2 := runListSignature(whole[i+5:])
+			if ok1 && ok2 {
+				return fmt.Sprintf("runs: rust %s, go %s", rust, golang)
+			}
+		}
+		return "runs: unparsed " + shortHash(line)
 	}
 	return line
 }
@@ -73,7 +149,11 @@ func listedDivergences(t *testing.T) (map[diffKey]string, string) {
 		}
 		id, signature := strings.TrimSpace(cols[0]), strings.TrimSpace(cols[1])
 		for _, c := range strings.Split(cols[2], ",") {
-			listed[diffKey{strings.TrimSpace(c), signature}] = id
+			key := diffKey{strings.TrimSpace(c), signature}
+			if prior, dup := listed[key]; dup {
+				t.Fatalf("docs/divergences.md: %s listed twice (%s and %s)", key.caseName, prior, id)
+			}
+			listed[key] = id
 		}
 	}
 	return listed, doc
@@ -125,13 +205,13 @@ func TestEveryDivergenceHasASectionWithAStatusAndAnOwner(t *testing.T) {
 		ids[id] = true
 	}
 	for id := range ids {
-		heading := "## " + id
-		start := strings.Index(doc, heading)
-		if start < 0 {
-			t.Errorf("%s has rows but no %q section", id, heading)
+		heading := regexp.MustCompile(`(?m)^## ` + regexp.QuoteMeta(id) + `(?::.*)?$`)
+		loc := heading.FindStringIndex(doc)
+		if loc == nil {
+			t.Errorf("%s has rows but no %q section", id, "## "+id)
 			continue
 		}
-		section := doc[start+len(heading):]
+		section := doc[loc[1]:]
 		if next := strings.Index(section, "\n## "); next >= 0 {
 			section = section[:next]
 		}
