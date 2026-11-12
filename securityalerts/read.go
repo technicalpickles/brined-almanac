@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ivy/almanac/diag"
@@ -33,6 +35,9 @@ type RepoRead struct {
 // 204 with no body and Github.Get fails decoding it.
 type Client struct {
 	Github *github.Client
+	// Retry is how hard Status tries. NewClient sets [github.DefaultRetry], the same as Github's
+	// default, and Github.Retrying does not reach it.
+	Retry github.Retry
 
 	base  string
 	token github.Token
@@ -44,6 +49,7 @@ type Client struct {
 func NewClient(baseURL string, token github.Token, options ...github.Option) *Client {
 	return &Client{
 		Github: github.New(baseURL, token, options...),
+		Retry:  github.DefaultRetry(),
 		base:   baseURL,
 		token:  token,
 		http:   &http.Client{Timeout: 30 * time.Second},
@@ -52,32 +58,94 @@ func NewClient(baseURL string, token github.Token, options ...github.Option) *Cl
 
 // Status makes a GET of path and says only how it was answered: nil for any 2xx, whatever the
 // body, and otherwise an error that wraps a *github.Refusal for a refusal, as Github's reads do.
+// It tries as hard as Github's reads do (see [Client.Retry]): a rate limit is waited out as
+// asked, unless it asks longer than Retry.LongestWait, and a server error or a failed send backs
+// off and tries again.
 func (c *Client) Status(ctx context.Context, path string) error {
 	action := "GET " + path
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
-	if err != nil {
-		return diag.Unreachable(action, err.Error())
+	backoff := c.Retry.Backoff
+	lastFailure := "no attempt was made"
+	for attempt := 1; attempt <= c.Retry.Attempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+		if err != nil {
+			return diag.Unreachable(action, err.Error())
+		}
+		request.Header.Set("Authorization", "Bearer "+string(c.token))
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		request.Header.Set("User-Agent", "almanac")
+		wait := backoff
+		response, err := c.http.Do(request)
+		if err != nil {
+			lastFailure = err.Error()
+		} else {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			limit, limited := rateLimitWait(response)
+			switch {
+			case limited && (limit > c.Retry.LongestWait || attempt == c.Retry.Attempts):
+				return diag.RateLimited(action, limit)
+			case limited:
+				wait = limit
+			case response.StatusCode >= 500:
+				lastFailure = "GitHub answered " + response.Status
+			case response.StatusCode >= 200 && response.StatusCode < 300:
+				return nil
+			default:
+				refused := diag.Refused(action, response.StatusCode)
+				refused.Cause = &github.Refusal{Status: response.StatusCode}
+				return refused
+			}
+		}
+		backoff *= 2
+		if attempt < c.Retry.Attempts {
+			if err := pause(ctx, wait); err != nil {
+				return diag.Unreachable(action, err.Error())
+			}
+		}
 	}
-	request.Header.Set("Authorization", "Bearer "+string(c.token))
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	request.Header.Set("User-Agent", "almanac")
-	response, err := c.http.Do(request)
-	if err != nil {
-		return diag.Unreachable(action, err.Error())
-	}
-	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, response.Body)
-	switch {
-	case response.StatusCode >= 200 && response.StatusCode < 300:
+	return diag.Unreachable(action, lastFailure)
+}
+
+func pause(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
 		return nil
-	case response.StatusCode >= 500:
-		return diag.Unreachable(action, "GitHub answered "+response.Status)
-	default:
-		refused := diag.Refused(action, response.StatusCode)
-		refused.Cause = &github.Refusal{Status: response.StatusCode}
-		return refused
 	}
+}
+
+// rateLimitWait is how long a refusal asks to wait, if it is a rate limit at all: a 429, or a
+// 403 that carries Retry-After, even an empty one, or says no requests remain. An empty or
+// unreadable Retry-After falls through to X-RateLimit-Reset, as Rust's rate_limit_wait does.
+func rateLimitWait(response *http.Response) (time.Duration, bool) {
+	header := response.Header
+	retryAfter := header.Get("Retry-After")
+	_, hasRetryAfter := header["Retry-After"]
+	remaining, err := strconv.ParseUint(header.Get("X-RateLimit-Remaining"), 10, 64)
+	exhausted := err == nil && remaining == 0
+	limited := response.StatusCode == http.StatusTooManyRequests ||
+		(response.StatusCode == http.StatusForbidden && (hasRetryAfter || exhausted))
+	if !limited {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseUint(retryAfter, 10, 64); err == nil {
+		return secondsToWait(seconds), true
+	}
+	reset, _ := strconv.ParseInt(header.Get("X-RateLimit-Reset"), 10, 64)
+	return secondsToWait(uint64(max(reset-time.Now().Unix(), 1))), true
+}
+
+// secondsToWait is n seconds as a Duration, held at the longest Duration there is so a huge
+// header cannot wrap around to a negative wait that reads as no wait at all.
+func secondsToWait(n uint64) time.Duration {
+	if n > uint64(math.MaxInt64/time.Second) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(n) * time.Second
 }
 
 func failed(repo string, err error) error {

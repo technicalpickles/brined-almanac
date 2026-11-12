@@ -54,6 +54,7 @@ func TestStatusKeepsTheRefusalAndItsStatus(t *testing.T) {
 	api.Status("/denied", 403)
 	api.Status("/down", 502)
 	c := client(api)
+	c.Retry = github.Retry{Attempts: 1}
 	for path, want := range map[string]int{"/gone": 404, "/denied": 403} {
 		err := c.Status(context.Background(), path)
 		var refusal *github.Refusal

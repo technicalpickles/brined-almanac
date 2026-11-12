@@ -89,6 +89,8 @@ func providersFor(t *testing.T, api *fakeapi.Api, client bool) *providers.Set {
 	alerts := brine.AlertsClient{}
 	if client {
 		alerts.Client = rules.NewClient(api.Origin, "alerts-token", github.Retrying(github.Retry{Attempts: 1}))
+		// Status has its own retry that the option does not reach, so switch it off here too.
+		alerts.Client.Retry = github.Retry{Attempts: 1}
 	}
 	providers.Provide(set, alerts)
 	return set
@@ -162,6 +164,54 @@ func TestAFailingRepositoryIsSkippedAndHoldsTheCoverageTask(t *testing.T) {
 	}
 	if len(found) != 1 || !strings.HasPrefix(found[0].DeliveryID, "scan:security-alerts/technicalpickles/dotfiles@") {
 		t.Fatalf("%+v", found)
+	}
+}
+
+// The switch call (Client.Status) has a retry of its own that github.Retrying does not reach, so
+// providersFor sets Client.Retry. A bound on the context, not a sleep, is what these tests wait
+// on: with the default retry the 502 backs off for seconds and the 429 waits out its 30.
+func scanWithin(t *testing.T, api *fakeapi.Api, bound time.Duration) ([]workflow.Found, error) {
+	t.Helper()
+	w, err := securityalerts.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	found, err := w.Scan(ctx, workflow.NewScanner(providersFor(t, api, true)))
+	if ctx.Err() != nil {
+		t.Fatalf("the scan was still waiting after %v: the switch call retried", bound)
+	}
+	return found, err
+}
+
+func TestASwitchCallThatGets502IsTriedOnceAndItsRepositoryIsSkipped(t *testing.T) {
+	api := api(t)
+	const switchCall = "/repos/technicalpickles/dotfiles/vulnerability-alerts"
+	api.Status(switchCall, 502)
+	found, err := scanWithin(t, api, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := api.Count(switchCall); got != 1 {
+		t.Errorf("the switch call was made %d times, want 1", got)
+	}
+	for _, f := range found {
+		if strings.Contains(f.DeliveryID, "technicalpickles/dotfiles") {
+			t.Errorf("a repository whose switch call failed was filed: %s", f.DeliveryID)
+		}
+	}
+}
+
+func TestASwitchCallThatGets429WithALongRetryAfterIsNotWaitedOut(t *testing.T) {
+	api := api(t)
+	const switchCall = "/repos/technicalpickles/dotfiles/vulnerability-alerts"
+	api.StatusWith(switchCall, 429, map[string]string{"Retry-After": "30"})
+	if _, err := scanWithin(t, api, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := api.Count(switchCall); got != 1 {
+		t.Errorf("the switch call was made %d times, want 1", got)
 	}
 }
 
