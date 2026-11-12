@@ -24,15 +24,16 @@ type Seen struct {
 type Api struct {
 	Origin string
 
-	mu     sync.Mutex
-	routes map[string]any
-	seen   []Seen
+	mu       sync.Mutex
+	routes   map[string]any
+	statuses map[string]int
+	seen     []Seen
 }
 
 // Serve starts an API that stops with the test.
 func Serve(t *testing.T) *Api {
 	t.Helper()
-	api := &Api{routes: map[string]any{}}
+	api := &Api{routes: map[string]any{}, statuses: map[string]int{}}
 	server := httptest.NewServer(http.HandlerFunc(api.handle))
 	t.Cleanup(server.Close)
 	api.Origin = server.URL
@@ -43,8 +44,13 @@ func (a *Api) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	a.mu.Lock()
 	answer, ok := a.routes[r.URL.RequestURI()]
+	status, hasStatus := a.statuses[r.URL.RequestURI()]
 	a.seen = append(a.seen, Seen{Method: r.Method, Target: r.URL.RequestURI(), Auth: r.Header.Get("Authorization"), Body: string(body)})
 	a.mu.Unlock()
+	if hasStatus {
+		w.WriteHeader(status)
+		return
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -65,6 +71,14 @@ func (a *Api) Route(target string, answer any) {
 	a.routes[target] = answer
 }
 
+// Status answers a request target with just a status and an empty body, as GitHub answers 204
+// for a switch that is on. It wins over a route for the same target.
+func (a *Api) Status(target string, status int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.statuses[target] = status
+}
+
 // Posts are the requests that changed something, oldest first.
 func (a *Api) Posts() []Seen {
 	a.mu.Lock()
@@ -76,6 +90,13 @@ func (a *Api) Posts() []Seen {
 		}
 	}
 	return posts
+}
+
+// Requests are every request the API got, oldest first.
+func (a *Api) Requests() []Seen {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]Seen(nil), a.seen...)
 }
 
 // Targets are every request's target, oldest first.
