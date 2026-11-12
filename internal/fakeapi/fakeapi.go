@@ -27,13 +27,14 @@ type Api struct {
 	mu       sync.Mutex
 	routes   map[string]any
 	statuses map[string]int
+	headers  map[string]map[string]string
 	seen     []Seen
 }
 
 // Serve starts an API that stops with the test.
 func Serve(t *testing.T) *Api {
 	t.Helper()
-	api := &Api{routes: map[string]any{}, statuses: map[string]int{}}
+	api := &Api{routes: map[string]any{}, statuses: map[string]int{}, headers: map[string]map[string]string{}}
 	server := httptest.NewServer(http.HandlerFunc(api.handle))
 	t.Cleanup(server.Close)
 	api.Origin = server.URL
@@ -45,9 +46,13 @@ func (a *Api) handle(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	answer, ok := a.routes[r.URL.RequestURI()]
 	status, hasStatus := a.statuses[r.URL.RequestURI()]
+	headers := a.headers[r.URL.RequestURI()]
 	a.seen = append(a.seen, Seen{Method: r.Method, Target: r.URL.RequestURI(), Auth: r.Header.Get("Authorization"), Body: string(body)})
 	a.mu.Unlock()
 	if hasStatus {
+		for name, value := range headers {
+			w.Header().Set(name, value)
+		}
 		w.WriteHeader(status)
 		return
 	}
@@ -77,6 +82,27 @@ func (a *Api) Status(target string, status int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.statuses[target] = status
+}
+
+// StatusWith is Status with response headers, such as the Retry-After of a rate limit.
+func (a *Api) StatusWith(target string, status int, headers map[string]string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.statuses[target] = status
+	a.headers[target] = headers
+}
+
+// Count is how many requests got target, query included.
+func (a *Api) Count(target string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, s := range a.seen {
+		if s.Target == target {
+			n++
+		}
+	}
+	return n
 }
 
 // Posts are the requests that changed something, oldest first.
