@@ -1,3 +1,8 @@
+# Runs once when worktrunk creates a worktree, before anything else in it, so the first commit's
+# forbidden check already has local/forbidden-strings. scripts/link-local says what it links.
+[pre-start]
+link-local = "scripts/link-local '{{ primary_worktree_path }}' '{{ worktree_path }}'"
+
 # Runs while the worktree is still on disk, so the task can find its port and compose project.
 # `wt remove --no-hooks` skips it. worktrunk reads this from the checkout you run `wt remove` in.
 [pre-remove]
