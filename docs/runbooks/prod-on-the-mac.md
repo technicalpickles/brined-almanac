@@ -140,12 +140,12 @@ appears on a command line:
 av save BRINED_ALMANAC_OP_TOKEN
 ```
 
-`scripts/deploy`, `scripts/cutover` and `scripts/bugsink-dry-run` run
-themselves under `av inject +BRINED_ALMANAC_OP_TOKEN`, so each use is approved
-on the phone or the Mac and works from an agent session. For a hand-typed
-command, wrap it the way the commands below do. Only
-`scripts/live-interop` still reads `$STATE/op-token`; if you run it, write the
-file with `(umask 077; pbpaste > "$STATE/op-token")` and `chmod 600` it.
+`scripts/deploy`, `scripts/cutover`, `scripts/bugsink-dry-run` and
+`scripts/live-interop` run themselves under `av inject +BRINED_ALMANAC_OP_TOKEN`,
+so each use is approved on the phone or the Mac and works from an agent
+session. For a hand-typed command, wrap it the way the commands below do.
+Nothing reads `$STATE/op-token` any more; if an older setup left one there,
+delete it.
 
 Write `$STATE/prod.env`:
 
@@ -500,8 +500,7 @@ and moves `prod` back.
   av save BRINED_ALMANAC_OP_TOKEN
   ```
 
-  Copy the new token from 1Password first. If you use `scripts/live-interop`,
-  rewrite `$STATE/op-token` too.
+  Copy the new token from 1Password first.
 
   The next `mise run deploy` uses it.
 - **Bugsink DSN.** Create a new DSN on the `brent-tool-failures` project in

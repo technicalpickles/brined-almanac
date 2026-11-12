@@ -8,6 +8,12 @@ shellcheck = "0.10.0"
 # by the `live` task, so dry runs need no database.
 [env]
 _.file = ".env.portool"
+# op checks the 1Password app's group container for policies on every command, even with a
+# service account token. macOS answers with an "access data from other apps" prompt charged to
+# whatever launched op, and under an agent sandbox op hangs on it. This undocumented switch skips
+# the check (1Password community post 25335; measured 2026-11-11: op whoami exits in ~1s with it,
+# hangs without).
+OP_LOAD_DESKTOP_APP_SETTINGS = "false"
 COMPOSE_PROJECT_NAME = "brined-almanac-{{ env.PORTOOL_WORKTREE_ID | default(value='unsynced') | truncate(length=8, end='') }}"
 
 [tasks.check]
@@ -16,7 +22,7 @@ run = "hk check"
 
 [tasks.test]
 description = "Run the unit and integration tests"
-run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/install-host-state.test.sh && scripts/fence-line.test.sh && scripts/fence-test.test.sh"
+run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/install-host-state.test.sh && scripts/fence-line.test.sh && scripts/fence-test.test.sh && scripts/check-forbidden.test.sh"
 
 [tasks."image:smoke"]
 description = "Build the almanac image and check it: mise run image:smoke [-- TAG]"
