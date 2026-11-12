@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -94,10 +95,17 @@ func (StoreRequired) File(context.Context, string, effect.Issue) error   { retur
 func (StoreRequired) Ask(context.Context, string, effect.Question) error { return errNoStore }
 
 // LogTracker prints what it would file. It stands in for a side with no credentials.
-type LogTracker struct{}
+type LogTracker struct {
+	// Out is where it prints. Nil is standard output.
+	Out io.Writer
+}
 
-func (LogTracker) File(_ context.Context, key string, issue effect.Issue) error {
-	fmt.Fprintf(os.Stdout, "FILE key=%s target=%s title=%q\n%s\n", key, issue.Target, issue.Title, reveal.Value(issue.Body))
+func (l LogTracker) File(_ context.Context, key string, issue effect.Issue) error {
+	out := l.Out
+	if out == nil {
+		out = os.Stdout
+	}
+	fmt.Fprintf(out, "FILE key=%s target=%s title=%q\n%s\n", key, issue.Target, issue.Title, reveal.Value(issue.Body))
 	return nil
 }
 

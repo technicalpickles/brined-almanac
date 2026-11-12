@@ -58,12 +58,13 @@ func TestTheGoSidesDenialsAreComparedWithRusts(t *testing.T) {
 	rustSaying := func(denied string) Side {
 		t.Helper()
 		text, err := json.Marshal(map[string]any{"simulate": "Queued", "outcomes": []string{
-			`Ran { run_id: "run-1", workflow: "host_state", effects: [File { title: Title("host-state: no report from mac"), target: Slug("task:brined-almanac"), body: Untrusted(..) }], denied: [` + denied + `] } recorded as [WouldApply]`,
+			`Ran { run_id: "run-1", workflow: "host_state", effects: [File { title: Title("host-state: no report from mac"), target: Slug("task:brined-almanac"), body: Untrusted(..) }], denied: [` + denied + `] } recorded as [Applied]`,
 		}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		side, err := parseSimulate(text)
+		filed := "FILE key=run-1:0 target=task:brined-almanac title=\"host-state: no report from mac\"\nno report from mac\n"
+		side, err := parseSimulate(append([]byte(filed), text...))
 		if err != nil {
 			t.Fatal(err)
 		}

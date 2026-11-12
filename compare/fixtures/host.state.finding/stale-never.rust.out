@@ -1,0 +1,3 @@
+FILE key=run-1:0 target=task:brined-almanac title="host-state: no report from mac"
+no report from mac
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"host-state\", effects: [File { title: Title(\"host-state: no report from mac\"), target: Slug(\"task:brined-almanac\"), body: Untrusted(..) }], denied: [] } recorded as [Applied]"],"simulate":"Queued","why":null}

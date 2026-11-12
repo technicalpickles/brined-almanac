@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,7 +33,12 @@ func recorded(t *testing.T, ingest string, outcomes ...string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return text
+	return append(text, '\n')
+}
+
+// printed is a recording with what the Rust LogTracker printed before simulate's JSON.
+func printed(filed string, recording []byte) []byte {
+	return append([]byte(filed), recording...)
 }
 
 // oneCase writes an event and its Rust recording into a fixtures directory of their own.
@@ -46,7 +52,7 @@ func oneCase(t *testing.T, kind, payload string, recording []byte) (string, comp
 	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(strings.TrimSuffix(path, ".json")+".rust.json", recording, 0o644); err != nil {
+	if err := os.WriteFile(strings.TrimSuffix(path, ".json")+".rust.out", recording, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dir, compare.Case{Name: kind + "/one", Kind: kind, Path: path}
@@ -112,7 +118,7 @@ func TestARecordingThatIsNotRustsOutputIsAnError(t *testing.T) {
 
 func TestAMissingRecordingSaysHowToMakeOne(t *testing.T) {
 	_, c := oneCase(t, "x.y", "{}", nil)
-	if err := os.Remove(strings.TrimSuffix(c.Path, ".json") + ".rust.json"); err != nil {
+	if err := os.Remove(strings.TrimSuffix(c.Path, ".json") + ".rust.out"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := sideOf(compare.Rust{}, c)
@@ -126,7 +132,13 @@ const stale = `{"kind": "stale", "project": "brined-almanac", "subject": "mac.st
 
 // staleFiled is what the Go side runs stale to, written as the Rust binary would print it.
 func staleFiled(t *testing.T, workflow, title string) []byte {
-	return recorded(t, "Queued", `Ran { run_id: "run-1", workflow: "`+workflow+`", effects: [File { title: Title("`+title+`"), target: Slug("task:brined-almanac"), body: Untrusted(..) }], denied: [] } recorded as [WouldApply]`)
+	return printedStale(t, workflow, title, "run-1:0", "no report from mac")
+}
+
+// printedStale is a Rust recording of stale filing body under key.
+func printedStale(t *testing.T, workflow, title, key, body string) []byte {
+	return printed("FILE key="+key+" target=task:brined-almanac title=\""+title+"\"\n"+body+"\n",
+		recorded(t, "Queued", `Ran { run_id: "run-1", workflow: "`+workflow+`", effects: [File { title: Title("`+title+`"), target: Slug("task:brined-almanac"), body: Untrusted(..) }], denied: [] } recorded as [Applied]`))
 }
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -334,14 +346,14 @@ func TestARefusedRecordWritesNoRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	was := map[string][]byte{
-		"a.rust.json": []byte(`{"simulate": "Unrouted", "outcomes": []}`),
-		"b.rust.json": staleFiled(t, "host-state", "host-state: no report from mac"),
+		"a.rust.out": []byte(`{"simulate": "Unrouted", "outcomes": []}`),
+		"b.rust.out": staleFiled(t, "host-state", "host-state: no report from mac"),
 	}
 	for _, name := range []string{"a", "b"} {
 		if err := os.WriteFile(filepath.Join(kind, name+".json"), []byte(stale), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(kind, name+".rust.json"), was[name+".rust.json"], 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(kind, name+".rust.out"), was[name+".rust.out"], 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -353,5 +365,57 @@ func TestARefusedRecordWritesNoRecording(t *testing.T) {
 		if now, _ := os.ReadFile(filepath.Join(kind, name)); !bytes.Equal(now, text) {
 			t.Errorf("%s changed to %s", name, now)
 		}
+	}
+}
+
+func TestAFiledBodyThatDiffersShowsLineNumbersAndHashesNotText(t *testing.T) {
+	recording := printedStale(t, "host_state", "host-state: no report from mac", "run-1:0", "no report from mac\nDISAGREE  forged")
+	dir, _ := oneCase(t, "host.state.finding", stale, recording)
+	out, err := run(t, "compare", "--fixtures", dir)
+	if err == nil {
+		t.Fatalf("agreed:\n%s", out)
+	}
+	if strings.Contains(out, "forged") {
+		t.Errorf("the body's text is in the report:\n%s", out)
+	}
+	if !regexp.MustCompile(`run 1 filing 1 body: line\(s\) 2 differ \(rust 2 line\(s\) [0-9a-f]{8}, go 1 line\(s\) [0-9a-f]{8}\)`).MatchString(out) {
+		t.Errorf("no line-numbered body difference in\n%s", out)
+	}
+}
+
+func TestAFilingsKeyIsComparedWithTheRunsOwnIdTakenOut(t *testing.T) {
+	recording := printedStale(t, "host_state", "host-state: no report from mac", "run-1:1", "no report from mac")
+	dir, _ := oneCase(t, "host.state.finding", stale, recording)
+	out, err := run(t, "compare", "--fixtures", dir)
+	if err == nil || !strings.Contains(out, `run 1 filing 1 key: rust "{run}:1", go "{run}:0"`) {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
+func TestARunThatFiledOnOnlyOneSideDisagrees(t *testing.T) {
+	recording := recorded(t, "Queued", `Ran { run_id: "run-1", workflow: "host_state", effects: [File { title: Title("host-state: no report from mac"), target: Slug("task:brined-almanac"), body: Untrusted(..) }], denied: [] } recorded as [Applied]`)
+	dir, _ := oneCase(t, "host.state.finding", stale, recording)
+	out, err := run(t, "compare", "--fixtures", dir)
+	if err == nil || !strings.Contains(out, "run 1 filed: rust 0, go 1") {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
+func TestAJSONReportCarriesABodysHashNotItsText(t *testing.T) {
+	dir, _ := oneCase(t, "host.state.finding", stale, staleFiled(t, "host_state", "host-state: no report from mac"))
+	out, err := run(t, "--format", "json", "compare", "--fixtures", dir)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, `"no report from mac"`) || !strings.Contains(out, `"filed":[{"key":"{run}:0","body":{"lines":1,"sha256":"`) {
+		t.Errorf("%s", out)
+	}
+}
+
+func TestAFilingUnderNoRunsKeyIsAnError(t *testing.T) {
+	recording := printedStale(t, "host_state", "host-state: no report from mac", "run-9:0", "no report from mac")
+	_, c := oneCase(t, "host.state.finding", stale, recording)
+	if _, err := sideOf(compare.Rust{}, c); err == nil || !strings.Contains(err.Error(), "no run") {
+		t.Errorf("%v", err)
 	}
 }
