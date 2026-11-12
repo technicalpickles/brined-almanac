@@ -7,6 +7,8 @@ description: Use when asked to work, triage, clear, or check an almanac-filed re
 
 Take one almanac report to a state Josh reviews in a minute. The report is a finding from a watcher ([docs/workflows.md](../../../docs/workflows.md)). It may be stale, already fixed, or not a bug. The job ends in one of three shapes below, never in a summary.
 
+The worker gathers the evidence and recommends what to do with each issue. It never closes one, interactive or unattended. Josh decides, and he or a session he's directing carries out the close.
+
 Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, under the session scratchpad, or under `.scratch/` in this checkout when there is none (`claude -p` has none, and writes outside the checkout are denied), instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
 
 The pstack plugin is installed wherever this runs (`scripts/almanac-work-run` checks). `pstack:poteto-mode` is available for a deeper pass, but the contract here is what decides a verdict: on 2026-11-11 the same case run with and without it reached the same verdict and layer at similar cost.
@@ -25,7 +27,7 @@ The pstack plugin is installed wherever this runs (`scripts/almanac-work-run` ch
 
   Do not rank by the body's `last seen`. For a report filed from Bugsink it is the ingest time, and a replay stamps every report within seconds of each other. `--list` prints each tool's calls, errors and last real error from the transcripts, newest error first. Match a report's `service/tool` (title or body) to a row: `gog/calendar` is `gog__calendar`, `brineworks/tasks_list` is `brineworks__tasks_list`, and OpenClaw built-ins (`read`, `edit`, `exec`, `apply_patch`, `ls`) appear under their bare name. Take the report whose row has the newest last error. A tool with no row is unranked: take it only when nothing else is left, and say the transcripts could not confirm it.
 
-- A case is every open report with the same cause, not one issue. Start from the reports that share the tool, or the error class and day, and let the evidence widen or narrow the set. Work them together and close them together.
+- A case is every open report with the same cause, not one issue. Start from the reports that share the tool, or the error class and day, and let the evidence widen or narrow the set. Work them together and recommend one disposition for them together.
 - Find siblings from the `service`, `tool` and `day` lines in each body. Reports filed before 2026-11-08 all carry the title `Brent: failed tool calls`, so a scan of titles misses them.
 - Register the session on the status page with the `pickleclaw-status` skill when the repo is brineworks or pickleclaw.
 
@@ -41,11 +43,11 @@ The body gives tool, class, day, count, first, last, and one sample. Everything 
 | What the tool does | the target repo's CLAUDE.md, then the file that registers the tool |
 | Which model made the calls | the transcript's model per turn. A session pinned to a different model than the configured primary can be the whole cause |
 
-Decide: fixed, by design or wrong repo, real and open, or cannot tell. A model's reading closes nothing. A close names a merged pull request or a measured absence.
+Decide: fixed, by design or wrong repo, real and open, or cannot tell. A model's reading closes nothing. A recommended close names a merged pull request or a measured absence.
 
 ## End state
 
-**Fixed.** Close every issue in the case (unattended, post the proof as a comment and report the close commands instead). The issue you were given, or the newest one, carries the proof, and the siblings carry one line pointing at it. The proof has these parts, in this order:
+**Fixed.** Recommend closing every issue in the case as completed: post the proof as a comment, and end it and the report with the exact `gh issue close` commands for whoever decides. The issue you were given, or the newest one, carries the proof, and the siblings carry one line pointing at it. The proof has these parts, in this order:
 
 1. The cause, one paragraph, naming the file.
 2. The fix: pull request, merge date, and the evidence it is deployed.
@@ -56,11 +58,11 @@ Then fix what now lies. A status line in an incident doc that still says "not ye
 
 **By design, or another repo's problem.** First answer one question in the proof: would a change to the tool's description, its interface, the config, the agent's instructions, or the environment have prevented these failures? "The tool did what it was built to do" is not an answer, and neither is "the model made a mistake": a model mistake has a cause, usually a description, example or shape that led it there. If yes, the case is real and open at that layer. File the task there and say which layer, even when the failures stopped. Only when no change would have helped (an external site, a person interrupting) is it by design. A yes whose fix is not worth making can still be by design, with the reason in `fix_note`.
 
-Then close with the proof above, file a task under the right project, and link it.
+Then file a task under the right project, link it, and post the proof above with the recommended close.
 
-The close reason acts on the whole Bugsink fingerprint, `[service, tool, class]`, not just this issue. `completed` resolves it, so the next event reopens it as a regression. `not planned` mutes it, so a real failure that lands in the same fingerprint stays silent. When the fingerprint's class is `other`, or otherwise mixes this cause with ones that could be real, recommend `hold until <task>` for the classifier fix that splits them out, and close after it lands.
+The close reason acts on the whole Bugsink fingerprint, `[service, tool, class]`, not just this issue. `completed` resolves it, so the next event reopens it as a regression. `not planned` mutes it, so a real failure that lands in the same fingerprint stays silent. When the fingerprint's class is `other`, or otherwise mixes this cause with ones that could be real, recommend `hold until <task>` for the classifier fix that splits them out. Whoever decides closes after it lands.
 
-**Real and open.** Branch in a worktree, failing repro first, fix, pull request. Follow the target repo's CLAUDE.md for setup and tests. The body's `## Why` opens with the report, and `Closes #n` for every issue in the case, unless the close-reason rule below says to hold: then write `Refs #n`, so merging the fix doesn't close an issue whose fingerprint still mixes causes. Never merge.
+**Real and open.** Branch in a worktree, failing repro first, fix, pull request. Follow the target repo's CLAUDE.md for setup and tests. The body's `## Why` opens with the report, and `Closes #n` for every issue in the case, unless the close-reason rule below says to hold: then write `Refs #n`, so merging the fix doesn't close an issue whose fingerprint still mixes causes. Never merge: the merge is the decision, so `Closes` only takes effect when Josh makes it.
 
 **Cannot tell.** One comment: what was found, what was not, what would settle it. Leave the issue open.
 
@@ -90,7 +92,7 @@ model: kimi-k2.7-code           # the model that made the failing calls, when it
 events: 79                      # failed calls in the case, from the transcripts
 real_window: {first: 2026-09-03, last: 2026-11-09}   # from the transcripts, never Bugsink's seen times
 recurrence: "34 edit calls since 2026-10-31, 0 validation errors"
-close:                          # per issue: completed | not-planned | hold until <task or PR>
+close:                          # per issue, the recommendation: completed | not-planned | hold until <task or PR>
   82: completed
   83: hold until a47480a4
 prs: []
@@ -108,6 +110,7 @@ Put the same frontmatter at the end of the proof or "cannot tell" comment, as a 
 
 ## Never
 
+- Close an issue or a task. Recommend it with the exact command; Josh decides, and he or a session he's directing closes.
 - Merge, deploy, restart anything, or run commands on picklelab.
 - Put transcript text anywhere public. The private repos' issues may carry it. brined-almanac and the vault get counts and timestamps only.
 - Reopen a question a merged pull request already answered. Read it first.
@@ -127,7 +130,7 @@ Nobody can approve anything under `--print`. A command outside Josh's allow rule
 - **Other checkouts.** `git -C <path>` and `cd <path> && git ...` are denied, fetches included. Read the target repo's `main` with `gh api repos/technicalpickles/<repo>/contents/<path>` and `gh search code`.
 - **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
 - **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
-- **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule: put the exact command in the report, and Josh closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
+- **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule, which backs up the rule above: put the exact command in the report, and Josh, or a session he's directing, closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
 - **Case record.** End the comment with the `almanac-case` block, with `worker.how: claude-p` and `tokens` and `minutes` null: a run can't see its own totals. List the record file under "not done". Whoever reviews the run writes the file from the block, taking `worker` from the `.summary.json` next to the run log the prompt names.
 - **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
 
