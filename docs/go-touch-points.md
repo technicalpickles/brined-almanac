@@ -20,6 +20,14 @@ These are gains. They cost nothing to take once the workflows are models.
 - **Production workflows as code.** `workflow.Coded` is documented as "for tests and samples". An almanac's own workflows are models. brined's three workflows (`host_state`, `bugsink_issues`, `security_alerts`) are scan, then `File`, with no repair step, so they fit a model with a scan, a small `decide`, and `File` effects. The open question is the body: the DSL gives `Saying(literal)` and `Showing(hostileFact, mapPart)`. A body assembled from clean facts plus quoted hostile text has to be a `MapPart` written in Go. That works, and it is the thing to prove first with `host_state`.
 - **Limits that match.** Rust declares `runs_per_hour = 1000` per workflow. Go's `DefaultLimits` set no run cap, so check that a workflow's own budget is taken as declared before relying on it.
 
+## Import friction, as feedback for upstream
+
+Found by importing `go-rewrite` at `86122f2` from outside its module. Running `hostilevet` here takes `go build -o hostilevet github.com/ivy/almanac/tools/hostilevet` then `go vet -vettool=./hostilevet ./...`; `go run` refuses with "use go hostilevet".
+
+- **`reveal` is upstream-only.** `boundaries` in `tools/hostilevet/taint/boundary.go` is a hardcoded list of `ivy/almanac/patch` and `ivy/almanac/github`. A downstream tracker has to hand hostile text to something outside almanac exactly as `github` does, so `bugsink` and `taskwarrior` both get "only the boundary packages tools/hostilevet lists may import hostile/reveal". The ask: let an almanac declare its own boundary packages (an analyzer flag, or a list the almanac's module owns), reviewed the same way.
+- **A no-leak test is flagged.** The boundary check skips `_test.go` files ("Tests may do both, to assert what a boundary sends"), but the formatting check does not. `transcript_test.go` formats a sample with `%v`, `%+v`, `%#v` and `%s` to prove its text never prints, and gets "fmt.Sprintf formats a hostile value". Upstream's own `hostile` tests are exempt only because `implementsTaint` covers package `hostile`. The ask: the same test-file exemption for formatting, or a sanctioned way to write that assertion.
+- **The module is importable as a pseudo-version.** `go get github.com/ivy/almanac@<commit>` works against `go-rewrite` with no `replace`. Nothing else has blocked so far.
+
 ## Not in scope until it is in Rust
 
 - **Tracker `Resolve`.** `effect.Tracker` has `File` and `Ask`, and so does the Rust `main` pin (`b8bdefa`). Closing tracker work on checked evidence lives only in [ivy/almanac#33](https://github.com/ivy/almanac/pull/33) and brined PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), both open. `resolve_on_close` on `main` resolves the **Bugsink** issue through the Bugsink API, which ports without it. A Go `Resolve` sits on a local, unpushed `brined-go` branch of ivy/almanac, shelved.
