@@ -57,10 +57,13 @@ run = """
 set -euo pipefail
 [ -f .env.portool ] || { echo "db:down: no .env.portool, nothing to tear down"; exit 0; }
 port=$(sed -n 's/^DB_PORT=//p' .env.portool)
-DB_PORT=${port:-0} docker compose down -v
-# Releasing the block frees GO_DB_PORT too, so the Go store must not outlive it.
-GO_DB_PORT=0 docker compose -f compose.go.yaml -p "$COMPOSE_PROJECT_NAME-go" down -v
-portool release
+failed=0
+DB_PORT=${port:-0} docker compose down -v || { echo "db:down: removing the Rust store failed (see above)" >&2; failed=1; }
+# Releasing the block frees GO_DB_PORT too, so the Go store should not outlive it. A failed
+# teardown must not leave the block held either, so the release below runs regardless.
+GO_DB_PORT=0 docker compose -f compose.go.yaml -p "$COMPOSE_PROJECT_NAME-go" down -v || { echo "db:down: removing the Go store failed (see above); releasing the ports anyway, so remove compose project $COMPOSE_PROJECT_NAME-go by hand" >&2; failed=1; }
+portool release || { echo "db:down: portool release failed (see above)" >&2; failed=1; }
+exit $failed
 """
 
 [tasks."db:pending"]

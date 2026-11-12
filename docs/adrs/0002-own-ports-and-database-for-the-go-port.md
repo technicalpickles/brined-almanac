@@ -17,7 +17,7 @@ One listener: `GET /healthz`, answered by the `run` daemon.
 - The Rust library serves it in `serve_health` (`crates/almanac/src/daemon.rs`), at `config.listen` or `HEALTH_LISTEN = "127.0.0.1:8788"` (`crates/almanac/src/app.rs:22`, `:162`).
 - The repository's `almanac.toml` says `listen = "127.0.0.1:8788"`.
 - Prod sets `ALMANAC_LISTEN: 0.0.0.0:8788` inside the container and publishes `127.0.0.1:8788:8788` (`compose.prod.yaml`). The container healthcheck and `scripts/deploy` both curl `/healthz` on 8788.
-- On the Mac today `lsof -iTCP:8788 -sTCP:LISTEN` shows OrbStack holding `127.0.0.1:8788` for `brined-almanac-prod-almanac-1`.
+- With prod up, `lsof -iTCP:8788 -sTCP:LISTEN` shows the container runtime holding `127.0.0.1:8788` for `brined-almanac-prod-almanac-1`.
 - No webhook receiver. That is the broker (`crates/broker`, default `127.0.0.1:8787`), and `compose.prod.yaml` runs no broker. Events come from scans only.
 
 ### What Rust stores
@@ -61,6 +61,7 @@ Not decided here: the prod shape for Go. When it comes, the loopback rule means 
 - `mise run db:down` also removes the Go store, because `portool release` frees `GO_DB_PORT` with the rest of the block.
 - `go run ./cmd/brined-almanac run` from the repository root without `ALMANAC_CONFIG` still reads `almanac.toml` and fails on 8788 while prod is up. It fails at once and touches nothing, but the safe way in is `mise run go:run`.
 - Running `portool sync` in a checkout allocates one more port in its block.
+- **8790 is not reserved with portool.** The health port is a fixed number, not an offset in a checkout's block, so portool does not know about it. Blocks are five ports wide and handed out from a range wide enough to include 8790 (`portool ls` shows the blocks in use), so a future block could cover 8790 and a Postgres could be published on it. `portool reserve 8790 --label go-almanac-health` closes that. It writes machine-wide portool state that every project on the machine shares, so this change does not run it. Until someone does, Go's health port depends on no block ever landing on 8790. If `go:run` fails with "address already in use" on 8790, check `portool ls` first.
 
 ## Options rejected
 

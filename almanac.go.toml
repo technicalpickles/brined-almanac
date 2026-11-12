@@ -1,4 +1,8 @@
 # Runtime settings for the Go port only, passed as ALMANAC_CONFIG by the go:* mise tasks.
 # Its own file so the Go daemon never takes Rust's listen port from almanac.toml. See
 # docs/adrs/0002-own-ports-and-database-for-the-go-port.md.
+#
+# Intentionally listen-only. ALMANAC_CONFIG replaces almanac.toml for the Go port instead of
+# layering on it, so any other setting in almanac.toml that the Go port should follow has to be
+# copied here by hand.
 listen = "127.0.0.1:8790"
