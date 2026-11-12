@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -162,14 +163,14 @@ func TestSidesThatMatchAgreeAndExitZero(t *testing.T) {
 }
 
 func TestEachDifferenceIsListedAndExitsNonZero(t *testing.T) {
-	dir, _ := oneCase(t, "host.state.finding", stale, staleFiled(t, "host-state", "host-state: no report from the mac"))
+	dir, _ := oneCase(t, "host.state.finding", stale, staleFiled(t, "hoststate", "host-state: no report from the mac"))
 	out, err := run(t, "compare", "--fixtures", dir)
 	if err == nil || !strings.Contains(err.Error(), "1 of 1 case(s) disagree") {
 		t.Errorf("err %v", err)
 	}
 	for _, line := range []string{
 		"DISAGREE  host.state.finding/one",
-		`run 1 workflow: rust "host-state", go "host_state"`,
+		`run 1 workflow: rust "hoststate", go "host_state"`,
 		`run 1 effects: rust [file "host-state: no report from the mac" to "task:brined-almanac"], go [file "host-state: no report from mac" to "task:brined-almanac"]`,
 	} {
 		if !strings.Contains(out, line) {
@@ -254,6 +255,7 @@ func TestDeniedEffectsAreReadAndCompared(t *testing.T) {
 	}
 	golang := side
 	golang.Runs = []compare.Run{side.Runs[0]}
+	golang.Runs[0].Workflow = "host_state"
 	golang.Runs[0].Denied = []string{"file"}
 	got := compare.Compare(compare.Case{Name: "x"}, side, golang).Differences
 	if len(got) != 1 || got[0] != `run 1 denied: rust "file, attest pending", go "file"` {
@@ -322,6 +324,27 @@ func TestRecordWritesWhatTheBinaryPrinted(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(c.Recording()); !bytes.Equal(got, now) {
 		t.Errorf("recorded %s", got)
+	}
+}
+
+func TestTheThreeAcceptedRenamesAgree(t *testing.T) {
+	for rustName, goName := range map[string]string{"host-state": "host_state", "bugsink-issues": "bugsink_issues", "security-alerts": "security_alerts"} {
+		rust := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: rustName, Result: "ran"}}}
+		golang := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: goName, Result: "ran"}}}
+		if got := compare.Compare(compare.Case{Name: "x"}, rust, golang).Differences; len(got) != 0 {
+			t.Errorf("%s vs %s: %q", rustName, goName, got)
+		}
+	}
+}
+
+func TestAnUnlistedRenameStillDisagrees(t *testing.T) {
+	for _, pair := range [][2]string{{"new-thing", "new_thing"}, {"host_state", "host_state2"}, {"host-state", "bugsink_issues"}, {"host-state", "host-state"}} {
+		rust := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: pair[0], Result: "ran"}}}
+		golang := compare.Side{Ingest: "queued", Runs: []compare.Run{{Workflow: pair[1], Result: "ran"}}}
+		want := fmt.Sprintf("run 1 workflow: rust %q, go %q", pair[0], pair[1])
+		if got := compare.Compare(compare.Case{Name: "x"}, rust, golang).Differences; len(got) != 1 || got[0] != want {
+			t.Errorf("%v: %q", pair, got)
+		}
 	}
 }
 

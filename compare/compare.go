@@ -132,6 +132,26 @@ func Compare(c Case, rust, golang Side) Compared {
 	return Compared{Case: c.Name, Differences: differences(rust, golang), Rust: rust, Go: golang}
 }
 
+// acceptedWorkflowRenames is a deliberate, documented divergence: Rust names these three
+// workflows with hyphens and Go keeps underscores. The planned cutover (PR #61, not
+// merged) copies only Rust's seen rows and moves run_seq, not run rows, and a tracker finds its
+// item by the outbox key alone (the GitHub almanac marker, the taskwarrior almanac_key UDA). It is a table, not
+// a '-' to '_' rewrite, so a fourth workflow or any other rename still shows as a difference.
+// See docs/divergences.md.
+var acceptedWorkflowRenames = map[string]string{
+	"host-state":      "host_state",
+	"bugsink-issues":  "bugsink_issues",
+	"security-alerts": "security_alerts",
+}
+
+// inGoName is a Rust workflow name as Go spells it.
+func inGoName(rustName string) string {
+	if goName, ok := acceptedWorkflowRenames[rustName]; ok {
+		return goName
+	}
+	return rustName
+}
+
 func inWorkflowOrder(s Side) Side {
 	s.Runs = slices.Clone(s.Runs)
 	slices.SortStableFunc(s.Runs, func(a, b Run) int { return strings.Compare(sortKey(a), sortKey(b)) })
@@ -166,7 +186,9 @@ func differences(rust, golang Side) []string {
 	for i := range rust.Runs {
 		r, g := rust.Runs[i], golang.Runs[i]
 		at := fmt.Sprintf("run %d ", i+1)
-		differ(at+"workflow", r.Workflow, g.Workflow)
+		if inGoName(r.Workflow) != g.Workflow {
+			out = append(out, fmt.Sprintf("%sworkflow: rust %s, go %s", at, shown(r.Workflow), shown(g.Workflow)))
+		}
 		differ(at+"result", r.Result, g.Result)
 		differ(at+"reason", r.Reason, g.Reason)
 		differ(at+"denied", strings.Join(r.Denied, ", "), strings.Join(g.Denied, ", "))
