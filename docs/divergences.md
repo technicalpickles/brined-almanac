@@ -18,26 +18,12 @@ One row per difference class and case set. Columns: `id | signature | cases`. Ca
 - Every effect keeps its kind and target and drops its title, so an extra, missing or retargeted effect changes the signature.
 
 ```divergences
-DV-WORKFLOW-NAME | run 1 workflow: rust "bugsink-issues", go "bugsink_issues" | bugsink.issue.unaddressed/body-only-empty-surfaces, bugsink.issue.unaddressed/body-only-ingest-dated, bugsink.issue.unaddressed/first, bugsink.issue.unaddressed/other-service, bugsink.issue.unaddressed/regressed
-DV-WORKFLOW-NAME | run 1 workflow: rust "host-state", go "host_state" | host.state.finding/check-critical, host.state.finding/check-dotted-project, host.state.finding/check-warning, host.state.finding/stale-never, host.state.finding/stale-since
-DV-WORKFLOW-NAME | run 1 workflow: rust "security-alerts", go "security_alerts" | security.alert.finding/coverage, security.alert.finding/overdue-every-severity, security.alert.finding/overdue-secrets-only, security.alert.finding/overdue
 ```
 
-Today that is 14 of 22 cases, all on the name (rows 1 to 3). The four parse gaps, where Rust refused an event at ingest and Go queued it, are fixed: brined's parsers now refuse a missing or non-list `surfaces`, a project that is not a taskwarrior project, and a `since` that does not split at `T`, as Rust's do.
+No rows are open. Each id needs a section below with a `Status:` line and an `Owner:` line, if a row ever returns. The test checks that.
 
-Each id needs a section below with a `Status:` line and an `Owner:` line. The test checks that too.
+## Accepted and normalised in compare: workflow names
 
-## DV-WORKFLOW-NAME: hyphen vs underscore in the workflow name
+Rust names the workflows `host-state`, `bugsink-issues` and `security-alerts`. Go names them `host_state`, `bugsink_issues` and `security_alerts`. Josh decided to keep the Go underscore names. A cutover uses a fresh Go store seeded from Rust, and a tracker finds its item by the outbox key alone (the GitHub `<!-- almanac:{key} -->` marker, the taskwarrior `almanac_key` UDA), so the workflow name never crosses over.
 
-- **Status:** open, proposed resolution pending.
-- **Owner:** Josh (decision). Proposed worker: the `upstream-prs` lane.
-- **Fixtures:** 14 cases, listed in the table above: every case where both sides start a run. A name difference does not hide others, because `compare` checks each field of a run on its own.
-- **Rust side:** the workflow is the function `host_state` in `src/workflows/host_state.rs:264`, and likewise `security_alerts` (`src/workflows/security_alerts.rs:663`) and `bugsink_issues` (`src/workflows/bugsink_issues.rs:319`). The recordings print the names hyphenated. That the `#[workflow]` macro turns underscores into hyphens is inferred from the recordings, not read from the macro source.
-- **Go side:** `Define("host_state", ...)` at `brine/hoststate/hoststate.go:16`, `Define("security_alerts", ...)` at `brine/securityalerts/securityalerts.go:20`, `Define("bugsink_issues", ...)` at `brine/bugsinkissues/bugsinkissues.go:15`. The checker in upstream almanac accepts only `^[a-z][a-z0-9_]*$` (`check/check.go:88` in the module `github.com/ivy/almanac`), so a hyphenated name does not check.
-- **Why it matters beyond cosmetics:** store scopes and budgets key on the workflow name (parity plan, `store-parity` lane, item 3). A cutover that reuses the Rust store would see different scope names.
-- **Proposed resolution:** upstream PR allowing `-` in workflow names (issue [steading-ai/almanac#35](https://github.com/steading-ai/almanac/issues/35) raises it; the `upstream-prs` lane is measuring a fix). If upstream declines, accept and record the store consequence for cutover.
-- **Decision needed from Josh:** upstream PR or accept. If accept, say how a cutover handles names already in the Rust store.
-
-## Open decisions in one place
-
-1. Workflow names: upstream PR (preferred, clears 14 cases) or accept.
+`compare` therefore treats those three pairs as the same workflow. The pairs live in the table `acceptedWorkflowRenames` in `compare/compare.go`. It is an explicit table, not a `-` to `_` rewrite, so a fourth workflow or any other rename still shows as a difference. Because it is normalised away, it has no row in the machine-readable block.
