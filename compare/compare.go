@@ -133,10 +133,10 @@ func Compare(c Case, rust, golang Side) Compared {
 }
 
 // acceptedWorkflowRenames is a deliberate, documented divergence: Rust names these three
-// workflows with hyphens and Go keeps underscores. The planned cutover (PR #61, not
-// merged) copies only Rust's seen rows and moves run_seq, not run rows, and a tracker finds its
-// item by the outbox key alone (the GitHub almanac marker, the taskwarrior almanac_key UDA). It is a table, not
-// a '-' to '_' rewrite, so a fourth workflow or any other rename still shows as a difference.
+// workflows with hyphens and Go keeps underscores. The planned cutover ("Cutover onto a
+// fresh Go store" in docs/go-port-parity-plan.md) copies only Rust's seen rows and moves run_seq,
+// not run rows, and a tracker finds its item by the outbox key alone (the GitHub almanac marker,
+// the taskwarrior almanac_key UDA). It is a table, not a '-' to '_' rewrite, so a fourth workflow or any other rename still shows as a difference.
 // See docs/divergences.md.
 var acceptedWorkflowRenames = map[string]string{
 	"host-state":      "host_state",
