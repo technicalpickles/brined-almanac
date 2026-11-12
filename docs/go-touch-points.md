@@ -15,11 +15,14 @@ These are gains. They cost nothing to take once the workflows are models.
 
 ## What the Go library lacks that brined's Rust relies on
 
-- **`Resolve`.** `effect.Tracker` has `File` and `Ask`. Rust brined closes tracker work on checked evidence through the effect in [ivy/almanac#33](https://github.com/ivy/almanac/pull/33). A Go version is in progress on the local `brined-go` branch of ivy/almanac.
 - **A way for a downstream package to be a taint boundary.** `tools/hostilevet/taint/boundary.go` lists the only packages allowed to import `hostile/reveal`, and the list names upstream's `patch` and `github`. brined needs the same standing in three places that must hand text to the outside: the Bugsink shipper, the taskwarrior tracker, and the Router wrapping both. Putting brined in upstream's list is the wrong fix. A flag or config on the analyzer is the right one, and is worth proposing.
 - **A non-GitHub `Tracker`.** `github.NewIssues` exists. Anything for `task:` targets does not, and the Router that sends `task:` targets to taskwarrior and everything else to GitHub is brined's to write against `effect.Tracker`.
 - **Production workflows as code.** `workflow.Coded` is documented as "for tests and samples". An almanac's own workflows are models. brined's three workflows (`host_state`, `bugsink_issues`, `security_alerts`) are scan, then `File`, with no repair step, so they fit a model with a scan, a small `decide`, and `File` effects. The open question is the body: the DSL gives `Saying(literal)` and `Showing(hostileFact, mapPart)`. A body assembled from clean facts plus quoted hostile text has to be a `MapPart` written in Go. That works, and it is the thing to prove first with `host_state`.
 - **Limits that match.** Rust declares `runs_per_hour = 1000` per workflow. Go's `DefaultLimits` set no run cap, so check that a workflow's own budget is taken as declared before relying on it.
+
+## Not in scope until it is in Rust
+
+- **Tracker `Resolve`.** `effect.Tracker` has `File` and `Ask`, and so does the Rust `main` pin (`b8bdefa`). Closing tracker work on checked evidence lives only in [ivy/almanac#33](https://github.com/ivy/almanac/pull/33) and brined PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), both open. `resolve_on_close` on `main` resolves the **Bugsink** issue through the Bugsink API, which ports without it. A Go `Resolve` sits on a local, unpushed `brined-go` branch of ivy/almanac, shelved.
 
 ## Gaps this port introduces on its own
 
@@ -45,7 +48,7 @@ These are gains. They cost nothing to take once the workflows are models.
 
 ## Order this implies
 
-1. Land the `Resolve` branch locally. It unblocks `resolve_on_close` and `bugsink_issues`.
+1. Port `resolve_on_close` from Rust `main`. It is pure rules over `cutover` types.
 2. Port `host_state` as a model first. It has the simplest scan and the smallest body, so it proves the `MapPart` body approach before the larger workflows commit to it.
-3. Write the Router and the `task` tracker once `Resolve` is in, since both must implement it.
+3. Write the Router and the `task` tracker against `effect.Tracker` as it is (`File`, `Ask`).
 4. Raise the boundary question with Ivy before the next package needs `reveal`.
