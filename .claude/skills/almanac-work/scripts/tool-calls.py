@@ -20,10 +20,24 @@ import json
 import os
 import re
 import sys
+import tomllib
 
 STATE = os.environ.get("BRINED_ALMANAC_STATE") or os.path.expanduser("~/.local/share/brined-almanac")
 TRANSCRIPTS = os.path.join(STATE, "transcripts")
-FENCE = re.compile(r"<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>.*?---\n(.*?)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT", re.S)
+FENCE = re.compile(
+    r"<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*Source:[^\n]*\n---\n(.*?)\n?<<<END_EXTERNAL_UNTRUSTED_CONTENT", re.S
+)
+CLASSES_TOML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../classes.toml")
+
+
+def load_classes():
+    """The ordered class table the Rust classifier reads too. The last row has no pattern."""
+    with open(CLASSES_TOML, "rb") as fh:
+        rows = tomllib.load(fh)["class"]
+    return [(r["name"], re.compile(r["pattern"]) if "pattern" in r else None) for r in rows]
+
+
+CLASSES = load_classes()
 
 
 def surface(path):
@@ -32,26 +46,55 @@ def surface(path):
     return m.group(1) if m else name[:12]
 
 
-def error_line(details):
-    """The line of the error text that says why. A nested-tool record keeps the text under
-    result.content, a plain toolResult record under content. Two shapes bury the reason below the
-    first line: a JSON object with an `error` field, and a `Command failed: <argv>` line followed
-    by the command's own message."""
-    holder = details.get("result") if isinstance(details.get("result"), dict) else details
-    try:
-        text = holder["content"][0]["text"]
-    except (KeyError, IndexError, TypeError):
-        text = json.dumps(holder.get("content") or holder.get("result"))[:200]
-    m = FENCE.search(text)
-    if m:
-        text = m.group(1)
+def unwrap(text):
+    """The error without OpenClaw's wrapping: the `error` of a JSON object, then whatever sits
+    inside an untrusted-content fence. Its preamble is boilerplate that says Delete and Execute."""
     try:
         wrapped = json.loads(text)
     except ValueError:
         wrapped = None
     if isinstance(wrapped, dict) and isinstance(wrapped.get("error"), str):
         text = wrapped["error"]
-    lines = [ln for ln in text.splitlines() if ln.strip()]
+    m = FENCE.search(text)
+    return m.group(1) if m else text
+
+
+def error_text(message):
+    """What a failed call said, picked as src/transcript.rs error_text does. `details` holds it as
+    a string, or as an object with an `error` or a `result`. Any other `details` only names the
+    tool and its status, and the message is in the text blocks of `content`."""
+    details = message.get("details")
+    if isinstance(details, str):
+        says_why = bool(details.strip())
+    elif isinstance(details, dict):
+        says_why = "error" in details or "result" in details
+    else:
+        says_why = False
+    blocks = message.get("content")
+    content = "\n".join(
+        b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+    ) if isinstance(blocks, list) else ""
+    if not says_why and content.strip():
+        return content
+    if isinstance(details, str):
+        return details
+    if details is None:
+        return ""
+    return json.dumps(details, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
+
+
+def nested_text(details):
+    """The same for an `openclaw.nested-tool.v1` record, which keeps the text under result.content."""
+    result = details.get("result")
+    if isinstance(result, dict):
+        return error_text({"details": None, "content": result.get("content")})
+    return error_text({"details": details.get("error"), "content": None})
+
+
+def error_line(text):
+    """The line of the unwrapped text that says why. A `Command failed: <argv>` line hides the
+    command's own message on the next line."""
+    lines = [ln for ln in unwrap(text).splitlines() if ln.strip()]
     if not lines:
         return ""
     if lines[0].startswith("Command failed:") and len(lines) > 1:
@@ -59,33 +102,28 @@ def error_line(details):
     return lines[0].strip()[:120]
 
 
-def classify(line):
-    if "-32001" in line:
-        return "mcp-timeout"
-    if "too many clients" in line:
-        return "pg-too-many-clients"
-    if "Approval timed out" in line or "card expired" in line:
-        return "approval-timeout"
-    if "approval" in line.lower():
-        return "approval-unavailable"
-    return "other"
+def classify(text):
+    text = unwrap(text)
+    for name, pattern in CLASSES:
+        if pattern is None or pattern.search(text):
+            return name
 
 
 def matches(name, tool):
     return name == tool or name.endswith(f"__{tool}")
 
 
-def row(ts, path, inp, details, started):
+def row(ts, path, inp, details, started, text):
     secs = (details.get("timestamp", 0) - started) / 1000 if started and details.get("timestamp") else None
-    err = error_line(details) if details.get("isError") else ""
+    failed = bool(details.get("isError"))
     return {
         "time": ts[:16],
         "surface": surface(path),
         "input": json.dumps(inp, separators=(",", ":"))[:40] if inp else "",
         "error": bool(details.get("isError")),
         "secs": secs,
-        "line": err,
-        "class": classify(err) if err else "",
+        "line": error_line(text) if failed else "",
+        "class": classify(text) if failed else "",
     }
 
 
@@ -118,7 +156,7 @@ def calls(tool, since):
                 if msg.get("customType") == "openclaw.nested-tool.v1":
                     d = msg.get("details", {})
                     if matches(d.get("toolName", ""), tool):
-                        rows.append(row(ts, path, d.get("input"), d, d.get("startedAt")))
+                        rows.append(row(ts, path, d.get("input"), d, d.get("startedAt"), nested_text(d)))
                 elif msg.get("role") == "toolResult" and matches(msg.get("toolName", ""), tool):
                     args, started = pending.pop(msg.get("toolCallId"), (None, 0))
                     if isinstance(args, str):
@@ -126,7 +164,7 @@ def calls(tool, since):
                             args = json.loads(args)
                         except json.JSONDecodeError:
                             pass
-                    rows.append(row(ts, path, args, msg, started))
+                    rows.append(row(ts, path, args, msg, started, error_text(msg)))
     rows.sort(key=lambda r: r["time"])
     return rows
 
