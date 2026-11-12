@@ -52,12 +52,14 @@ echo "postgres: 127.0.0.1:$port (compose project $COMPOSE_PROJECT_NAME, volume $
 """
 
 [tasks."db:down"]
-description = "Remove this checkout's Postgres and volume and release its ports"
+description = "Remove this checkout's Postgres servers (Rust and Go) and volumes and release its ports"
 run = """
 set -euo pipefail
 [ -f .env.portool ] || { echo "db:down: no .env.portool, nothing to tear down"; exit 0; }
 port=$(sed -n 's/^DB_PORT=//p' .env.portool)
 DB_PORT=${port:-0} docker compose down -v
+# Releasing the block frees GO_DB_PORT too, so the Go store must not outlive it.
+GO_DB_PORT=0 docker compose -f compose.go.yaml -p "$COMPOSE_PROJECT_NAME-go" down -v
 portool release
 """
 
@@ -77,4 +79,32 @@ set -euo pipefail
 port=$(sed -n 's/^DB_PORT=//p' .env.portool 2>/dev/null || true)
 [ -n "$port" ] || { echo "mise run live: no DB_PORT; run \\`mise run db\\` first" >&2; exit 1; }
 ALMANAC_MODE=live DATABASE_URL="postgres://almanac@127.0.0.1:$port/almanac" GITHUB_TOKEN="$(gh auth token)" cargo run -q --
+"""
+
+# The Go port's own store and port (docs/adrs/0002-own-ports-and-database-for-the-go-port.md).
+[tasks."go:db"]
+description = "Start this checkout's Go port Postgres on the port portool allocated as GO_DB_PORT"
+run = """
+set -euo pipefail
+portool sync --quiet
+port=$(sed -n 's/^GO_DB_PORT=//p' .env.portool)
+[ -n "$port" ] || { echo "mise run go:db: .env.portool has no GO_DB_PORT; run \\`portool sync\\` here from a normal terminal (the agent sandbox may block ~/.local/state/portool)" >&2; exit 1; }
+GO_DB_PORT=$port docker compose -f compose.go.yaml -p "$COMPOSE_PROJECT_NAME-go" up -d --wait db
+echo "postgres (Go port): 127.0.0.1:$port/brined_almanac_go (compose project $COMPOSE_PROJECT_NAME-go)"
+"""
+
+[tasks."go:db:down"]
+description = "Remove this checkout's Go port Postgres and its volume, keeping the portool block"
+run = """
+set -euo pipefail
+GO_DB_PORT=0 docker compose -f compose.go.yaml -p "$COMPOSE_PROJECT_NAME-go" down -v
+"""
+
+[tasks."go:run"]
+description = "Run a Go port verb against its own store and port: mise run go:run -- run | check | backfill"
+run = """
+set -euo pipefail
+port=$(sed -n 's/^GO_DB_PORT=//p' .env.portool 2>/dev/null || true)
+[ -n "$port" ] || { echo "mise run go:run: no GO_DB_PORT; run \\`mise run go:db\\` first" >&2; exit 1; }
+ALMANAC_CONFIG=almanac.go.toml DATABASE_URL="postgres://brined_almanac_go@127.0.0.1:$port/brined_almanac_go" go run ./cmd/brined-almanac
 """
