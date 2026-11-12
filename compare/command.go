@@ -46,7 +46,7 @@ targets, denied effects, and recorded statuses. A filed body is not compared, be
 only as Untrusted(..). A case whose name starts with body-only differs from another case only in
 fields that reach the body, so it shows the event still parses and files the same task, and nothing
 about the body itself.`,
-		Args:  cobra.NoArgs,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if record && binary == "" {
 				return errors.New("compare --record needs --rust BIN, the Rust binary whose output to record")
