@@ -22,9 +22,11 @@ These are gains. They cost nothing to take once the workflows are models.
 
 ## Import friction, as feedback for upstream
 
+Josh has write access to steading-ai/almanac, so each item below can go upstream as a pull request, not only as feedback. Issue [#35](https://github.com/steading-ai/almanac/issues/35) raises them with the maintainer first. Nothing is sent without Josh saying so.
+
 Found by importing `go-rewrite` at `86122f2` from outside its module. Running `hostilevet` here takes `go build -o hostilevet github.com/ivy/almanac/tools/hostilevet` then `go vet -vettool=./hostilevet ./...`; `go run` refuses with "use go hostilevet".
 
-- **`reveal` is upstream-only.** `boundaries` in `tools/hostilevet/taint/boundary.go` is a hardcoded list of `ivy/almanac/patch` and `ivy/almanac/github`. A downstream tracker has to hand hostile text to something outside almanac exactly as `github` does, so `bugsink` and `taskwarrior` both get "only the boundary packages tools/hostilevet lists may import hostile/reveal". The ask: let an almanac declare its own boundary packages (an analyzer flag, or a list the almanac's module owns), reviewed the same way.
+- **`reveal` is gated by a library-side list.** `boundaries` in `tools/hostilevet/taint/boundary.go` is a hardcoded list of `ivy/almanac/patch` and `ivy/almanac/github`. A downstream tracker has to hand hostile text to something outside almanac exactly as `github` does, so `bugsink` and `taskwarrior` both get "only the boundary packages tools/hostilevet lists may import hostile/reveal". The ask: let an almanac declare its own boundary packages (an analyzer flag, or a list the almanac's module owns), reviewed the same way.
 - **A no-leak test is flagged.** The boundary check skips `_test.go` files ("Tests may do both, to assert what a boundary sends"), but the formatting check does not. `transcript_test.go` formats a sample with `%v`, `%+v`, `%#v` and `%s` to prove its text never prints, and gets "fmt.Sprintf formats a hostile value". Upstream's own `hostile` tests are exempt only because `implementsTaint` covers package `hostile`. The ask: the same test-file exemption for formatting, or a sanctioned way to write that assertion.
 - **An event parser cannot refuse a value that decodes.** `wire.Field` takes only `hostile.Clean` types and `wire.Member` only closed sets, and `wire.Payload` has no exported way to mark a field malformed. Rust's `host_state` refused, at parse, a `/project` that is a slug but not a taskwarrior project (`Bad`) and a `/since` that does not split at `T` into two slugs (`T14:50Z`). In Go those parse, and the `brine.file_finding` observer refuses them, so the delivery becomes a failed run instead of a malformed one. The ask: a way for `Parse` to report a field malformed after reading it.
 - **A pure derivation has to be an Observer.** Turning a project into `task:<project>` and splitting `since` reads nothing from outside, but the DSL has no compute step, so it is declared as an observer.
@@ -50,7 +52,7 @@ Found by importing `go-rewrite` at `86122f2` from outside its module. Running `h
 
 ## Not in scope until it is in Rust
 
-- **Tracker `Resolve`.** `effect.Tracker` has `File` and `Ask`, and so does the Rust `main` pin (`b8bdefa`). Closing tracker work on checked evidence lives only in [ivy/almanac#33](https://github.com/ivy/almanac/pull/33) and brined PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), both open. `resolve_on_close` on `main` resolves the **Bugsink** issue through the Bugsink API, which ports without it. A Go `Resolve` sits on a local, unpushed `brined-go` branch of ivy/almanac, shelved.
+- **Tracker `Resolve`.** `effect.Tracker` has `File` and `Ask`, and so does the Rust `main` pin (`b8bdefa`). Closing tracker work on checked evidence lives only in [ivy/almanac#33](https://github.com/steading-ai/almanac/pull/33) and brined PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), both open. `resolve_on_close` on `main` resolves the **Bugsink** issue through the Bugsink API, which ports without it. A Go `Resolve` sits on a local, unpushed `brined-go` branch of ivy/almanac, shelved.
 
 ## Gaps this port introduces on its own
 

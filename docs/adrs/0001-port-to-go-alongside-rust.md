@@ -6,9 +6,9 @@ Proposed for the `go-port` branch. The Rust implementation stays in the tree and
 
 ## Context
 
-brined-almanac is built on [ivy/almanac](https://github.com/ivy/almanac), pinned in `Cargo.toml` at `b8bdefa`. Upstream's author is rewriting almanac in Go on the `go-rewrite` branch of that repository, recorded in her [ADR 0002](https://github.com/ivy/almanac/blob/go-rewrite/docs/adrs/0002-go-and-a-workflow-model.md). In that design a workflow is no longer Rust code. It is a checked data model built by a Go DSL, and an engine interprets it. The branch had no pull request and was 115 commits ahead of upstream's `main` when this ADR was written. Like the Rust pin, it has no tracker `Resolve` effect. That effect exists only in open PRs ([ivy/almanac#33](https://github.com/ivy/almanac/pull/33), brined [#38](https://github.com/technicalpickles/brined-almanac/pull/38)).
+brined-almanac is built on [steading-ai/almanac](https://github.com/steading-ai/almanac) (formerly ivy/almanac, which redirects), pinned in `Cargo.toml` at `b8bdefa`. Upstream's author is rewriting almanac in Go on the `go-rewrite` branch of that repository, recorded in her [ADR 0002](https://github.com/steading-ai/almanac/blob/go-rewrite/docs/adrs/0002-go-and-a-workflow-model.md). In that design a workflow is no longer Rust code. It is a checked data model built by a Go DSL, and an engine interprets it. The branch had no pull request and was 115 commits ahead of upstream's `main` when this ADR was written. On 2026-11-12 it was still 115 ahead and 0 behind, with no pull request and no tags, so the Go port is not on upstream's `main`, which is still Rust and whose tip is this repo's pin. Like the Rust pin, it has no tracker `Resolve` effect. That effect exists only in open PRs ([ivy/almanac#33](https://github.com/steading-ai/almanac/pull/33), brined [#38](https://github.com/technicalpickles/brined-almanac/pull/38)).
 
-Staying on the Rust pin works today. It leaves brined on a library whose author has moved on. A port waits for upstream's Go surface to settle, but the work that does not depend on it can start now.
+Staying on the Rust pin works today. It leaves brined on the Rust side of a library whose author is working on the Go side. A port waits for upstream's Go surface to settle, but the work that does not depend on it can start now.
 
 ## Decision
 
@@ -29,5 +29,5 @@ Work on a `go-port` branch, in the same spirit as upstream's.
 
 ## Options rejected
 
-- **Stay on the Rust pin indefinitely.** Cheap now, but the pin stops getting upstream fixes, such as the hardening in ivy/almanac#26 to #32.
+- **Stay on the Rust pin indefinitely.** Cheap now, but fixes land upstream on the Go side first, and the Rust hardening in steading-ai/almanac#26 to #32 is still in open pull requests, not on `main`. Josh has write access upstream, so a fix that matters can also go there as a pull request.
 - **Port everything in one cutover.** No way to check the port while it is being written.

@@ -1,6 +1,6 @@
 # Porting plan: Rust to Go
 
-The port follows Rust `main` and nothing else. Behaviour that is not on `main` yet, such as the tracker `Resolve` effect in [ivy/almanac#33](https://github.com/ivy/almanac/pull/33) and brined's PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), comes over only after it lands in Rust.
+The port follows Rust `main` and nothing else. Behaviour that is not on `main` yet, such as the tracker `Resolve` effect in [ivy/almanac#33](https://github.com/steading-ai/almanac/pull/33) and brined's PR [#38](https://github.com/technicalpickles/brined-almanac/pull/38), comes over only after it lands in Rust.
 
 The order below comes from `use crate::` edges in `src/`, leaves first. Each step ends in a check against the Rust: the same table cases as the Rust test file, run on the Go side, with the Rust test run beside it. Status lives in the table, not in prose.
 
