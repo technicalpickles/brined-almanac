@@ -1,0 +1,1 @@
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"bugsink-issues\", effects: [File { title: Title(\"Brent: pickleclaw/exec mcp-timeout (14 events)\"), target: Slug(\"technicalpickles/pickleclaw\"), body: Untrusted(..) }], denied: [] } recorded as [WouldApply]"],"simulate":"Queued","why":null}

@@ -1,0 +1,1 @@
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"host-state\", effects: [File { title: Title(\"host-state: gh-auth critical on picklelab since 2026-11-10 14:50Z\"), target: Slug(\"task:home.lab\"), body: Untrusted(..) }], denied: [] } recorded as [WouldApply]"],"simulate":"Queued","why":null}

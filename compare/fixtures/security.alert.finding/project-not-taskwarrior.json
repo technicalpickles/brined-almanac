@@ -1,0 +1,15 @@
+{
+  "kind": "overdue",
+  "project": "Bad",
+  "subject": "technicalpickles/dotfiles",
+  "critical": 0,
+  "high": 2,
+  "medium": 1,
+  "low": 0,
+  "unknown": 0,
+  "secrets": 0,
+  "dependabot_off": 0,
+  "secret_scanning_off": 0,
+  "repositories": 0,
+  "lines": "#37 high toml (package-lock.json) GHSA-aaaa-bbbb-cccc, fixed in 5.0.1, 21 days, https://github.com/technicalpickles/dotfiles/security/dependabot/37\n#38 high lodash (package-lock.json) GHSA-dddd-eeee-ffff, no fix yet, 16 days, https://github.com/technicalpickles/dotfiles/security/dependabot/38\n#41 medium minimist (package-lock.json) GHSA-gggg-hhhh-iiii, fixed in 1.2.6, 35 days, https://github.com/technicalpickles/dotfiles/security/dependabot/41"
+}
