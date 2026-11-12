@@ -104,14 +104,19 @@ impl At {
 /// a question about it (`narrow`) or a bounded excerpt (`excerpt`).
 pub struct Sample(String);
 
-/// The error itself, without OpenClaw's wrapping: the `error` of a JSON object, then whatever is
-/// inside an untrusted-content fence. The fence's preamble is boilerplate that would otherwise
-/// be classified and quoted in place of the error.
+/// The error itself, without OpenClaw's wrapping: the `error` of a JSON object, or else the text
+/// blocks of its `result.content`, then whatever is inside an untrusted-content fence. The
+/// fence's preamble is boilerplate that would otherwise be classified and quoted in place of the
+/// error, and JSON escapes the quotes a pattern looks for.
 fn unwrap(raw: &str) -> String {
     let error = match serde_json::from_str::<Value>(raw) {
-        Ok(Value::Object(mut fields)) => match fields.remove("error") {
-            Some(Value::String(error)) => error,
-            _ => raw.to_string(),
+        Ok(Value::Object(fields)) => match &fields.get("error") {
+            Some(Value::String(error)) => error.clone(),
+            _ => fields
+                .get("result")
+                .map(content_text)
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| raw.to_string()),
         },
         _ => raw.to_string(),
     };

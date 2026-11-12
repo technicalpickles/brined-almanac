@@ -342,6 +342,19 @@ fn a_fence_without_a_json_wrapper_is_unwrapped_too() {
 }
 
 #[test]
+fn a_result_object_gives_its_content_text() {
+    let blob = serde_json::json!({
+        "result": {"content": [{"type": "text", "text": "bundle-mcp server \"brineworks\" is not connected"}]},
+        "status": "error",
+    })
+    .to_string();
+    assert_eq!(
+        reason_of(&blob),
+        "bundle-mcp server \"brineworks\" is not connected"
+    );
+}
+
+#[test]
 fn text_with_no_wrapper_is_left_alone() {
     assert_eq!(reason_of("plain failure\nsecond line"), "plain failure");
     assert_eq!(

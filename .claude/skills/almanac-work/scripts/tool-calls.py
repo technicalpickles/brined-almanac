@@ -47,7 +47,7 @@ def surface(path):
 
 
 def unwrap(text):
-    """The error without OpenClaw's wrapping: the `error` of a JSON object, then whatever sits
+    """The error without OpenClaw's wrapping: the `error` of a JSON object, or its result.content text, then whatever sits
     inside an untrusted-content fence. Its preamble is boilerplate that says Delete and Execute."""
     try:
         wrapped = json.loads(text)
@@ -55,6 +55,9 @@ def unwrap(text):
         wrapped = None
     if isinstance(wrapped, dict) and isinstance(wrapped.get("error"), str):
         text = wrapped["error"]
+    elif isinstance(wrapped, dict) and isinstance(wrapped.get("result"), dict):
+        inner = error_text({"details": None, "content": wrapped["result"].get("content")})
+        text = inner if inner.strip() else text
     m = FENCE.search(text)
     return m.group(1) if m else text
 
