@@ -168,10 +168,24 @@ Each host declares its transport. picklelab is the first pull host: the puller f
 - **Model:** none.
 - **Needs:** fetch access to origin for maintained-tier repositories, read-only. The container can fetch public repositories without credentials; private ones in that tier wait for the GitHub App. Plus the `~/github.com` mount and read access to `~/.claude/plugins/cache` and `~/.cargo/.crates.toml`.
 
+### github-notifications
+
+- **Status:** next. A source, not a workflow: it files nothing itself, and oss-maintained and oss-contributions read from it.
+- **Watches:** my GitHub notifications, through `GET /notifications`.
+- **Why:** notifications are the signal GitHub already pushes to me. Each thread says why it reached me (`mention`, `review_requested`, `comment`, `author`, `assign`, `ci_activity`, `state_change`, `security_alert`), across every repository, including other people's projects where no webhook reaches. Polling every issue and pull request I've opened reconstructs that signal from diffs, and misses what isn't mine to list, like a mention on someone else's thread. The web inbox doesn't work as the fallback either: it mixes in a work organization I can't sign in to from here, and those threads show up as blank pages I have to click past to reach the rest. Decided 2026-11-12.
+- **How it reads:**
+  - Each scan sends `If-Modified-Since` with the last `Last-Modified` it saw, so a quiet inbox costs a 304, and it waits at least the `X-Poll-Interval` GitHub returns.
+  - A thread's id and `updated_at` make the delivery id, so scanning the same thread twice changes nothing, and a new comment on it is a new event.
+  - It never marks a thread read or changes a subscription. The inbox is still mine to read.
+  - A notification only says where to look. The workflow that takes it reads the issue or pull request's current state before it reports anything, the same way upstream treats a webhook.
+  - A thread from an organization outside my own accounts is dropped. The token is never authorized for the work organization's SSO, so its threads shouldn't arrive at all, and the drop is the backstop.
+- **Model:** none.
+- **Needs:** a classic personal access token with the `notifications` scope, plus `repo` to see threads on private repositories. The notifications endpoints only accept classic tokens, not fine-grained tokens or GitHub App tokens, so the M4 App can't stand in for it. It gets its own variable, the way security-alerts has `GITHUB_ALERTS_TOKEN`, and nothing else uses it.
+
 ### oss-maintained
 
 - **Status:** next.
-- **Watches:** issues and pull requests from other people on maintained-tier repositories, through almanac's native GitHub source.
+- **Watches:** issues and pull requests from other people on maintained-tier repositories, through almanac's native GitHub source, and github-notifications for the threads on them that ask for me.
 - **Reports:** a pull request that needs my review, an issue that waits on my answer, or a thread that has gone quiet.
 - **Model:** none to start.
 - **Needs:** the GitHub App that continue-work sets up in M4, installed on maintained-tier repositories too.
@@ -187,7 +201,7 @@ Each host declares its transport. picklelab is the first pull host: the puller f
 
   To find workarounds, a workaround names its upstream issue in a comment, and the workflow searches for that link.
 - **Model:** none.
-- **Needs:** only a token. The repositories are not mine, so webhooks are not available. This workflow polls on a schedule.
+- **Needs:** github-notifications. The repositories are not mine, so webhooks are not available, and a thread's notification is the trigger instead: a reply, a review, a failing check, or a close on something I opened. A slower scan of the issues and pull requests I opened still runs, to catch an upstream close that sent no notification and threads I unsubscribed from.
 
 ### session-friction
 
