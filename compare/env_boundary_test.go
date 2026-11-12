@@ -16,7 +16,7 @@ func TestNoProcessEnvReadsOutsideRustPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reads := map[string]bool{"Getenv": true, "LookupEnv": true, "Environ": true}
+	reads := map[string]bool{"Getenv": true, "LookupEnv": true, "Environ": true, "ExpandEnv": true, "Expand": true}
 	allowed := 0
 	fset := token.NewFileSet()
 	for _, name := range files {
