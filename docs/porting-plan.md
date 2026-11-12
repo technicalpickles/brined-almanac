@@ -8,13 +8,13 @@ Sizes are Rust lines in `src/` and `tests/` at `ea999b3`.
 |---|---|---|---|---|---|
 | 0 | `classes` | 86 / 203 | none | none | done |
 | 1 | `routing` | 191 / 98 | none | `Router` waits for the Go effect package | `Project` done |
-| 2 | `bugsink_api` | 134 / 250 | none | none | |
-| 3 | `transcript` | 355 / 364 | none | Go `hostile` type for untrusted text | |
+| 2 | `bugsink_api` | 134 / 250 | none | none | done |
+| 3 | `transcript` | 355 / 364 | none | none | done |
 | 4 | `tiers` | 111 / 157 | routing | none | done |
-| 5 | `host_state` (rules) | 477 / 407 | routing | none | |
-| 6 | `bugsink` | 260 / 332 | classes, transcript | hostile type | |
-| 7 | `cutover` | 630 / 314 | bugsink, bugsink_api | none | |
-| 8 | `taskwarrior` | 469 / 243 | providers, routing | **No Go TaskChampion.** Decide: speak the sync protocol, shell out to `task`, or file elsewhere | |
+| 5 | `host_state` (rules) | 477 / 407 | routing | none | done |
+| 6 | `bugsink` | 260 / 332 | classes, transcript | `reveal` boundary (see go-touch-points.md) | done |
+| 7 | `cutover` | 630 / 314 | bugsink, bugsink_api | none | done |
+| 8 | `taskwarrior` | 469 / 243 | providers, routing | No Go TaskChampion. Decided: shell out to `task` | |
 | 9 | `resolve_on_close` | 70 / 192 | cutover | **Go has no `Resolve` effect** (see upstream) | |
 | 10 | workflow `host_state` | 308 / 440 | host_state, routing | Go engine as a module | |
 | 11 | workflow `security_alerts` | 704 / 565 | routing, tiers | Go engine, GitHub alerts client | |
