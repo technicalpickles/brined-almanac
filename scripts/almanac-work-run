@@ -10,8 +10,10 @@ log_dir="$HOME/.local/state/brined-almanac/almanac-work"
 transcripts="$HOME/.claude/projects"
 required_plugins=(pstack)
 
-fail() { echo "almanac-work-run: $*" >&2; exit 1; }
-skip() { echo "almanac-work-run: skip: $*"; exit 0; }
+# The LaunchAgent appends every run to one log, so each line carries its time.
+say() { printf '%s almanac-work-run: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+fail() { say "$*" >&2; exit 1; }
+skip() { say "skip: $*"; exit 0; }
 
 preflight() {
   claude auth status --json | jq -e '.loggedIn' >/dev/null \
@@ -46,7 +48,8 @@ budget_allows() {
 has_unworked() {
   local n
   n=$(gh issue list -R "technicalpickles/$1" --label almanac --state open --limit 200 --json comments \
-    --jq '[.[] | select(.comments | length == 0)] | length')
+    --jq '[.[] | select(.comments | length == 0)] | length') \
+    || fail "gh could not list almanac reports in $1; the known cause on a locked Mac is Automic Vault waiting for an approval nobody can give"
   ((n > 0)) || skip "no unworked almanac reports in $1"
 }
 
@@ -79,5 +82,5 @@ jq -s --argjson secs "$(($(date +%s) - started))" '
      minutes: (($secs / 60) | floor), subtype, is_error, denials: (.permission_denials | length)}
 ' "$log.jsonl" >"$log.summary.json"
 
-jq -r '"\(.subtype) turns=\(.turns) cost=$\(.cost_usd) minutes=\(.minutes) denials=\(.denials)"' "$log.summary.json"
+say "$(jq -r '"\(.subtype) turns=\(.turns) cost=$\(.cost_usd) minutes=\(.minutes) denials=\(.denials)"' "$log.summary.json")"
 jq -r 'select(.type=="result") | .result' "$log.jsonl"
