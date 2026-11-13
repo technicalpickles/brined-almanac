@@ -29,7 +29,8 @@ done
 [ -n "$tmo" ] || { echo "collect: neither gtimeout nor timeout found" >&2; exit 1; }
 
 tmp="$out_file.tmp.$$"
-trap 'rm -f "$tmp"' EXIT
+raw_file="$out_file.raw.$$"
+trap 'rm -f "$tmp" "$raw_file"' EXIT
 
 prev=$(jq -c '
   [.checks[]?
@@ -60,7 +61,10 @@ for name in $CHECKS; do
     rc=3
     line="$upper UNKNOWN - check is not executable"
   else
-    raw=$("$tmo" -k "${CHECK_KILL_AFTER:-5}" "$timeout_s" "$path" </dev/null 2>/dev/null) || rc=$?
+    # A file, not $(...): a child that outlives its killed parent holds a pipe open and would
+    # keep collect waiting for it. On the CI runner a TERM-ignoring check held it for its full 30s.
+    "$tmo" -k "${CHECK_KILL_AFTER:-5}" "$timeout_s" "$path" </dev/null >"$raw_file" 2>/dev/null || rc=$?
+    raw=$(head -c 65536 "$raw_file")
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
       rc=2
       line="$upper CRITICAL - timed out after ${timeout_s}s"

@@ -11,11 +11,15 @@ fail() {
   exit 1
 }
 
+# The container runs as uid 10001, so on Linux it needs to read this mktemp -d directory (0700).
 empty=$(mktemp -d)
+chmod 755 "$empty"
 errs=$(mktemp)
 trap 'rm -rf "$empty" "$errs"' EXIT
 
-docker build -f Containerfile -t "$image" .
+# IMAGE_SMOKE_BUILD_FLAGS adds flags to the build, which is how CI passes its BuildKit cache.
+read -r -a build_flags <<<"${IMAGE_SMOKE_BUILD_FLAGS:-}"
+docker build ${build_flags[@]+"${build_flags[@]}"} -f Containerfile -t "$image" .
 
 manifest=$(docker run --rm "$image" synth --format json)
 jq -e 'any(.[]; .workflow == "bugsink-issues" and .scans == true)' <<<"$manifest" >/dev/null ||

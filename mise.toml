@@ -2,7 +2,7 @@
 go = "1.26.4"
 hk = "2.7.1"
 gitleaks = "8.30.1"
-rust = "1.99.0"
+rust = { version = "1.99.0", components = "clippy,rustfmt" }
 shellcheck = "0.10.0"
 
 # DB_PORT and PORTOOL_WORKTREE_ID come from portool (.portool.toml). DATABASE_URL is set only
@@ -23,7 +23,15 @@ run = "hk check"
 
 [tasks.test]
 description = "Run the unit and integration tests"
-run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/install-host-state.test.sh && scripts/fence-line.test.sh && scripts/fence-test.test.sh && scripts/check-forbidden.test.sh"
+depends = ["test:portable", "test:macos"]
+
+[tasks."test:portable"]
+description = "Run the tests that need nothing macOS-specific (CI runs these on Linux)"
+run = "cargo test && puller/pull.test.sh && puller/fetch-report.test.sh && checks/puller-age.test.sh && checks/stack-health.test.sh && checks/collect.test.sh && scripts/fence-line.test.sh && scripts/fence-test.test.sh && scripts/check-forbidden.test.sh"
+
+[tasks."test:macos"]
+description = "Run the launchd installer test, which needs plutil"
+run = "scripts/install-host-state.test.sh"
 
 [tasks."image:smoke"]
 description = "Build the almanac image and check it: mise run image:smoke [-- TAG]"
