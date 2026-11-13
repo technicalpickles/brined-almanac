@@ -1,0 +1,1 @@
+{"outcomes":[],"simulate":"Rejected","why":"the file does not parse as `host.state.finding`; check it has every field the event declares"}

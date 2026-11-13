@@ -1,5 +1,7 @@
-# Ports for a checkout's Postgres. Each key becomes <KEY>_PORT in the gitignored .env.portool;
-# mise.toml reads DB_PORT from there. Every checkout, main included, gets its own block, so no
-# two checkouts' stores collide.
+# Ports for a checkout's Postgres servers, as offsets into its portool block. Each key becomes
+# <KEY>_PORT in the gitignored .env.portool; mise.toml reads DB_PORT (the Rust store,
+# compose.yaml) and GO_DB_PORT (the Go port's store, compose.go.yaml) from there. Every checkout,
+# main included, gets its own block, so no two checkouts' stores collide.
 [ports]
 db = 0
+go_db = 1

@@ -1,6 +1,6 @@
 # Vision
 
-brined-almanac keeps my projects moving between bursts of attention. It is a set of almanacs built on [ivy/almanac](https://github.com/ivy/almanac). Each one watches something I care about, reports what changed, and spends model time only when I'm not using it.
+brined-almanac keeps my projects moving between bursts of attention. It is a set of almanacs built on [ivy/almanac](https://github.com/steading-ai/almanac). Each one watches something I care about, reports what changed, and spends model time only when I'm not using it.
 
 ## The problem
 
@@ -29,9 +29,9 @@ brined-almanac is a steady lane under the bursts. It has two tiers.
 
 **Agent work** uses a model to keep my projects moving. Mostly that means continuing what a burst left unfinished, from a parked handoff or an open task through to a pull request. It also judges what code can't decide and makes small repairs. It runs only on capacity I am not using, under the budget rule below.
 
-Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes almanac as how things outside the plan get into it, and it names vulnerability response as the same shape of problem as broken dependency updates. Here the plan is taskwarrior. Ops and security work that nobody scheduled, like an open advisory on a deployed app, is exactly what should get in.
+Upstream's [vision](https://github.com/steading-ai/almanac/blob/main/docs/vision.md) describes almanac as how things outside the plan get into it, and it names vulnerability response as the same shape of problem as broken dependency updates. Here the plan is taskwarrior. Ops and security work that nobody scheduled, like an open advisory on a deployed app, is exactly what should get in.
 
-Everything upstream's [core principles](https://github.com/ivy/almanac/blob/main/docs/core-principles.md) say still holds. Behaviour is code, inference is the last resort, hostile text is a type, and almanac reports while the repository decides.
+Everything upstream's [core principles](https://github.com/steading-ai/almanac/blob/main/docs/core-principles.md) say still holds. Behaviour is code, inference is the last resort, hostile text is a type, and almanac reports while the repository decides.
 
 ## The budget rule
 
@@ -69,7 +69,7 @@ When a burst ends, its work usually isn't finished. It's parked in a handoff, le
 - **How far it goes.** As far as the work goes. It writes code, runs the tests, and opens or updates a pull request. The limits are the budget rule, the sandbox, and the repository's rules, which still decide what merges.
 - **When it stops.** When the window runs out, a burst starts, or it reaches a decision only I can make. It parks its state in a handoff, the same way my own sessions do, and the next window picks up from there. A burst that starts in the same repository finds that handoff first.
 - **Less stays mine.** Every stop that needs me records why: a deploy, a host, a sign-in, a decision, or a stale handoff. Those reasons get counted each week, and the common ones become tasks to give workers a safe way through that step. The set of things only I can do should shrink over time.
-- **Who does the work.** Almanac decides what continues and when. A worker does the work: a headless Claude Code session in a container, using upstream's rootless Podman sandbox. It gets a fresh clone and the handoff or task text, and no credentials. It returns a patch, code checks it, and almanac pushes it through a GitHub App, the same path upstream's own agents take. The App is installed only on fair-game repositories, and its name on a pull request tells me a worker wrote it. Upstream's [vision](https://github.com/ivy/almanac/blob/main/docs/vision.md) describes the same split, with almanac upstream of a tracker and workers.
+- **Who does the work.** Almanac decides what continues and when. A worker does the work: a headless Claude Code session in a container, using upstream's rootless Podman sandbox. It gets a fresh clone and the handoff or task text, and no credentials. It returns a patch, code checks it, and almanac pushes it through a GitHub App, the same path upstream's own agents take. The App is installed only on fair-game repositories, and its name on a pull request tells me a worker wrote it. Upstream's [vision](https://github.com/steading-ai/almanac/blob/main/docs/vision.md) describes the same split, with almanac upstream of a tracker and workers.
 
 ## Small steps
 
@@ -93,7 +93,7 @@ Both destinations sit behind almanac's `Tracker` trait, the interface that carri
 
 - **Not a merge bot.** It reports. Branch protection and the repository's own rules merge.
 - **Not the backlog.** Taskwarrior is. Almanac reads the backlog and reports on it.
-- **Not a closer on a model's word.** It closes a task when code confirms the evidence, and an agent may go looking for that evidence. A model's opinion that a task is done never closes it, which is upstream's principle 4, ["a model can veto, never approve"](https://github.com/ivy/almanac/blob/main/docs/core-principles.md). Every close carries its evidence, so I can review it and reopen a mistake.
+- **Not a closer on a model's word.** It closes a task when code confirms the evidence, and an agent may go looking for that evidence. A model's opinion that a task is done never closes it, which is upstream's principle 4, ["a model can veto, never approve"](https://github.com/steading-ai/almanac/blob/main/docs/core-principles.md). Every close carries its evidence, so I can review it and reopen a mistake.
 - **Not a chat surface.** No Telegram alerts. Someone else's front end can read the issues.
 - **Not a reason to hit the limit.** If directed work ever stops because almanac spent the window, the budget rule is wrong.
 

@@ -1,0 +1,20 @@
+// Package brinedalmanac holds the files at the repository root that both the Rust and Go
+// implementations read, so there is one copy of each.
+package brinedalmanac
+
+import _ "embed"
+
+// ClassesTOML is classes.toml, the failure-class table.
+//
+//go:embed classes.toml
+var ClassesTOML []byte
+
+// TiersTOML is tiers.toml, the public repository tiers.
+//
+//go:embed tiers.toml
+var TiersTOML []byte
+
+// HostsTOML is hosts.toml, the hosts whose state reports the scan reads.
+//
+//go:embed hosts.toml
+var HostsTOML []byte

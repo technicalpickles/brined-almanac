@@ -1,0 +1,10 @@
+{
+  "kind": "stale",
+  "project": "brined-almanac",
+  "subject": "mac.stale",
+  "host": "mac",
+  "check": null,
+  "status": null,
+  "since": null,
+  "body": "no report from mac"
+}

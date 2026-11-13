@@ -1,0 +1,15 @@
+{
+  "issue": "0f7c1a2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+  "generation": 0,
+  "service": "brineworks",
+  "tool": "triage_apply",
+  "class": "mcp-timeout",
+  "count": 14,
+  "first_seen": "2026-11-04T10:00:00.250000Z",
+  "last_seen": "2026-11-09T21:14:03.482113Z",
+  "ingest_dated": false,
+  "surfaces": [],
+  "sessions": 2,
+  "link": "http://bugsink.example/issues/issue/0f7c1a2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/event/last/",
+  "reason": "MCP error -32001: Request timed out"
+}

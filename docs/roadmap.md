@@ -52,7 +52,7 @@ Still open: the worker closes an issue as completed only after a few reviewed co
 The backlog and the parking lot stop going stale on their own.
 
 - task-reconciler, closing a task when a merged pull request or commit names its UUID or when a pull request or issue it cites has closed, and flagging the ones a later burst probably finished
-- A `Resolve { item, evidence }` effect and a `Tracker::resolve(key, item, evidence)` method, so closing is its own effect that guards and the run record can see. Upstream's effect module says nothing in it closes, so propose it to ivy/almanac first ([ivy/almanac#6](https://github.com/ivy/almanac/issues/6)), arguing that a task is my planning record and closing it on checked evidence is closer to `Attest` than to a merge. If upstream declines or is slow, pin a fork branch, which is a one-line change to `Cargo.toml`. Flagging and the daily list ship without it, and closing turns on when it exists
+- A `Resolve { item, evidence }` effect and a `Tracker::resolve(key, item, evidence)` method, so closing is its own effect that guards and the run record can see. Upstream's effect module says nothing in it closes, so propose it to ivy/almanac first ([ivy/almanac#6](https://github.com/steading-ai/almanac/issues/6)), arguing that a task is my planning record and closing it on checked evidence is closer to `Attest` than to a merge. If upstream declines or is slow, pin a fork branch, which is a one-line change to `Cargo.toml`. Flagging and the daily list ship without it, and closing turns on when it exists
 - A daily task that lists what the reconciler closed
 - parked-handoffs, sorting each handoff older than a week into captured, resumable, or orphaned, reading the vault's parked-sessions folder, the legacy `.parkinglot/` files, and project-type memory files
 - left-behind, reporting unpushed commits, orphan branches, dirty trees and idle worktrees per repository, loud at first and tuned from the counts it keeps
@@ -80,9 +80,9 @@ Work a burst left unfinished keeps going on capacity I'm not using.
 - The budget rule in code, with its starting numbers next to it, and the likely-free and likely-mine hours from the 2026-11-08 histogram as a prior
 - A probe that reads `unifiedWindows.five_hour` from a headless `claude -p` run
 - Burst and working detection from transcript writes under `~/.claude/projects/`, with the repository taken from each message's `cwd`, then tool-call paths, rather than the transcript's project field, and eval-harness sessions excluded by their `/private/tmp` project path
-- A GitHub App, installed on fair-game repositories with contents and pull request write access, and later on maintained-tier repositories for M5, following upstream's [deploying guide](https://github.com/ivy/almanac/blob/main/docs/deploying.md)
+- A GitHub App, installed on fair-game repositories with contents and pull request write access, and later on maintained-tier repositories for M5, following upstream's [deploying guide](https://github.com/steading-ai/almanac/blob/main/docs/deploying.md)
 - A worker runner: a headless Claude Code session in a container under upstream's rootless Podman sandbox, with no credentials, started by almanac and stopped when the budget rule says so. It returns a patch that almanac checks and pushes
-- An effect that opens a pull request. Upstream's `Push` only commits to an existing pull request's branch, so propose it upstream ([ivy/almanac#9](https://github.com/ivy/almanac/issues/9))
+- An effect that opens a pull request. Upstream's `Push` only commits to an existing pull request's branch, so propose it upstream ([ivy/almanac#9](https://github.com/steading-ai/almanac/issues/9))
 - `park` writing portable handoffs: branch pushed, work in progress committed, repository-relative paths
 - continue-work, picking up resumable handoffs, tasks in fair-game repositories (brineworks first), and follow-ups on its own pull requests, and parking a handoff whenever it stops
 - task-reconciler's evidence hunt, where an agent returns a proof of read-only checks and code runs them before closing
@@ -118,8 +118,8 @@ Almanac reports problems in running services and deployed repositories.
 ## Not yet placed
 
 - **Moving the host to picklelab.** Not scheduled. Almanac lives on the Mac because its most valuable inputs are Mac-local: parked handoffs in my checkouts, my Claude Code transcripts, which the budget rule and session-friction read, and my memory files. If the Mac turns out to be the wrong host, the move is the Mac pushing reports of those inputs, the way a push host sends its host-state report, and picklelab running almanac.
-- **The budget rule upstream.** Proposed upstream ([ivy/almanac#8](https://github.com/ivy/almanac/issues/8)), since anyone running agents on a personal subscription shares the window with their own sessions.
-- **A rerun-CI effect.** Proposed upstream ([ivy/almanac#7](https://github.com/ivy/almanac/issues/7)) so other builders can weigh in. Building it waits until deployed-upkeep in M6 runs into flaky CI.
+- **The budget rule upstream.** Proposed upstream ([ivy/almanac#8](https://github.com/steading-ai/almanac/issues/8)), since anyone running agents on a personal subscription shares the window with their own sessions.
+- **A rerun-CI effect.** Proposed upstream ([ivy/almanac#7](https://github.com/steading-ai/almanac/issues/7)) so other builders can weigh in. Building it waits until deployed-upkeep in M6 runs into flaky CI.
 - **Usage signals for tiers.** Dormant was the second of the three top picks on 2026-11-08, but computing it from commits and tasks would misread a deployed thing in daily use. It waits on knowing what says "in use" per repository: Brent receiving messages, cq being invoked, a site serving requests. See [open questions](open-questions.md).
 
 ## Deliberately unscheduled

@@ -1,0 +1,15 @@
+FILE key=run-1:0 target=technicalpickles/brineworks title="Brent: brineworks/triage_apply mcp-timeout regressed (14 events)"
+service: brineworks
+tool: triage_apply
+class: mcp-timeout
+events: 14
+first seen: 2026-11-04T10:00:00.250000Z
+last seen: 2026-11-09T21:14:03.482113Z
+surfaces: main (11), cli (3)
+sessions: 2
+regressions: 2 (came back after being resolved)
+bugsink: http://bugsink.example/issues/issue/0f7c1a2e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/event/last/
+
+reason:
+MCP error -32001: Request timed out
+{"outcomes":["Ran { run_id: \"run-1\", workflow: \"bugsink-issues\", effects: [File { title: Title(\"Brent: brineworks/triage_apply mcp-timeout regressed (14 events)\"), target: Slug(\"technicalpickles/brineworks\"), body: Untrusted(..) }], denied: [] } recorded as [Applied]"],"simulate":"Queued","why":null}

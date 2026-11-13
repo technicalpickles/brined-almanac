@@ -403,7 +403,7 @@ The task checks that `$STATE` has `prod.env`,
 `known_hosts`, and `transcripts/`, then fetches `tiers.toml` from the vault.
 It refuses while prod's `pending` table holds events: a binary with a different payload shape fails them, and their
 delivery ids stay seen, so they never run
-([ivy/almanac#10](https://github.com/ivy/almanac/issues/10)). Let them run on
+([ivy/almanac#10](https://github.com/steading-ai/almanac/issues/10)). Let them run on
 the current binary first, or pass `--allow-pending` when you know the payload
 shape did not change. It then builds both images with the short commit SHA and
 the `prod` tag, runs `docker compose up -d --wait` under one `op run`, and

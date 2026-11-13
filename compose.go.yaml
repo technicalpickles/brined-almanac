@@ -1,0 +1,24 @@
+# The Go port's store for this checkout, apart from the Rust one in compose.yaml. `mise run go:db`
+# brings it up on the port portool gave this checkout as GO_DB_PORT, in its own compose project.
+# Its database and role are brined_almanac_go, so a URL aimed at the Rust store finds nothing.
+# Loopback only, no password: trust auth never leaves 127.0.0.1.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: brined_almanac_go
+      POSTGRES_DB: brined_almanac_go
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:${GO_DB_PORT:?run `mise run go:db`, which asks portool for this checkout's port}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brined_almanac_go"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
