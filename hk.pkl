@@ -55,10 +55,11 @@ local shellcheck = new Step {
 }
 
 // git ls-files keeps gofmt out of other worktrees under .claude/, which a plain
-// `gofmt -l .` from the main checkout would walk.
+// `gofmt -l .` from the main checkout would walk. gofmt reports a parse error on
+// stderr and still exits 0, so stderr counts as a failure too.
 local go_fmt = new Step {
   check = new CommandSpec {
-    command = "test -z \"$(git ls-files -z '*.go' | xargs -0 gofmt -l)\""
+    command = "out=$(git ls-files -z '*.go' | xargs -0 gofmt -l 2>&1); test -z \"$out\" || { echo \"$out\"; exit 1; }"
     effect = "read"
   }
 }
