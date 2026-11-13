@@ -11,7 +11,9 @@ fail() {
   exit 1
 }
 
+# The container runs as uid 10001, so on Linux it needs to read this mktemp -d directory (0700).
 empty=$(mktemp -d)
+chmod 755 "$empty"
 errs=$(mktemp)
 trap 'rm -rf "$empty" "$errs"' EXIT
 
