@@ -54,6 +54,29 @@ local shellcheck = new Step {
   }
 }
 
+// git ls-files keeps gofmt out of other worktrees under .claude/, which a plain
+// `gofmt -l .` from the main checkout would walk.
+local go_fmt = new Step {
+  check = new CommandSpec {
+    command = "test -z \"$(git ls-files -z '*.go' | xargs -0 gofmt -l)\""
+    effect = "read"
+  }
+}
+
+local go_vet = new Step {
+  check = new CommandSpec {
+    command = "go vet ./..."
+    effect = "read"
+  }
+}
+
+local go_test = new Step {
+  check = new CommandSpec {
+    command = "go test -count=1 ./..."
+    effect = "read"
+  }
+}
+
 local compose_config = new Step {
   check = new CommandSpec {
     command = "scripts/compose-config-check"
@@ -65,6 +88,7 @@ hooks {
   ["pre-commit"] {
     steps {
       ["fmt"] = cargo_fmt
+      ["gofmt"] = go_fmt
       ["gitleaks"] = gitleaks_staged
       ["forbidden"] = forbidden_files
       ["shellcheck"] = shellcheck
@@ -74,6 +98,9 @@ hooks {
     steps {
       ["fmt"] = cargo_fmt
       ["clippy"] = cargo_clippy
+      ["gofmt"] = go_fmt
+      ["govet"] = go_vet
+      ["gotest"] = go_test
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
       ["shellcheck"] = shellcheck
@@ -83,6 +110,8 @@ hooks {
   ["pre-push"] {
     steps {
       ["clippy"] = cargo_clippy
+      ["govet"] = go_vet
+      ["gotest"] = go_test
       ["gitleaks"] = gitleaks_history
       ["forbidden"] = forbidden_tree
     }
