@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/check-hostilevet
+
+Run upstream's hostilevet taint pass over the Go code and fail unless it reports exactly the
+four known findings (docs/go-touch-points.md, "The boundary list is not extensible"). A fifth
+finding, or a known one that disappears, exits 1: the first is a new hostile/reveal import,
+the second means this list should shrink.
+
+Builds hostilevet into a temp dir. Read-only.
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Files allowed to import hostile/reveal until upstream lets an almanac declare its own boundary.
+known=$'bugsink/bugsink.go\nsecurityalerts/plain.go\ntaskwarrior/taskwarrior.go\nwiring/trackers.go'
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+go build -o "$tmp/hostilevet" github.com/ivy/almanac/tools/hostilevet
+# go vet exits non-zero when the pass reports, which is the case we are counting.
+findings=$(go vet -vettool="$tmp/hostilevet" ./... 2>&1 || true)
+
+# Keep the file of each "path:line:col: message" finding and drop go vet's "# package" headers.
+files=$(printf '%s\n' "$findings" | sed -n 's/^\([^:#]*\.go\):[0-9]*:[0-9]*: .*/\1/p' | sort -u)
+
+if [[ $files == "$known" ]] && [[ $(printf '%s\n' "$findings" | grep -c '\.go:') -eq 4 ]]; then
+  echo "check-hostilevet: the 4 known findings, nothing new"
+  exit 0
+fi
+
+echo "check-hostilevet: expected exactly the 4 known findings in:" >&2
+printf '  %s\n' "${known//$'\n'/$'\n'  }" >&2
+echo "got:" >&2
+printf '%s\n' "$findings" >&2
+exit 1

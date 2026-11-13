@@ -49,7 +49,7 @@ local cargo_clippy = new Step {
 
 local shellcheck = new Step {
   check = new CommandSpec {
-    command = "shellcheck puller/pull.sh puller/pull.test.sh puller/fetch-report.sh puller/fetch-report.test.sh scripts/check-forbidden scripts/image-smoke scripts/deploy scripts/compose-config-check checks/collect checks/puller-age checks/stack-health checks/puller-age.test.sh checks/stack-health.test.sh checks/collect.test.sh scripts/install-host-state scripts/install-host-state.test.sh scripts/host-state-dry-run scripts/fence-line scripts/fence-line.test.sh scripts/fence-test scripts/fence-test.test.sh scripts/check-forbidden.test.sh"
+    command = "shellcheck puller/pull.sh puller/pull.test.sh puller/fetch-report.sh puller/fetch-report.test.sh scripts/check-forbidden scripts/image-smoke scripts/deploy scripts/compose-config-check checks/collect checks/puller-age checks/stack-health checks/puller-age.test.sh checks/stack-health.test.sh checks/collect.test.sh scripts/install-host-state scripts/install-host-state.test.sh scripts/host-state-dry-run scripts/fence-line scripts/fence-line.test.sh scripts/fence-test scripts/fence-test.test.sh scripts/check-forbidden.test.sh scripts/check-hostilevet"
     effect = "read"
   }
 }

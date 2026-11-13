@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# No secrets, no write access. compare builds its children's environment from scratch, and
+# nothing here needs more than the checkout.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  check:
+    name: hk check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks scans history.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - run: hk check --all
+      - run: scripts/check-hostilevet
+
+  test:
+    name: mise run test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - run: mise run test
+
+  drift:
+    name: Go agrees with a fresh Rust build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - run: cargo build --locked
+      # No --record: a difference fails the job. Re-recording stays a deliberate local step.
+      - run: go run ./cmd/brined-almanac compare --rust target/debug/brined-almanac
