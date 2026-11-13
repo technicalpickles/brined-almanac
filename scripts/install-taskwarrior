@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/install-taskwarrior [PREFIX]
+
+Build taskwarrior 3 from its release tarball into PREFIX (default ~/.local) unless
+PREFIX/bin/task is already that version. The taskwarrior Go tests run the real `task`, and
+distro packages are still 2.x. Needs cmake, a C++ compiler, uuid-dev and cargo.
+
+CI caches PREFIX, so the build runs once per version.
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
+version=3.4.2
+prefix=${1:-$HOME/.local}
+
+if [[ -x $prefix/bin/task ]] && [[ $("$prefix/bin/task" --version) == "$version" ]]; then
+  echo "install-taskwarrior: $version already in $prefix"
+  exit 0
+fi
+
+src=$(mktemp -d)
+trap 'rm -rf "$src"' EXIT
+curl -fsSL "https://github.com/GothenburgBitFactory/taskwarrior/releases/download/v$version/task-$version.tar.gz" |
+  tar -xz -C "$src" --strip-components=1
+cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" >/dev/null
+cmake --build "$src/build" -j "$(nproc)"
+cmake --install "$src/build"
+"$prefix/bin/task" --version

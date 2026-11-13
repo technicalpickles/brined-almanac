@@ -30,6 +30,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      # The taskwarrior Go tests run the real `task`; apt has 2.x only.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: tw
+        with:
+          path: ~/taskwarrior
+          key: taskwarrior-3.4.2-${{ runner.os }}
+      - if: steps.tw.outputs.cache-hit != 'true'
+        run: sudo apt-get install -y --no-install-recommends cmake uuid-dev && scripts/install-taskwarrior ~/taskwarrior
+      - run: echo "$HOME/taskwarrior/bin" >> "$GITHUB_PATH"
       - run: hk check --all
       - run: scripts/check-hostilevet
 
