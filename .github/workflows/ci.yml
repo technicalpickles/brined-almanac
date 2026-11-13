@@ -43,14 +43,24 @@ jobs:
       - run: scripts/check-hostilevet
 
   test:
-    name: mise run test
+    name: mise run test:portable
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-      - run: mise run test
+      - run: mise run test:portable
+
+  test-macos:
+    name: mise run test:macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+      - run: mise run test:macos
 
   drift:
     name: Go agrees with a fresh Rust build
