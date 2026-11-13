@@ -38,15 +38,11 @@ jobs:
             ~/.cache/go-build
           key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: go-${{ runner.os }}-
-      # The taskwarrior Go tests run the real `task`; apt has 2.x only.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: tw
-        with:
-          path: ~/taskwarrior
-          key: taskwarrior-3.4.2-${{ runner.os }}
-      - if: steps.tw.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y --no-install-recommends cmake uuid-dev && scripts/install-taskwarrior ~/taskwarrior
-      - run: echo "$HOME/taskwarrior/bin" >> "$GITHUB_PATH"
+      # The taskwarrior Go tests run the real `task` (3.x). apt has 2.x, so use Homebrew's bottle.
+      - run: |
+          /home/linuxbrew/.linuxbrew/bin/brew install task
+          sudo ln -s /home/linuxbrew/.linuxbrew/bin/task /usr/local/bin/task
+          task --version
       - run: hk check --all
       - run: scripts/check-hostilevet
 
@@ -90,3 +86,23 @@ jobs:
       - run: cargo build --locked
       # No --record: a difference fails the job. Re-recording stays a deliberate local step.
       - run: go run ./cmd/brined-almanac compare --rust target/debug/brined-almanac
+
+  image:
+    name: Image builds and passes the smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Keyed on what changes the dependency layer, so an app-only change reuses it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/buildx-cache
+          key: image-${{ hashFiles('Containerfile', 'Cargo.toml', 'Cargo.lock') }}
+          restore-keys: image-
+      - run: scripts/image-smoke ci
+        env:
+          IMAGE_SMOKE_BUILD_FLAGS: --load --cache-from type=local,src=/tmp/buildx-cache --cache-to type=local,dest=/tmp/buildx-cache-new,mode=max
+      # Replacing the cache keeps it from growing with every run.
+      - run: rm -rf /tmp/buildx-cache && mv /tmp/buildx-cache-new /tmp/buildx-cache
