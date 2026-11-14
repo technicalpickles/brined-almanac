@@ -1,0 +1,11 @@
+{
+  "how": "claude-p",
+  "model": "example-model-1",
+  "turns": 12,
+  "cost_usd": 1.6,
+  "tokens": 987654,
+  "minutes": 7,
+  "subtype": "success",
+  "is_error": false,
+  "denials": 0
+}

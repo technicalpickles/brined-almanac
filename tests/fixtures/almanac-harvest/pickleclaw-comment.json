@@ -1,0 +1,4 @@
+{
+  "html_url": "https://github.com/technicalpickles/pickleclaw/issues/301#issuecomment-1000000003",
+  "body": "Intro line.\n\nSearch calls fail with HTTP 429 from the provider. Every call in the window failed.\n\n```yaml\n# almanac-case\ndate: 2026-11-12\nrepo: pickleclaw\nissues:\n- 301\nfingerprint:\n  service: openclaw\n  tool: web_search\n  class: other\ntrue_class: provider-error\nverdict: real-open\ncause: provider-quota\nfix_layer: config\nfix_note: check the provider's quota\nmodel: null\nevents: 3\nreal_window:\n  first: 2026-11-01\n  last: 2026-11-12\nrecurrence: every call failed\nclose:\n  301: hold until 22222222\nprs: []\ntasks:\n- 22222222-2222-4222-8222-222222222222\ncomments:\n- https://github.com/technicalpickles/pickleclaw/issues/301#issuecomment-1000000001\nevidence:\n- transcripts\nskill_gaps: []\nworker:\n  how: claude-p\n  model: null\n  tokens: null\n  minutes: null\n```"
+}

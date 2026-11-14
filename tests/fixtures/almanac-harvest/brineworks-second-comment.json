@@ -1,0 +1,4 @@
+{
+  "html_url": "https://github.com/technicalpickles/brineworks/issues/202#issuecomment-1000000004",
+  "body": "A second cause in the same tool on the same day, so the filenames must not collide.\n\n```yaml\n# almanac-case\n---\ndate: 2026-11-12\nrepo: brineworks\nissues: [202]\nfingerprint:\n  service: brineworks\n  tool: widget_list\n  class: arg-validation\ntrue_class: model-error\nverdict: real-open\ncause: wrong-param-names\nfix_layer: description\nfix_note: \"the only example in the skill nests its params\"\nmodel: example-model-1\nevents: 5\nreal_window: {first: 2026-11-07, last: 2026-11-09}\nrecurrence: \"12 widget_list calls since 2026-11-09, 0 errors\"\nclose:\n  202: completed\nprs: []\ntasks: [11111111-1111-4111-8111-111111111111]\ncomments: []\nevidence: [transcripts, merged-prs]\nskill_gaps: []\nworker: {how: claude-p, model: null, tokens: null, minutes: null}\n---\n```"
+}
