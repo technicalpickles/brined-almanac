@@ -103,6 +103,20 @@ impl<T: Tracker, V: Visibility> Tracker for PrivateOnly<T, V> {
             self.inner.ask(key, target, pull, question, body).await
         })
     }
+
+    /// Checked like filing, because the evidence is posted where the work was filed.
+    fn resolve<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        item: &'a Resolving,
+        evidence: &'a str,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        Box::pin(async move {
+            self.check(target).await?;
+            self.inner.resolve(key, target, item, evidence).await
+        })
+    }
 }
 
 /// Stands in for the tracker on a live run that has no durable store. Without one, every
@@ -130,6 +144,16 @@ impl Tracker for StoreRequired {
         _pull: Option<u64>,
         _question: &'a str,
         _body: &'a Untrusted<String>,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        Box::pin(async { Err(StepError(NO_STORE.to_string())) })
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        _key: &'a str,
+        _target: &'a Slug,
+        _item: &'a Resolving,
+        _evidence: &'a str,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         Box::pin(async { Err(StepError(NO_STORE.to_string())) })
     }
@@ -174,6 +198,19 @@ impl Tracker for LogTracker {
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         self.file(key, target, question, body)
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        item: &'a Resolving,
+        evidence: &'a str,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        Box::pin(async move {
+            println!("RESOLVE key={key} target={target} item={item:?}\n{evidence}");
+            Ok(())
+        })
     }
 }
 

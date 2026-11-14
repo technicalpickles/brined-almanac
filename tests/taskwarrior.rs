@@ -241,3 +241,109 @@ async fn a_sync_check_against_an_unreachable_server_fails() {
     std::fs::write(dir.path().join("server"), "not a directory").unwrap();
     assert!(sync_check(checker(dir.path())).await.is_err());
 }
+
+fn annotations(task: &TaskData) -> Vec<&str> {
+    task.iter()
+        .filter(|(k, _)| k.starts_with("annotation_"))
+        .map(|(_, v)| v.as_str())
+        .collect()
+}
+
+fn filed(keys: &[&str]) -> Resolving {
+    Resolving::Filed(keys.iter().map(|k| k.to_string()).collect())
+}
+
+#[tokio::test]
+async fn resolving_filed_work_completes_only_those_tasks_with_the_evidence() {
+    let dir = TempDir::new().unwrap();
+    let (container, mac) = (open(dir.path(), "container"), open(dir.path(), "mac"));
+    let target = target();
+    for key in ["run-1:0", "run-2:0"] {
+        container
+            .file(key, &target, "title", &body("synthetic body"))
+            .await
+            .unwrap();
+    }
+    container
+        .resolve("run-3:0", &target, &filed(&["run-1:0"]), "the check is ok")
+        .await
+        .unwrap();
+    mac.sync().await.unwrap();
+    let tasks = mac.tasks().await.unwrap();
+    let closed = task_with(&tasks, "run-1:0").unwrap();
+    assert_eq!(closed.get("status"), Some("completed"));
+    assert!(closed.get("end").is_some());
+    assert!(
+        annotations(closed).contains(&"almanac resolved run-3:0\nthe check is ok"),
+        "{:?}",
+        annotations(closed)
+    );
+    let open = task_with(&tasks, "run-2:0").unwrap();
+    assert_eq!(open.get("status"), Some("pending"));
+}
+
+#[tokio::test]
+async fn a_repeated_resolve_changes_nothing() {
+    let dir = TempDir::new().unwrap();
+    let container = open(dir.path(), "container");
+    let target = target();
+    container
+        .file("run-1:0", &target, "title", &body("synthetic body"))
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        container
+            .resolve("run-3:0", &target, &filed(&["run-1:0"]), "ok")
+            .await
+            .unwrap();
+    }
+    let tasks = container.tasks().await.unwrap();
+    assert_eq!(annotations(task_with(&tasks, "run-1:0").unwrap()).len(), 2);
+}
+
+#[tokio::test]
+async fn a_task_named_by_uuid_is_completed() {
+    let dir = TempDir::new().unwrap();
+    let container = open(dir.path(), "container");
+    let target = target();
+    container
+        .file("run-1:0", &target, "title", &body("synthetic body"))
+        .await
+        .unwrap();
+    let tasks = container.tasks().await.unwrap();
+    let uuid = task_with(&tasks, "run-1:0").unwrap().get_uuid().to_string();
+    let named = Resolving::Named(uuid.parse().unwrap());
+    container
+        .resolve("run-3:0", &target, &named, "merged in abc")
+        .await
+        .unwrap();
+    let tasks = container.tasks().await.unwrap();
+    assert_eq!(
+        task_with(&tasks, "run-1:0").unwrap().get("status"),
+        Some("completed")
+    );
+}
+
+#[tokio::test]
+async fn a_name_that_is_not_a_uuid_is_refused_before_anything_is_written() {
+    let dir = TempDir::new().unwrap();
+    let container = open(dir.path(), "container");
+    let named = Resolving::Named("53db253c".parse().unwrap());
+    let error = container
+        .resolve("run-3:0", &target(), &named, "ok")
+        .await
+        .unwrap_err();
+    assert!(error.0.contains("not a task UUID"), "{}", error.0);
+    assert!(!dir.path().join("server").exists());
+}
+
+#[tokio::test]
+async fn resolving_nothing_filed_never_reaches_the_server() {
+    let dir = TempDir::new().unwrap();
+    let container = open(dir.path(), "container");
+    container
+        .resolve("run-3:0", &target(), &Resolving::Filed(vec![]), "ok")
+        .await
+        .unwrap();
+    assert!(!dir.path().join("server").exists());
+}

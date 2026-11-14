@@ -98,6 +98,20 @@ impl<I: Tracker, T: Tracker> Tracker for Router<I, T> {
             Some(Err(why)) => Box::pin(async move { Err(not_a_task_target(target, &why)) }),
         }
     }
+
+    fn resolve<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        item: &'a Resolving,
+        evidence: &'a str,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        match Project::from_target(target) {
+            None => self.issues.resolve(key, target, item, evidence),
+            Some(Ok(_)) => self.tasks.resolve(key, target, item, evidence),
+            Some(Err(why)) => Box::pin(async move { Err(not_a_task_target(target, &why)) }),
+        }
+    }
 }
 
 /// A boxed tracker, so the router's two sides can be chosen at runtime. The orphan rule rules
@@ -124,6 +138,16 @@ impl Tracker for AnyTracker {
         body: &'a Untrusted<String>,
     ) -> BoxFuture<'a, Result<(), StepError>> {
         self.0.ask(key, target, pull, question, body)
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        key: &'a str,
+        target: &'a Slug,
+        item: &'a Resolving,
+        evidence: &'a str,
+    ) -> BoxFuture<'a, Result<(), StepError>> {
+        self.0.resolve(key, target, item, evidence)
     }
 }
 
