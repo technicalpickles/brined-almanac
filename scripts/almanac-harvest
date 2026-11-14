@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""Turn almanac-work comments into case record files and open one PR per repo.
+
+  scripts/almanac-harvest [--dry-run] [--out DIR] --case COMMENT SUMMARY [--case ...]
+
+COMMENT is an issue-comment URL or a path to its `gh api` JSON ({"html_url", "body"}). SUMMARY is the
+.summary.json that scripts/almanac-work-run writes next to the run log. The comment ends with a fenced
+`yaml` block whose first line is `# almanac-case` (.claude/skills/almanac-work/SKILL.md, "Case
+record"). The file is that block with `worker` taken from SUMMARY and the comment's URL added to
+`comments`, and the comment text above the block as its body.
+
+--dry-run writes the files under DIR (default: a new temp directory) as they would sit in each repo,
+and prints the PR it would open for each one. Without it, each repo is cloned to a temp directory, the
+files are committed on a new branch, pushed, and a PR is opened.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+OWNER = "technicalpickles"
+REPOS = ("brineworks", "pickleclaw")
+CASES_DIR = "docs/almanac/cases"
+
+REQUIRED_KEYS = (
+    "date issues repo fingerprint true_class verdict cause fix_layer fix_note model events "
+    "real_window recurrence close prs tasks comments evidence skill_gaps worker"
+).split()
+VERDICTS = {"fixed", "by-design", "wrong-repo", "real-open", "cannot-tell"}
+
+FENCE = re.compile(r"^```ya?ml[ \t]*\n(.*?)^```[ \t]*$", re.S | re.M)
+TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*):(.*)$")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class HarvestError(Exception):
+    pass
+
+
+@dataclass
+class Record:
+    repo: str
+    date: str
+    tool: str
+    cause: str
+    url: str
+    text: str
+    path: str = ""
+
+
+def fetch_comment(spec: str) -> dict:
+    path = Path(spec)
+    if path.is_file():
+        return json.loads(path.read_text())
+    m = re.fullmatch(
+        rf"https://github\.com/{OWNER}/([\w.-]+)/(?:issues|pull)/\d+#issuecomment-(\d+)", spec
+    )
+    if not m:
+        raise HarvestError(f"{spec}: not a file or a {OWNER} issue-comment URL")
+    out = subprocess.run(
+        ["gh", "api", f"repos/{OWNER}/{m[1]}/issues/comments/{m[2]}"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    return json.loads(out)
+
+
+def split_comment(body: str) -> tuple[str, list[str]]:
+    blocks = [
+        m for m in FENCE.finditer(body)
+        if m[1].lstrip().startswith("# almanac-case")
+    ]
+    if not blocks:
+        raise HarvestError("no fenced yaml block starting with '# almanac-case'")
+    block = blocks[-1]
+    lines = [
+        line for line in block[1].splitlines()
+        if line.strip() and line.strip() != "---" and not line.startswith("# almanac-case")
+    ]
+    return body[: block.start()].strip(), lines
+
+
+def chunk_frontmatter(lines: list[str]) -> list[tuple[str, list[str]]]:
+    chunks: list[tuple[str, list[str]]] = []
+    for line in lines:
+        m = TOP_KEY.match(line)
+        if m:
+            chunks.append((m[1], [line]))
+        elif chunks:
+            chunks[-1][1].append(line)
+        else:
+            raise HarvestError(f"line before the first key: {line!r}")
+    return chunks
+
+
+def scalar(chunk: list[str], key: str | None = None) -> str:
+    if key is None:
+        value = TOP_KEY.match(chunk[0])[2]
+    else:
+        pat = re.compile(rf"^\s+{re.escape(key)}:(.*)$")
+        value = next((m[1] for line in chunk if (m := pat.match(line))), "")
+    return value.strip().strip("\"'")
+
+
+def yaml_scalar(value) -> str:
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def worker_chunk(summary: dict, previous: list[str]) -> list[str]:
+    how = summary.get("how") or scalar(previous, "how") or "claude-p"
+    return [
+        "worker:",
+        f"  how: {how}",
+        f"  model: {yaml_scalar(summary.get('model'))}",
+        f"  tokens: {yaml_scalar(summary.get('tokens'))}",
+        f"  minutes: {yaml_scalar(summary.get('minutes'))}",
+    ]
+
+
+def comments_chunk(previous: list[str], url: str) -> list[str]:
+    inline = scalar(previous)
+    if inline.startswith("["):
+        existing = [u.strip().strip("\"'") for u in inline.strip("[]").split(",") if u.strip()]
+    else:
+        existing = [line.strip()[2:].strip() for line in previous[1:] if line.strip().startswith("- ")]
+    if url not in existing:
+        existing.append(url)
+    return ["comments:"] + [f"- {u}" for u in existing]
+
+
+def build_record(comment: dict, summary: dict) -> Record:
+    url = comment.get("html_url") or ""
+    if not url:
+        raise HarvestError("comment has no html_url")
+    prose, lines = split_comment(comment.get("body") or "")
+    if not prose:
+        raise HarvestError("no text above the almanac-case block to use as the record body")
+    chunks = chunk_frontmatter(lines)
+    keys = [k for k, _ in chunks]
+    missing = [k for k in REQUIRED_KEYS if k not in keys]
+    if missing:
+        raise HarvestError(f"block is missing keys: {', '.join(missing)}")
+
+    by_key = dict(chunks)
+    repo = scalar(by_key["repo"])
+    date = scalar(by_key["date"])
+    tool = scalar(by_key["fingerprint"], "tool")
+    verdict = scalar(by_key["verdict"])
+    if repo not in REPOS:
+        raise HarvestError(f"repo {repo!r} is not one of {', '.join(REPOS)}")
+    if not DATE.match(date):
+        raise HarvestError(f"date {date!r} is not YYYY-MM-DD")
+    if not tool:
+        raise HarvestError("fingerprint.tool is empty")
+    if verdict not in VERDICTS:
+        raise HarvestError(f"verdict {verdict!r} is not one of {', '.join(sorted(VERDICTS))}")
+
+    out: list[str] = ["---"]
+    for key, chunk in chunks:
+        if key == "worker":
+            chunk = worker_chunk(summary, chunk)
+        elif key == "comments":
+            chunk = comments_chunk(chunk, url)
+        out.extend(chunk)
+    out.append("---")
+    text = "\n".join(out) + "\n\n" + prose + "\n"
+    return Record(repo, date, tool, scalar(by_key["cause"]), url, text)
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def assign_paths(records: list[Record]) -> None:
+    taken: dict[tuple[str, str], Record] = {}
+    for r in records:
+        name = f"{r.date}-{slug(r.tool)}"
+        if (r.repo, name) in taken:
+            name = f"{name}-{slug(r.cause)}"
+        if (r.repo, name) in taken:
+            raise HarvestError(f"two records would be {r.repo}/{name}.md ({r.url})")
+        taken[(r.repo, name)] = r
+        r.path = f"{CASES_DIR}/{name}.md"
+
+
+def pr_text(repo: str, records: list[Record]) -> tuple[str, str]:
+    n = len(records)
+    title = f"Add {n} almanac case record{'s' if n != 1 else ''}"
+    rows = "\n".join(f"- `{r.path}` from {r.url}" for r in records)
+    body = (
+        "Case records for almanac-work runs, harvested from the comments they posted. "
+        "An unattended run can't commit to this checkout, so the record lives in the comment "
+        "until someone writes it down.\n\n"
+        f"{rows}\n\n"
+        "Each file is the comment's `almanac-case` block with `worker` filled from the run's "
+        "`.summary.json` and the comment's URL added to `comments`. The text above the block "
+        "is the body. Opened by `scripts/almanac-harvest` in brined-almanac.\n"
+    )
+    return title, body
+
+
+def group(records: list[Record]) -> dict[str, list[Record]]:
+    by_repo: dict[str, list[Record]] = {}
+    for r in records:
+        by_repo.setdefault(r.repo, []).append(r)
+    return by_repo
+
+
+def dry_run(by_repo: dict[str, list[Record]], out: Path) -> None:
+    for repo, records in by_repo.items():
+        for r in records:
+            target = out / repo / r.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(r.text)
+        title, body = pr_text(repo, records)
+        print(f"would open a PR in {OWNER}/{repo}")
+        print(f"  title: {title}")
+        print(f"  branch: {branch_name()}")
+        for r in records:
+            print(f"  file: {out / repo / r.path}")
+        print("  body:")
+        print("\n".join(f"    {line}" for line in body.splitlines()))
+        print()
+    print(f"dry run: wrote files under {out}; nothing pushed, no PR opened")
+
+
+def branch_name() -> str:
+    return "almanac-cases-" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def run(cmd: list[str], cwd: Path | None = None) -> None:
+    subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def open_prs(by_repo: dict[str, list[Record]]) -> None:
+    branch = branch_name()
+    for repo, records in by_repo.items():
+        with tempfile.TemporaryDirectory(prefix=f"almanac-harvest-{repo}-") as tmp:
+            clone = Path(tmp) / repo
+            run(["gh", "repo", "clone", f"{OWNER}/{repo}", str(clone), "--", "--depth", "1"])
+            fresh = [r for r in records if not (clone / r.path).exists()]
+            for r in records:
+                if r not in fresh:
+                    print(f"{repo}: {r.path} already exists, skipping")
+            if not fresh:
+                continue
+            run(["git", "checkout", "-b", branch], clone)
+            for r in fresh:
+                (clone / r.path).parent.mkdir(parents=True, exist_ok=True)
+                (clone / r.path).write_text(r.text)
+                run(["git", "add", r.path], clone)
+            title, body = pr_text(repo, fresh)
+            run(["git", "commit", "-m", title], clone)
+            run(["git", "push", "origin", branch], clone)
+            run(["gh", "pr", "create", "-R", f"{OWNER}/{repo}", "--head", branch,
+                 "--title", title, "--body", body])
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--case", nargs=2, action="append", metavar=("COMMENT", "SUMMARY"), required=True)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--out", type=Path, help="dry-run output directory (default: new temp directory)")
+    args = ap.parse_args()
+
+    records: list[Record] = []
+    failed = False
+    for comment_spec, summary_path in args.case:
+        try:
+            summary = json.loads(Path(summary_path).read_text())
+            records.append(build_record(fetch_comment(comment_spec), summary))
+        except (HarvestError, OSError, json.JSONDecodeError, subprocess.CalledProcessError) as e:
+            print(f"almanac-harvest: {comment_spec}: {e}", file=sys.stderr)
+            failed = True
+    if failed:
+        return 1
+    try:
+        assign_paths(records)
+    except HarvestError as e:
+        print(f"almanac-harvest: {e}", file=sys.stderr)
+        return 1
+
+    by_repo = group(records)
+    if args.dry_run:
+        dry_run(by_repo, args.out or Path(tempfile.mkdtemp(prefix="almanac-harvest-")))
+    else:
+        open_prs(by_repo)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
