@@ -9,7 +9,7 @@ Take one almanac report to a state Josh reviews in a minute. The report is a fin
 
 The worker gathers the evidence and recommends what to do with each issue. It never closes one, interactive or unattended. Josh decides, and he or a session he's directing carries out the close.
 
-Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, under the session scratchpad, or under `.scratch/` in this checkout when there is none (`claude -p` has none, and writes outside the checkout are denied), instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
+Arguments: `/almanac-work <repo | issue url | task uuid> [--dry-run]`. With `--dry-run`, write every comment, command and diff to a new directory named for the case and the run (`almanac-<repo>-<issue>-<HHMMSS>`), never a shared one, under the session scratchpad, or under `.scratch/` in this checkout when there is none (`claude -p` has none; `/tmp` and every other path outside the checkout are denied, so never `mkdir` there), instead of posting, and say so in the report. Parallel dry runs share the scratchpad and overwrite each other otherwise.
 
 The pstack plugin is installed wherever this runs (`scripts/almanac-work-run` checks). `pstack:poteto-mode` is available for a deeper pass, but the contract here is what decides a verdict: on 2026-11-11 the same case run with and without it reached the same verdict and layer at similar cost.
 
@@ -128,8 +128,10 @@ The script runs `claude -p` with this repository's settings and logs the stream 
 Nobody can approve anything under `--print`. A command outside Josh's allow rules is denied and the run carries on, so work inside them:
 
 - **Other checkouts.** `git -C <path>` and `cd <path> && git ...` are denied, fetches included. Read the target repo's `main` with `gh api repos/technicalpickles/<repo>/contents/<path>` and `gh search code`.
-- **Transcripts.** `grep` over the transcripts directory is denied. `tool-calls.py` is allowed.
-- **Bash shape.** Every part of a command has to be allowed on its own. A `cd` combined with a redirect is denied, and so is a loop variable inside a command.
+- **Transcripts.** `ls`, `grep` and `cat` on the transcripts directory are denied, because it sits outside the checkout. `python3 .claude/skills/almanac-work/scripts/tool-calls.py` is allowed and is the only way in: `--list` shows what exists, `--help` the options. Don't look at the directory layout.
+- **Reading the checkout.** Use the Read tool on a file here, `scripts/` included. Read-only `sed -n`, `cat` and `head` on a file inside the checkout pass on their own, so the failure is chaining them (next bullet).
+- **Bash shape.** Every part of a command has to be allowed on its own, and one denied part sinks the whole command, so make one call per command and don't chain with `;`. A `cd` combined with a redirect is denied. A loop (`for`, `while`) is denied with "a variable in this command can't be checked": make one call per item instead.
+- **Scratch files.** `mkdir -p .scratch/<case-dir>` inside the checkout. `.scratch/` is gitignored.
 - **Posting.** `.claude/settings.json` allows `gh issue comment <number> -R technicalpickles/<repo> --body-file <file>` for pickleclaw and brineworks, and only in that argument order, so write the proof to a file first. `gh issue close` has no allow rule, which backs up the rule above: put the exact command in the report, and Josh, or a session he's directing, closes. The almanac scan resolves the Bugsink issue when he closes as completed, and mutes it on not planned. `task add` and `gh issue create` are allowed.
 - **Case record.** End the comment with the `almanac-case` block, with `worker.how: claude-p` and `tokens` and `minutes` null: a run can't see its own totals. List the record file under "not done". Whoever reviews the run writes the file from the block, taking `worker` from the `.summary.json` next to the run log the prompt names.
 - **Status page and devlog.** Skip both and list them under "not done" in the report. The devlog skill is denied, and registering publishes a page.
