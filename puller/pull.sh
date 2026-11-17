@@ -40,9 +40,22 @@ remote() {
   ssh -i "$KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$PULL_USER@$PULL_HOST" "$@"
 }
 
+# Says why a listing failed: ssh's exit status, or a reply with no sessions array
+# (picklelab's `sessions` execs into the OpenClaw container, so a missing
+# container shows up here). Never lets a bad reply read as zero sessions, which
+# would refresh .last-pull on a pass that saw nothing.
 list_sessions() {
-  remote sessions |
-    jq -c '.sessions[] | select(.key | test("heartbeat") | not) | {key, updatedAt}'
+  local reply rc=0
+  reply=$(remote sessions) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    log "remote 'sessions' exited $rc: $(printf '%s' "$reply" | head -c 200 | tr '\n' ' ')"
+    return 1
+  fi
+  if ! jq -e '.sessions | type == "array"' >/dev/null 2>&1 <<<"$reply"; then
+    log "remote 'sessions' returned no sessions array: $(printf '%s' "$reply" | head -c 200 | tr '\n' ' ')"
+    return 1
+  fi
+  jq -c '.sessions[] | select(.key | test("heartbeat") | not) | {key, updatedAt}' <<<"$reply"
 }
 
 set_cursor() {
