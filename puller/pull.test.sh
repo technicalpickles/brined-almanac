@@ -18,6 +18,7 @@ shift 13
 case "$1" in
   sessions)
     [ ! -e "$TMP/fail-sessions" ] || { echo "ssh: connection refused"; exit 1; }
+    [ ! -e "$TMP/bad-sessions" ] || { echo '{"error":"no such container"}'; exit 0; }
     cat "$TMP/sessions.json"
     ;;
   transcript)
@@ -135,7 +136,17 @@ rm -f "$TRANSCRIPTS/.last-pull"
 run_pull
 check "listing failure exit" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
 check "listing failure last-pull" absent "$([ -e "$TRANSCRIPTS/.last-pull" ] && echo present || echo absent)"
+check "listing failure says why" 1 "$(grep -c "remote 'sessions' exited 1: ssh: connection refused" "$TMP/stderr")"
 rm -f "$TMP/fail-sessions"
+
+# 7b. a reply with no sessions array fails the pass instead of reading as zero sessions
+touch "$TMP/bad-sessions"
+rm -f "$TRANSCRIPTS/.last-pull"
+run_pull
+check "bad reply exit" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+check "bad reply last-pull" absent "$([ -e "$TRANSCRIPTS/.last-pull" ] && echo present || echo absent)"
+check "bad reply says why" 1 "$(grep -c "remote 'sessions' returned no sessions array: {\"error\":\"no such container\"}" "$TMP/stderr")"
+rm -f "$TMP/bad-sessions"
 
 # 8. safe key
 echo '[{"key":"agent:main:direct:abc","updatedAt":3000}]' | jq -c '{sessions: .}' >"$TMP/sessions.json"

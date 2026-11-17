@@ -259,12 +259,31 @@ fn http() -> Client {
         .expect("an HTTP client with a timeout builds")
 }
 
+/// Renders a reqwest error with its whole cause chain, so "error sending request" also says
+/// whether the connect, the DNS lookup, TLS or the timeout failed. The URL is dropped from the
+/// error itself, since it may name the tailnet host; the causes below it are hyper and io errors
+/// that do not carry it.
+fn describe(error: reqwest::Error) -> String {
+    let mut causes = vec![];
+    let mut cause = std::error::Error::source(&error);
+    while let Some(next) = cause {
+        causes.push(next.to_string());
+        cause = next.source();
+    }
+    let mut out = error.without_url().to_string();
+    for text in causes {
+        out.push_str(": ");
+        out.push_str(&text);
+    }
+    out
+}
+
 /// Sends and reads JSON. The error never carries the URL, which may name the tailnet host.
 async fn send(request: RequestBuilder, what: &str) -> Result<Value, String> {
     let response = request
         .send()
         .await
-        .map_err(|e| format!("{what}: {}", e.without_url()))?;
+        .map_err(|e| format!("{what}: {}", describe(e)))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("{what}: answered {status}"));
@@ -272,7 +291,7 @@ async fn send(request: RequestBuilder, what: &str) -> Result<Value, String> {
     response
         .json()
         .await
-        .map_err(|e| format!("{what}: {}", e.without_url()))
+        .map_err(|e| format!("{what}: {}", describe(e)))
 }
 
 pub struct Github {
@@ -627,4 +646,31 @@ pub async fn run(lookup: impl Fn(&str) -> Option<String>, apply: bool) -> Result
     }
     println!("\ncutover: resolved {} issue(s)", due.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_send_failure_names_its_cause_and_not_its_url() {
+        let port = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let request = http().get(format!("http://127.0.0.1:{port}/secret-path"));
+        let why = send(request, "GitHub x/y issues").await.unwrap_err();
+        assert!(
+            why.starts_with("GitHub x/y issues: error sending request"),
+            "{why}"
+        );
+        assert!(
+            why.len() > "GitHub x/y issues: error sending request".len(),
+            "{why}"
+        );
+        assert!(
+            !why.contains("secret-path") && !why.contains("127.0.0.1"),
+            "{why}"
+        );
+    }
 }
