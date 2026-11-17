@@ -11,8 +11,8 @@ name = "brined-almanac"
 path = "src/main.rs"
 
 [dependencies]
-almanac = { git = "https://github.com/ivy/almanac", rev = "b8bdefa" }
-github = { git = "https://github.com/ivy/almanac", rev = "b8bdefa" }
+almanac = { git = "https://github.com/ivy/almanac", rev = "66cbd6e" }
+github = { git = "https://github.com/ivy/almanac", rev = "66cbd6e" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }

@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::host_state::{
-    Episodes, Finding, Hosts, candidates, is_old_report, iso_minute, read, scan_gap_is_trusted,
+    Episodes, Finding, Hosts, candidates, is_old_report, iso_minute, read, recovered,
+    scan_gap_is_trusted,
 };
 use crate::routing::Project;
 
@@ -32,8 +33,10 @@ fn status_name(status: crate::host_state::Status) -> String {
     format!("{status:?}").to_lowercase()
 }
 
-/// One pair per finding, the delivery id being the finding's key. A file in `dir` that no declared
-/// host owns is logged and files nothing. `previous` is when this process last scanned.
+/// One pair per finding, the delivery id being the finding's key, one per check back to ok for
+/// longer than the hold, and one per host whose reports have been current for longer than it. A
+/// file in `dir` that no declared host owns is logged and files
+/// nothing. `previous` is when this process last scanned.
 pub fn scan_findings(
     hosts: &Hosts,
     dir: &Path,
@@ -70,7 +73,7 @@ pub fn scan_findings(
         let mut found = candidates(host, &result, now, trusted);
         episodes.continue_outages(&mut found, now);
         for finding in found.into_iter().filter(|finding| finding.is_due(now)) {
-            let (kind, check, status, since) = match &finding {
+            let (kind, check, status, since, outage) = match &finding {
                 Finding::Check {
                     check,
                     status,
@@ -81,13 +84,21 @@ pub fn scan_findings(
                     Some(check.clone()),
                     Some(status_name(*status)),
                     Some(iso_minute(*since)),
+                    format!("{}.{check}", host.name),
                 ),
-                Finding::Stale { since, .. } => ("stale", None, None, since.map(iso_minute)),
+                Finding::Stale { since, .. } => (
+                    "stale",
+                    None,
+                    None,
+                    since.map(iso_minute),
+                    format!("{}.stale", host.name),
+                ),
             };
             let payload = json!({
                 "kind": kind,
                 "project": host.project.as_str(),
                 "subject": finding.key().replace('/', "."),
+                "outage": outage,
                 "host": host.name,
                 "check": check,
                 "status": status,
@@ -95,6 +106,41 @@ pub fn scan_findings(
                 "body": finding.body(),
             });
             out.push((finding.key(), payload));
+        }
+        for check in recovered(&result, now) {
+            if episodes.holds(&host.name, &check.name, now) {
+                continue;
+            }
+            let since = iso_minute(check.since);
+            let id = format!("{}/{}/ok/{since}", host.name, check.name);
+            let payload = json!({
+                "kind": "recovered",
+                "project": host.project.as_str(),
+                "subject": id.replace('/', "."),
+                "outage": format!("{}.{}", host.name, check.name),
+                "host": host.name,
+                "check": check.name,
+                "status": "ok",
+                "since": since,
+                "body": "",
+            });
+            out.push((id, payload));
+        }
+        if let Some(since) = episodes.resumed(&host.name, &result, now) {
+            let since = iso_minute(since);
+            let id = format!("{}/stale/ok/{since}", host.name);
+            let payload = json!({
+                "kind": "resumed",
+                "project": host.project.as_str(),
+                "subject": id.replace('/', "."),
+                "outage": format!("{}.stale", host.name),
+                "host": host.name,
+                "check": null,
+                "status": "ok",
+                "since": since,
+                "body": "",
+            });
+            out.push((id, payload));
         }
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -110,11 +156,14 @@ pub fn scan_findings(
 
 observed! {
     /// One host-state finding. `body` carries a check's output line, which the host wrote, so it
-    /// is tainted. `since` is `YYYY-MM-DDTHH:MMZ`, and a stale finding may have none.
+    /// is tainted. `since` is `YYYY-MM-DDTHH:MMZ`, and a stale finding may have none. `outage` is
+    /// `<host>.<check>` or `<host>.stale`, the same for every outage of one check, so a recovery
+    /// can close what each of them filed.
     pub struct HostFinding {
         pub kind: Slug,
         pub project: Slug,
         pub subject: Slug,
+        pub outage: Slug,
         pub host: Slug,
         pub check: Option<Slug>,
         pub status: Option<Slug>,
@@ -130,7 +179,11 @@ impl Event for HostFinding {
             pointer: pointer.to_string(),
         };
         let kind: Slug = p.field("/kind")?;
-        if !matches!(kind.to_string().as_str(), "check" | "stale") {
+        let kind_name = kind.to_string();
+        if !matches!(
+            kind_name.as_str(),
+            "check" | "stale" | "recovered" | "resumed"
+        ) {
             return Err(malformed("/kind"));
         }
         let project: Slug = p.field("/project")?;
@@ -140,16 +193,21 @@ impl Event for HostFinding {
         let check: Option<Slug> = p.field("/check")?;
         let status: Option<Slug> = p.field("/status")?;
         let since: Option<Slug> = p.field("/since")?;
-        if kind.to_string() == "check" {
-            if check.is_none() {
-                return Err(malformed("/check"));
-            }
+        if matches!(kind_name.as_str(), "check" | "recovered") != check.is_some() {
+            return Err(malformed("/check"));
+        }
+        if kind_name != "stale" {
             if status.is_none() {
                 return Err(malformed("/status"));
             }
             if since.is_none() {
                 return Err(malformed("/since"));
             }
+        }
+        if matches!(kind_name.as_str(), "recovered" | "resumed")
+            && status.as_ref().map(Slug::to_string).as_deref() != Some("ok")
+        {
+            return Err(malformed("/status"));
         }
         if since.as_ref().is_some_and(|since| split(since).is_none()) {
             return Err(malformed("/since"));
@@ -158,6 +216,7 @@ impl Event for HostFinding {
             kind,
             project,
             subject: p.field("/subject")?,
+            outage: p.field("/outage")?,
             host: p.field("/host")?,
             check,
             status,
@@ -211,6 +270,19 @@ pub enum Facts {
         since: Option<Since>,
         body: Untrusted<String>,
     },
+    Recovered {
+        target: Slug,
+        outage: Slug,
+        host: Slug,
+        check: Slug,
+        since: Since,
+    },
+    Resumed {
+        target: Slug,
+        outage: Slug,
+        host: Slug,
+        since: Since,
+    },
 }
 
 /// Splits `2026-11-10T14:50Z` into its date and time, each a slug.
@@ -241,6 +313,25 @@ pub fn facts(event: &HostFinding) -> Facts {
             body: event.body.clone(),
         };
     }
+    if event.kind.to_string() == "recovered" {
+        return Facts::Recovered {
+            target,
+            outage: event.outage.clone(),
+            host: event.host.clone(),
+            check: event.check.clone().expect("parse checked the check"),
+            since: split(event.since.as_ref().expect("parse checked the since"))
+                .expect("parse checked the since"),
+        };
+    }
+    if event.kind.to_string() == "resumed" {
+        return Facts::Resumed {
+            target,
+            outage: event.outage.clone(),
+            host: event.host.clone(),
+            since: split(event.since.as_ref().expect("parse checked the since"))
+                .expect("parse checked the since"),
+        };
+    }
     Facts::Check {
         target,
         host: event.host.clone(),
@@ -254,9 +345,9 @@ pub fn facts(event: &HostFinding) -> Facts {
 
 #[workflow(
     on = HostFinding,
-    key = "{subject}",
-    intent = "File one task for each host check that has been failing long enough, and one when a host's report stops arriving.",
-    may = [File],
+    key = "{outage}",
+    intent = "File one task for each host check that has been failing long enough, and one when a host's report stops arriving. Close a check's tasks once it has been ok for an hour, and a host's stale tasks once its reports have been current for an hour.",
+    may = [File, Resolve],
     runs_per_hour = 1000,
     scan = scan,
     decide = policy,
@@ -303,6 +394,42 @@ pub fn policy(facts: &Facts) -> Vec<Effect> {
             },
             target: target.clone(),
             body: body.clone(),
+        }],
+        Facts::Recovered {
+            target,
+            outage,
+            host,
+            check,
+            since,
+        } => vec![Effect::Resolve {
+            target: target.clone(),
+            item: Item::Filed {
+                key: outage.to_string(),
+            },
+            evidence: title!(
+                "host-state: {} ok on {} since {} {}",
+                check,
+                host,
+                since.date,
+                since.time
+            ),
+        }],
+        Facts::Resumed {
+            target,
+            outage,
+            host,
+            since,
+        } => vec![Effect::Resolve {
+            target: target.clone(),
+            item: Item::Filed {
+                key: outage.to_string(),
+            },
+            evidence: title!(
+                "host-state: reports from {} current since {} {}",
+                host,
+                since.date,
+                since.time
+            ),
         }],
     }
 }
